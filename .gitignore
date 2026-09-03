@@ -1,6 +1,13 @@
 node_modules/
 .expo/
 dist/
-android/
-ios/
 *.log
+
+# Anchored to the repo root on purpose.
+#
+# Unanchored `android/` and `ios/` match a directory of that name at ANY depth, which
+# silently swallowed the hand-written native sources under modules/*/android and
+# modules/*/ios. Those are checked-in source; only the top-level folders that
+# `expo prebuild` generates are build output.
+/android/
+/ios/
