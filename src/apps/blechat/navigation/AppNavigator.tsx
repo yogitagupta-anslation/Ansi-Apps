@@ -1,5 +1,5 @@
 import React from 'react';
-import {View} from 'react-native';
+import {StyleSheet, View} from 'react-native';
 import {DenseText} from '../components/AppText';
 import {
   ThemeProvider as NavigationThemeProvider,
@@ -46,11 +46,11 @@ function useNavTheme() {
 }
 
 /**
- * Only the focused tab carries colour — every inactive icon sits in the same neutral grey.
- * That is what makes the row read as "here is where you are" rather than four permanently
- * lit destinations; a bar where nothing is grey has nothing left to highlight. The active
- * icon also sits inside a soft filled circle, with a small dot under the label — both
- * reserved for the one tab that is actually current.
+ * Only the focused tab carries colour — every inactive icon sits in the same neutral
+ * grey. That is what makes the row read as "here is where you are" rather than four
+ * permanently lit destinations; a bar where nothing is grey has nothing left to
+ * highlight. The active icon sits in a soft filled lozenge rather than a circle:
+ * wider than it is tall, it reads as a selected segment instead of a button.
  */
 function TabIcon({
   icon,
@@ -64,12 +64,8 @@ function TabIcon({
   const styles = useStyles();
   const theme = useTheme();
   return (
-    <View
-      style={[
-        styles.tabIconWrap,
-        focused && {backgroundColor: theme.glow},
-      ]}>
-      <Icon name={icon} color={focused ? activeColor : theme.textDim} size={20} />
+    <View style={[styles.tabIconWrap, focused && {backgroundColor: theme.accentSoft}]}>
+      <Icon name={icon} color={focused ? activeColor : theme.textFaint} size={19} />
     </View>
   );
 }
@@ -82,7 +78,7 @@ function NearbyTabIcon({focused, activeColor}: {focused: boolean; activeColor: s
     <View>
       <TabIcon icon="target" focused={focused} activeColor={activeColor} />
       {count > 0 && (
-        <View style={[styles.badge, {backgroundColor: theme.tileGreenFg}]}>
+        <View style={[styles.badge, {backgroundColor: theme.ok}]}>
           {/* Fixed 16x16 circle — a scaled-up count would spill out of it, so this one
               stays at native size rather than following the dense cap. */}
           <DenseText style={styles.badgeText} numberOfLines={1} maxFontSizeMultiplier={1}>
@@ -104,7 +100,7 @@ function ChatsTabIcon({focused, activeColor}: {focused: boolean; activeColor: st
     <View>
       <TabIcon icon="chatBubble" focused={focused} activeColor={activeColor} />
       {unreadTotal > 0 && (
-        <View style={[styles.badge, {backgroundColor: theme.tilePurpleFg}]}>
+        <View style={[styles.badge, {backgroundColor: theme.accent}]}>
           <DenseText style={styles.badgeText} numberOfLines={1} maxFontSizeMultiplier={1}>
             {unreadTotal > 99 ? '99+' : unreadTotal}
           </DenseText>
@@ -114,7 +110,7 @@ function ChatsTabIcon({focused, activeColor}: {focused: boolean; activeColor: st
   );
 }
 
-/** Label plus a small dot underneath, shown only for the focused tab. */
+/** Weight, not decoration, marks the focused label — the lozenge above it does the rest. */
 function TabLabel({
   title,
   focused,
@@ -126,12 +122,11 @@ function TabLabel({
 }) {
   const styles = useStyles();
   return (
-    <View style={styles.labelWrap}>
-      <DenseText style={[styles.tabLabel, {color}]} numberOfLines={1}>
-        {title}
-      </DenseText>
-      {focused ? <View style={[styles.tabDot, {backgroundColor: color}]} /> : null}
-    </View>
+    <DenseText
+      style={[styles.tabLabel, {color, fontWeight: focused ? '700' : '600'}]}
+      numberOfLines={1}>
+      {title}
+    </DenseText>
   );
 }
 
@@ -143,26 +138,26 @@ function TabLabel({
 // mount timing — where an emulator never showed the gap. Setting an explicit height built
 // from real safe-area insets removes the guess entirely instead of hoping the library's
 // own measurement lines up with what actually got laid out.
-const TAB_CONTENT_HEIGHT = 62;
+const TAB_CONTENT_HEIGHT = 70;
 
 function Tabs() {
   const styles = useStyles();
   const theme = useTheme();
   const insets = useSafeAreaInsets();
 
-  // One accent for every focused tab, not a colour per destination — the reference only
-  // ever shows a single hue (purple) lit up at a time, on whichever tab is active.
+  // One accent for every focused tab, not a colour per destination — only a single hue
+  // is ever lit at a time, on whichever tab is actually current.
   const renderHomeIcon = ({focused}: {focused: boolean}) => (
-    <TabIcon icon="house" focused={focused} activeColor={theme.tilePurpleFg} />
+    <TabIcon icon="house" focused={focused} activeColor={theme.accent} />
   );
   const renderChatsIcon = ({focused}: {focused: boolean}) => (
-    <ChatsTabIcon focused={focused} activeColor={theme.tilePurpleFg} />
+    <ChatsTabIcon focused={focused} activeColor={theme.accent} />
   );
   const renderNearbyIcon = ({focused}: {focused: boolean}) => (
-    <NearbyTabIcon focused={focused} activeColor={theme.tilePurpleFg} />
+    <NearbyTabIcon focused={focused} activeColor={theme.accent} />
   );
   const renderDebugIcon = ({focused}: {focused: boolean}) => (
-    <TabIcon icon="code" focused={focused} activeColor={theme.tilePurpleFg} />
+    <TabIcon icon="code" focused={focused} activeColor={theme.accent} />
   );
 
   return (
@@ -173,8 +168,8 @@ function Tabs() {
           styles.tabBar,
           {height: TAB_CONTENT_HEIGHT + insets.bottom, paddingBottom: insets.bottom},
         ],
-        tabBarActiveTintColor: theme.tilePurpleFg,
-        tabBarInactiveTintColor: theme.textDim,
+        tabBarActiveTintColor: theme.accent,
+        tabBarInactiveTintColor: theme.textFaint,
       }}>
       <Tab.Screen
         name="Home"
@@ -272,27 +267,24 @@ export function AppNavigator() {
 const useStyles = makeStyles(t => ({
   tabBar: {
     backgroundColor: t.surface,
-    borderTopColor: t.border,
-    borderTopWidth: 1,
-    // No fixed height or bottom padding: React Navigation derives those from the
-    // bottom safe-area inset, and overriding them puts the labels underneath the
-    // gesture bar on devices with navigation gestures.
-    paddingTop: 6,
+    // Hairline, not 1px: at the top of the bar a full pixel reads as a drawn line
+    // rather than the edge of a surface.
+    borderTopColor: t.divider,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    paddingTop: 8,
   },
   tabIconWrap: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
+    width: 44,
+    height: 30,
+    borderRadius: 15,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  labelWrap: {alignItems: 'center', marginTop: 2},
-  tabLabel: {fontSize: 11, fontWeight: '700'},
-  tabDot: {width: 4, height: 4, borderRadius: 2, marginTop: 3},
+  tabLabel: {fontSize: 11, marginTop: 3},
   badge: {
     position: 'absolute',
-    right: -8,
-    top: -4,
+    right: 4,
+    top: -2,
     minWidth: 16,
     height: 16,
     borderRadius: 8,

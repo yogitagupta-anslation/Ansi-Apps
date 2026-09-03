@@ -1,6 +1,6 @@
 import React from 'react';
 import {Text, View, type ViewStyle} from 'react-native';
-import {radius, spacing, typography} from '../../config/theme';
+import {avatarHue, avatarInitial, radius, spacing, typography} from '../../config/theme';
 import {makeStyles, useTheme} from '../../theme/ThemeProvider';
 import {AppText, DenseText} from '../AppText';
 import {Icon, type IconName} from './Icon';
@@ -81,6 +81,133 @@ export function PeerAvatar({size = 44, muted}: {size?: number; muted?: boolean})
         ]}>
         ✦
       </Text>
+    </View>
+  );
+}
+
+/**
+ * The avatar used everywhere a person appears: nearby, in a chat header, on a
+ * conversation row, in the hero's stack.
+ *
+ * An initial in a tinted disc rather than the old Bluetooth glyph. The glyph was the
+ * same on every row, which meant a list of six people had six identical marks and the
+ * avatar column carried no information at all. A letter plus a stable hue makes a row
+ * findable by shape before it is read.
+ *
+ * The presence dot lives here rather than in each caller because it must sit on the
+ * disc's edge, and every caller that drew it separately had to re-derive the same
+ * offsets. `ring` is the colour it is punched out of — white on a card, the accent
+ * inside the hero — so the dot keeps a clean edge on any ground.
+ */
+export function InitialAvatar({
+  name,
+  seed,
+  size = 40,
+  online,
+  ring,
+  bg,
+  fg,
+}: {
+  name: string | null | undefined;
+  /** Identity the hue is derived from. Falls back to the name when there is no id. */
+  seed?: string | null;
+  size?: number;
+  /** Draws the presence dot. Omit entirely where presence is not the point. */
+  online?: boolean;
+  ring?: string;
+  /** Overrides, for the two places the hue is fixed by the design rather than derived. */
+  bg?: string;
+  fg?: string;
+}) {
+  const styles = useStyles();
+  const theme = useTheme();
+  const hue = avatarHue(theme, seed || name || '');
+  const dot = Math.round(size * 0.3);
+
+  return (
+    <View style={{width: size, height: size}}>
+      <View
+        style={[
+          styles.initialAvatar,
+          {
+            width: size,
+            height: size,
+            borderRadius: size / 2,
+            backgroundColor: bg ?? hue.bg,
+          },
+        ]}>
+        <Text
+          style={[
+            styles.initialAvatarText,
+            {color: fg ?? hue.fg, fontSize: Math.round(size * 0.375)},
+          ]}
+          maxFontSizeMultiplier={1}>
+          {avatarInitial(name)}
+        </Text>
+      </View>
+      {online === undefined ? null : (
+        <View
+          style={[
+            styles.presenceDot,
+            {
+              width: dot,
+              height: dot,
+              borderRadius: dot / 2,
+              backgroundColor: online ? theme.ok : theme.textFaint,
+              borderColor: ring ?? theme.surface,
+            },
+          ]}
+        />
+      )}
+    </View>
+  );
+}
+
+/**
+ * A group has no initial worth showing — every member has one and none of them is the
+ * group's. So it gets the people mark on the same disc instead, which also makes a
+ * group instantly separable from a person in a mixed list.
+ */
+export function GroupAvatar({
+  size = 40,
+  online,
+  ring,
+}: {
+  size?: number;
+  online?: boolean;
+  ring?: string;
+}) {
+  const styles = useStyles();
+  const theme = useTheme();
+  const dot = Math.round(size * 0.3);
+  return (
+    <View style={{width: size, height: size}}>
+      <View
+        style={[
+          styles.initialAvatar,
+          {
+            width: size,
+            height: size,
+            borderRadius: size / 2,
+            backgroundColor: theme.tilePurple,
+          },
+        ]}>
+        <Icon name="people" color={theme.tilePurpleFg} size={Math.round(size * 0.45)} />
+      </View>
+      {online === undefined ? null : (
+        <View
+          style={[
+            styles.presenceDot,
+            {
+              width: dot,
+              height: dot,
+              borderRadius: dot / 2,
+              backgroundColor: online ? theme.ok : theme.textFaint,
+              borderColor: ring ?? theme.surface,
+            },
+          ]}
+        />
+      )}
     </View>
   );
 }
@@ -280,6 +407,9 @@ const useStyles = makeStyles(t => ({
   bar: {borderRadius: 1},
 
   avatar: {borderWidth: 1, alignItems: 'center', justifyContent: 'center'},
+  initialAvatar: {alignItems: 'center', justifyContent: 'center'},
+  initialAvatarText: {fontWeight: '700'},
+  presenceDot: {position: 'absolute', right: -1, bottom: -1, borderWidth: 2},
   avatarBt: {fontWeight: '700', marginTop: -2},
   avatarBtActive: {color: t.accent},
   avatarBtMuted: {color: t.textDim},

@@ -5,7 +5,6 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import {SafeAreaView} from 'react-native-safe-area-context';
 import {radius, spacing, typography, tintsFor, type Theme} from '../config/theme';
 import {makeStyles, useTheme} from '../theme/ThemeProvider';
 import {bleChat} from '../services/BleChatService';
@@ -17,6 +16,7 @@ import {describeFailure} from '../ble/LinkErrors';
 import {AppText, DenseText} from '../components/AppText';
 import {Touchable} from '../components/Motion';
 import {Icon} from '../components/ui/Icon';
+import {Screen} from '../components/ui/Screen';
 import {
   InfoTile,
   LeaderRow,
@@ -53,6 +53,14 @@ function levelColor(level: LogLevel, t: Theme): string {
  * Every value on this screen is read from the live transport, router or platform.
  * If something here says "Connected" or "Notifications: Yes", the BLE stack said so.
  */
+type DebugTab = 'link' | 'traffic' | 'logs';
+
+const DEBUG_TABS: Array<{key: DebugTab; label: string}> = [
+  {key: 'link', label: 'Link'},
+  {key: 'traffic', label: 'Traffic'},
+  {key: 'logs', label: 'Logs'},
+];
+
 export function DebugScreen() {
   const styles = useStyles();
   const theme = useTheme();
@@ -107,6 +115,16 @@ export function DebugScreen() {
     }
   }, []);
 
+  /**
+   * Eight equally-weighted sections in one scroll became three tabs.
+   *
+   * Every section is still here and still says the same thing; they were simply never
+   * all wanted at once. Someone diagnosing a dropped link needs the peer, GATT and the
+   * radio; someone chasing a lost message needs packet counters. Stacking both meant
+   * scrolling past one to reach the other, every time.
+   */
+  const [tab, setTab] = useState<DebugTab>('link');
+
   // The peer worth showing at the top: connected first, else the most recently seen.
   const primary = useMemo(() => {
     const connected = peers.find(p => p.state === 'connected');
@@ -114,43 +132,69 @@ export function DebugScreen() {
   }, [peers]);
 
   return (
-    <SafeAreaView style={styles.safe} edges={['top']}>
+    <Screen>
       <ScrollView contentContainerStyle={styles.content}>
+        {/* Who this phone is, which build it is running and how many links are live —
+            the three things every bug report needs, as one line rather than a card and
+            a section apiece. */}
         <View style={styles.brandRow}>
-          <AppText style={styles.brand}>
-            <DenseText style={styles.brandAccent}>BLE</DenseText>Chat
-          </AppText>
-          <Touchable scale={false} style={styles.exportButton} onPress={onCopy}>
-            <Icon name="copy" color={theme.text} size={14} />
-            <DenseText style={styles.exportText}>Copy</DenseText>
+          <View style={styles.flex}>
+            <AppText style={styles.brand}>Diagnostics</AppText>
+            <DenseText style={styles.brandMeta} numberOfLines={1}>
+              {(identity?.displayName || 'No name set') +
+                // Just the date half of the build label: the full string, and its
+                // notes, are one tab away under Logs, and a subtitle that ellipsises
+                // has told you nothing.
+                ' \u00b7 build ' +
+                BUILD_LABEL.split(' \u00b7 ')[0] +
+                ' \u00b7 ' +
+                peers.filter(p => p.state === 'connected').length +
+                ' live link' +
+                (peers.filter(p => p.state === 'connected').length === 1 ? '' : 's')}
+            </DenseText>
+          </View>
+          <Touchable
+            scale={false}
+            style={styles.exportButton}
+            onPress={onCopy}
+            accessibilityLabel="Copy diagnostics">
+            <Icon name="copy" color={theme.text} size={16} />
           </Touchable>
-          <Touchable scale={false} style={styles.exportButton} onPress={onExport}>
-            <Icon name="share" color={theme.text} size={14} />
-            <DenseText style={styles.exportText}>Share</DenseText>
+          <Touchable
+            scale={false}
+            style={styles.exportButton}
+            onPress={onExport}
+            accessibilityLabel="Share diagnostics">
+            <Icon name="share" color={theme.text} size={16} />
           </Touchable>
         </View>
 
-        {/*
-          The very first bold name on this screen used to be whichever peer we're
-          connected to — easy to mistake for your own identity, especially mid-chat.
-          "This device" now says whose name that PeerSummary card below is NOT.
-        */}
-        <View style={styles.thisDeviceCard}>
-          <View style={[styles.emptyPeerIcon, {backgroundColor: theme.tilePurple}]}>
-            <Icon name="device" color={theme.tilePurpleFg} size={20} />
-          </View>
-          <View style={styles.emptyPeerText}>
-            <DenseText style={styles.thisDeviceLabel}>THIS DEVICE</DenseText>
-            <AppText style={styles.thisDeviceName} numberOfLines={1}>
-              {identity?.displayName || 'No name set'}
-            </AppText>
-          </View>
+        <View style={styles.tabs}>
+          {DEBUG_TABS.map(option => {
+            const active = option.key === tab;
+            return (
+              <Touchable
+                key={option.key}
+                scale={false}
+                onPress={() => setTab(option.key)}
+                accessibilityRole="tab"
+                accessibilityState={{selected: active}}
+                style={active ? [styles.tab, styles.tabActive] : styles.tab}>
+                <AppText
+                  style={active ? styles.tabTextActive : styles.tabText}
+                  numberOfLines={1}
+                  maxFontSizeMultiplier={1.1}>
+                  {option.label}
+                </AppText>
+              </Touchable>
+            );
+          })}
         </View>
 
-        {primary && (
+        {tab === 'link' && primary ? (
           <DenseText style={styles.connectedPeerLabel}>CONNECTED PEER</DenseText>
-        )}
-        {primary ? (
+        ) : null}
+        {tab !== 'link' ? null : primary ? (
           <PeerSummary peer={primary} />
         ) : (
           <View style={styles.emptyPeer}>
@@ -177,312 +221,329 @@ export function DebugScreen() {
             </View>
           </View>
         )}
+        {tab === 'link' ? (
 
-        <Section
-          title="Device Details"
-          icon="device"
-          right={
-            <Touchable
-              scale={false}
-              onPress={() => setShowDetails(v => !v)}
-              hitSlop={12}
-              accessibilityLabel={showDetails ? 'Hide device details' : 'Show device details'}
-              style={showDetails ? styles.chevronFlipped : undefined}>
-              <Icon name="chevronDown" color={theme.textDim} size={16} />
-            </Touchable>
-          }>
-          {showDetails && primary && <PeerDetailGrid peer={primary} />}
-          {showDetails && !primary && (
-            <DenseText style={styles.dim}>
-              Nothing to show until a peer appears.
-            </DenseText>
-          )}
-        </Section>
+          <Section
+            title="Device Details"
+            icon="device"
+            right={
+              <Touchable
+                scale={false}
+                onPress={() => setShowDetails(v => !v)}
+                hitSlop={12}
+                accessibilityLabel={showDetails ? 'Hide device details' : 'Show device details'}
+                style={showDetails ? styles.chevronFlipped : undefined}>
+                <Icon name="chevronDown" color={theme.textDim} size={16} />
+              </Touchable>
+            }>
+            {showDetails && primary && <PeerDetailGrid peer={primary} />}
+            {showDetails && !primary && (
+              <DenseText style={styles.dim}>
+                Nothing to show until a peer appears.
+              </DenseText>
+            )}
+          </Section>
+        ) : null}
+        {tab === 'logs' ? (
 
-        <Section title="Build" icon="code">
-          {/* Which APK is actually running. Without this, a fixed bug reported again
-              from an older build is indistinguishable from a bug that was never fixed. */}
-          <LeaderRow label="Build" value={BUILD_LABEL} />
-          <DenseText style={styles.dim}>{BUILD_NOTES}</DenseText>
-        </Section>
+          <Section title="Build" icon="code">
+            {/* Which APK is actually running. Without this, a fixed bug reported again
+                from an older build is indistinguishable from a bug that was never fixed. */}
+            <LeaderRow label="Build" value={BUILD_LABEL} />
+            <DenseText style={styles.dim}>{BUILD_NOTES}</DenseText>
+          </Section>
+        ) : null}
+        {tab === 'link' ? (
 
-        <Section title="Radio" icon="broadcast">
-          <View style={styles.grid}>
-            <InfoTile label="Adapter" value={bluetoothState} icon="device" />
-            <InfoTile
-              label="Permission"
-              value={permission.state}
-              valueColor={permission.state === 'granted' ? theme.ok : theme.warn}
-              icon="shield"
-            />
-            <InfoTile
-              label="Radio duty"
-              value={
-                scanning
-                  ? `${scanTelemetry.dutyPercent.toFixed(0)}% · ${scanTelemetry.intensity}`
-                  : 'idle'
-              }
-            />
-            <InfoTile
-              label="Scan bursts"
-              value={
-                scanning
-                  ? `${scanTelemetry.burstCount} · ${Math.round(
-                      scanTelemetry.radioOnMs / 1000,
-                    )}s on / ${Math.round(scanTelemetry.elapsedMs / 1000)}s`
-                  : '—'
-              }
-            />
-            <InfoTile
-              label="Start budget"
-              value={
-                scanning ? `${scanTelemetry.startsRemaining} left` : '—'
-              }
-              valueColor={
-                scanning && scanTelemetry.startsRemaining === 0
-                  ? theme.warn
-                  : undefined
-              }
-            />
-            <InfoTile
-              label="Scanning"
-              value={scanning ? 'Yes' : 'No'}
-              check
-              valueColor={scanning ? theme.ok : theme.textDim}
+          <Section title="Radio" icon="broadcast">
+            <View style={styles.grid}>
+              <InfoTile label="Adapter" value={bluetoothState} icon="device" />
+              <InfoTile
+                label="Permission"
+                value={permission.state}
+                valueColor={permission.state === 'granted' ? theme.ok : theme.warn}
+                icon="shield"
+              />
+              <InfoTile
+                label="Radio duty"
+                value={
+                  scanning
+                    ? `${scanTelemetry.dutyPercent.toFixed(0)}% · ${scanTelemetry.intensity}`
+                    : 'idle'
+                }
+              />
+              <InfoTile
+                label="Scan bursts"
+                value={
+                  scanning
+                    ? `${scanTelemetry.burstCount} · ${Math.round(
+                        scanTelemetry.radioOnMs / 1000,
+                      )}s on / ${Math.round(scanTelemetry.elapsedMs / 1000)}s`
+                    : '—'
+                }
+              />
+              <InfoTile
+                label="Start budget"
+                value={
+                  scanning ? `${scanTelemetry.startsRemaining} left` : '—'
+                }
+                valueColor={
+                  scanning && scanTelemetry.startsRemaining === 0
+                    ? theme.warn
+                    : undefined
+                }
+              />
+              <InfoTile
+                label="Scanning"
+                value={scanning ? 'Yes' : 'No'}
+                check
+                valueColor={scanning ? theme.ok : theme.textDim}
+                icon="clock"
+              />
+              <InfoTile
+                label="Advertising"
+                value={peripheral.advertising ? 'Yes' : 'No'}
+                check
+                valueColor={peripheral.advertising ? theme.ok : theme.textDim}
+                icon="broadcast"
+              />
+              <InfoTile
+                label="Peripheral module"
+                value={peripheral.available ? 'Linked' : 'NOT LINKED'}
+                valueColor={peripheral.available ? theme.ok : theme.error}
+                icon="link"
+              />
+              <InfoTile
+                label="This device"
+                value={identity?.displayName || '(none)'}
+                icon="device"
+              />
+            </View>
+            {permission.denied.length > 0 && (
+              <LeaderRow label="Denied" value={permission.denied.join(', ')} />
+            )}
+            {peripheral.error && (
+              <LeaderRow label="Peripheral error" value={peripheral.error} />
+            )}
+          </Section>
+        ) : null}
+        {tab === 'traffic' ? (
+
+          <Section title="Session" icon="chart">
+            <LeaderRow
+              label="Duration"
+              value={formatDuration(session.durationMs)}
+              mono
               icon="clock"
             />
-            <InfoTile
-              label="Advertising"
-              value={peripheral.advertising ? 'Yes' : 'No'}
-              check
-              valueColor={peripheral.advertising ? theme.ok : theme.textDim}
-              icon="broadcast"
+            <LeaderRow
+              label="Messages sent"
+              value={String(session.messagesSent)}
+              mono
+              icon="share"
             />
-            <InfoTile
-              label="Peripheral module"
-              value={peripheral.available ? 'Linked' : 'NOT LINKED'}
-              valueColor={peripheral.available ? theme.ok : theme.error}
+            <LeaderRow
+              label="Messages received"
+              value={String(session.messagesReceived)}
+              mono
+              icon="inbox"
+            />
+            <LeaderRow label="Bytes TX" value={formatBytes(session.bytesTx)} mono icon="share" />
+            <LeaderRow label="Bytes RX" value={formatBytes(session.bytesRx)} mono icon="inbox" />
+            <LeaderRow
+              label="Avg ACK"
+              value={
+                session.avgAckLatencyMs !== null
+                  ? Math.round(session.avgAckLatencyMs) + ' ms'
+                  : 'no samples'
+              }
+              mono
+              icon="check"
+            />
+            <LeaderRow
+              label="Avg RSSI"
+              value={
+                session.avgRssi !== null
+                  ? Math.round(session.avgRssi) + ' dBm'
+                  : 'no samples'
+              }
+              mono
+              icon="radar"
+            />
+            <LeaderRow
+              label="Reconnects"
+              value={String(session.reconnects)}
+              mono
               icon="link"
             />
-            <InfoTile
-              label="This device"
-              value={identity?.displayName || '(none)'}
-              icon="device"
+            <LeaderRow
+              label="Queued (outbox)"
+              value={String(queuedTotal)}
+              mono
+              icon="mail"
             />
-          </View>
-          {permission.denied.length > 0 && (
-            <LeaderRow label="Denied" value={permission.denied.join(', ')} />
-          )}
-          {peripheral.error && (
-            <LeaderRow label="Peripheral error" value={peripheral.error} />
-          )}
-        </Section>
+          </Section>
+        ) : null}
+        {tab === 'traffic' ? (
 
-        <Section title="Session" icon="chart">
-          <LeaderRow
-            label="Duration"
-            value={formatDuration(session.durationMs)}
-            mono
-            icon="clock"
-          />
-          <LeaderRow
-            label="Messages sent"
-            value={String(session.messagesSent)}
-            mono
-            icon="share"
-          />
-          <LeaderRow
-            label="Messages received"
-            value={String(session.messagesReceived)}
-            mono
-            icon="inbox"
-          />
-          <LeaderRow label="Bytes TX" value={formatBytes(session.bytesTx)} mono icon="share" />
-          <LeaderRow label="Bytes RX" value={formatBytes(session.bytesRx)} mono icon="inbox" />
-          <LeaderRow
-            label="Avg ACK"
-            value={
-              session.avgAckLatencyMs !== null
-                ? Math.round(session.avgAckLatencyMs) + ' ms'
-                : 'no samples'
-            }
-            mono
-            icon="check"
-          />
-          <LeaderRow
-            label="Avg RSSI"
-            value={
-              session.avgRssi !== null
-                ? Math.round(session.avgRssi) + ' dBm'
-                : 'no samples'
-            }
-            mono
-            icon="radar"
-          />
-          <LeaderRow
-            label="Reconnects"
-            value={String(session.reconnects)}
-            mono
-            icon="link"
-          />
-          <LeaderRow
-            label="Queued (outbox)"
-            value={String(queuedTotal)}
-            mono
-            icon="mail"
-          />
-        </Section>
-
-        <Section title="Packets" glyph="◫">
-          <View style={styles.statGrid}>
-            <StatCard glyph="↑" value={counters.tx} label="TX" tint={tints.tx} />
-            <StatCard glyph="↓" value={counters.rx} label="RX" tint={tints.rx} />
-            <StatCard glyph="✓" value={counters.ack} label="ACK" tint={tints.ack} />
-            <StatCard
-              glyph="✕"
-              value={counters.failed}
-              label="Failed"
-              tint={tints.failed}
-            />
-            <StatCard
-              glyph="⧉"
-              value={counters.duplicates}
-              label="Dupes"
-              tint={tints.dupes}
-            />
-            <StatCard
-              glyph="⊘"
-              value={counters.dropped}
-              label="Dropped"
-              tint={tints.dropped}
-            />
-            {/*
-              Kept separate from Dropped on purpose. A dropped packet usually means the
-              link is having a bad time; these two mean a peer sent something it should
-              not have, and burying them in a general total would hide that.
-            */}
-            <StatCard
-              glyph="↺"
-              value={counters.replayed}
-              label="Replayed"
-              tint={tints.rejected}
-            />
-            <StatCard
-              glyph="⚠"
-              value={counters.spoofed}
-              label="Spoofed"
-              tint={tints.rejected}
-            />
-          </View>
-          <TouchableOpacity
-            style={styles.resetButton}
-            onPress={() => bleChat.router.resetCounters()}>
-            <DenseText style={styles.resetText}>◌  Reset Counters</DenseText>
-          </TouchableOpacity>
-        </Section>
-
-        <Section title="Last Packet" glyph="▤">
-          {lastPacket ? (
-            <>
-              <LeaderRow
-                label="Direction"
-                value={lastPacket.direction.toUpperCase()}
-                badge
+          <Section title="Packets" glyph="◫">
+            <View style={styles.statGrid}>
+              <StatCard glyph="↑" value={counters.tx} label="TX" tint={tints.tx} />
+              <StatCard glyph="↓" value={counters.rx} label="RX" tint={tints.rx} />
+              <StatCard glyph="✓" value={counters.ack} label="ACK" tint={tints.ack} />
+              <StatCard
+                glyph="✕"
+                value={counters.failed}
+                label="Failed"
+                tint={tints.failed}
               />
-              <LeaderRow label="Packet ID" value={shortId(lastPacket.packet.id)} mono />
-              <LeaderRow label="Type" value={lastPacket.packet.type} mono />
-              <LeaderRow label="Origin" value={shortId(lastPacket.packet.originId)} mono />
-              <LeaderRow label="Sender" value={shortId(lastPacket.packet.senderId)} mono />
-              <LeaderRow
-                label="Destination"
-                value={
-                  lastPacket.packet.destinationId
-                    ? shortId(lastPacket.packet.destinationId)
-                    : '(link-local)'
-                }
-                mono
+              <StatCard
+                glyph="⧉"
+                value={counters.duplicates}
+                label="Dupes"
+                tint={tints.dupes}
               />
-              <LeaderRow label="TTL" value={String(lastPacket.packet.ttl)} mono />
-              <LeaderRow label="Hops" value={String(lastPacket.packet.hopCount)} mono />
-              <LeaderRow
-                label="Timestamp"
-                value={formatTime(lastPacket.packet.timestamp)}
-                mono
+              <StatCard
+                glyph="⊘"
+                value={counters.dropped}
+                label="Dropped"
+                tint={tints.dropped}
               />
-              <LeaderRow label="Link" value={lastPacket.linkId} mono />
-            </>
-          ) : (
-            <DenseText style={styles.dim}>No packets yet.</DenseText>
-          )}
-        </Section>
+              {/*
+                Kept separate from Dropped on purpose. A dropped packet usually means the
+                link is having a bad time; these two mean a peer sent something it should
+                not have, and burying them in a general total would hide that.
+              */}
+              <StatCard
+                glyph="↺"
+                value={counters.replayed}
+                label="Replayed"
+                tint={tints.rejected}
+              />
+              <StatCard
+                glyph="⚠"
+                value={counters.spoofed}
+                label="Spoofed"
+                tint={tints.rejected}
+              />
+            </View>
+            <TouchableOpacity
+              style={styles.resetButton}
+              onPress={() => bleChat.router.resetCounters()}>
+              <DenseText style={styles.resetText}>◌  Reset Counters</DenseText>
+            </TouchableOpacity>
+          </Section>
+        ) : null}
+        {tab === 'traffic' ? (
 
-        <Section title="GATT" glyph="⌬">
-          <LeaderRow label="Service" value={tail(BLE_SERVICE_UUID)} mono />
-          <LeaderRow label="RX char" value={tail(BLE_RX_CHAR_UUID)} mono />
-          <LeaderRow label="TX char" value={tail(BLE_TX_CHAR_UUID)} mono />
-        </Section>
-
-        {peers.length > 1 && (
-          <Section title={'All peers (' + peers.length + ')'} glyph="⁙">
-            {peers.map(peer => (
-              <View
-                key={peer.peerId ?? peer.linkId ?? String(peer.firstSeen)}
-                style={styles.peerRow}>
-                <DenseText style={styles.peerName} numberOfLines={1}>
-                  {peer.displayName ?? 'unnamed'}
-                </DenseText>
-                <StatusPill
-                  label={peer.state}
-                  tone={
-                    peer.state === 'connected'
-                      ? theme.ok
-                      : peer.state === 'failed'
-                      ? theme.error
-                      : theme.warn
-                  }
+          <Section title="Last Packet" glyph="▤">
+            {lastPacket ? (
+              <>
+                <LeaderRow
+                  label="Direction"
+                  value={lastPacket.direction.toUpperCase()}
+                  badge
                 />
+                <LeaderRow label="Packet ID" value={shortId(lastPacket.packet.id)} mono />
+                <LeaderRow label="Type" value={lastPacket.packet.type} mono />
+                <LeaderRow label="Origin" value={shortId(lastPacket.packet.originId)} mono />
+                <LeaderRow label="Sender" value={shortId(lastPacket.packet.senderId)} mono />
+                <LeaderRow
+                  label="Destination"
+                  value={
+                    lastPacket.packet.destinationId
+                      ? shortId(lastPacket.packet.destinationId)
+                      : '(link-local)'
+                  }
+                  mono
+                />
+                <LeaderRow label="TTL" value={String(lastPacket.packet.ttl)} mono />
+                <LeaderRow label="Hops" value={String(lastPacket.packet.hopCount)} mono />
+                <LeaderRow
+                  label="Timestamp"
+                  value={formatTime(lastPacket.packet.timestamp)}
+                  mono
+                />
+                <LeaderRow label="Link" value={lastPacket.linkId} mono />
+              </>
+            ) : (
+              <DenseText style={styles.dim}>No packets yet.</DenseText>
+            )}
+          </Section>
+        ) : null}
+        {tab === 'link' ? (
+
+          <Section title="GATT" glyph="⌬">
+            <LeaderRow label="Service" value={tail(BLE_SERVICE_UUID)} mono />
+            <LeaderRow label="RX char" value={tail(BLE_RX_CHAR_UUID)} mono />
+            <LeaderRow label="TX char" value={tail(BLE_TX_CHAR_UUID)} mono />
+          </Section>
+        ) : null}
+
+        {tab === 'link' && peers.length > 1 ? (
+            <Section title={'All peers (' + peers.length + ')'} glyph="⁙">
+              {peers.map(peer => (
+                <View
+                  key={peer.peerId ?? peer.linkId ?? String(peer.firstSeen)}
+                  style={styles.peerRow}>
+                  <DenseText style={styles.peerName} numberOfLines={1}>
+                    {peer.displayName ?? 'unnamed'}
+                  </DenseText>
+                  <StatusPill
+                    label={peer.state}
+                    tone={
+                      peer.state === 'connected'
+                        ? theme.ok
+                        : peer.state === 'failed'
+                        ? theme.error
+                        : theme.warn
+                    }
+                  />
+                </View>
+              ))}
+            </Section>
+        ) : null}
+
+        {tab === 'logs' ? (
+
+          <Section title={'Logs (' + visibleLogs.length + ')'} glyph="≡">
+            <View style={styles.filterRow}>
+              {(['all', 'info', 'warn', 'error', 'debug'] as const).map(level => (
+                <TouchableOpacity
+                  key={level}
+                  style={[
+                    styles.filterChip,
+                    levelFilter === level && styles.filterChipActive,
+                  ]}
+                  onPress={() => setLevelFilter(level)}>
+                  <DenseText
+                    style={[
+                      styles.filterText,
+                      levelFilter === level && styles.filterTextActive,
+                    ]}>
+                    {level}
+                  </DenseText>
+                </TouchableOpacity>
+              ))}
+              <TouchableOpacity style={styles.filterChip} onPress={() => logger.clear()}>
+                <DenseText style={styles.filterText}>clear</DenseText>
+              </TouchableOpacity>
+            </View>
+
+            {visibleLogs.map(entry => (
+              <View key={entry.id} style={styles.logRow}>
+                <DenseText style={styles.logTime}>{formatTime(entry.timestamp)}</DenseText>
+                <DenseText
+                  style={[styles.logText, {color: levelColor(entry.level, theme)}]}
+                  selectable>
+                  [{entry.tag}] {entry.message}
+                </DenseText>
               </View>
             ))}
           </Section>
-        )}
-
-        <Section title={'Logs (' + visibleLogs.length + ')'} glyph="≡">
-          <View style={styles.filterRow}>
-            {(['all', 'info', 'warn', 'error', 'debug'] as const).map(level => (
-              <TouchableOpacity
-                key={level}
-                style={[
-                  styles.filterChip,
-                  levelFilter === level && styles.filterChipActive,
-                ]}
-                onPress={() => setLevelFilter(level)}>
-                <DenseText
-                  style={[
-                    styles.filterText,
-                    levelFilter === level && styles.filterTextActive,
-                  ]}>
-                  {level}
-                </DenseText>
-              </TouchableOpacity>
-            ))}
-            <TouchableOpacity style={styles.filterChip} onPress={() => logger.clear()}>
-              <DenseText style={styles.filterText}>clear</DenseText>
-            </TouchableOpacity>
-          </View>
-
-          {visibleLogs.map(entry => (
-            <View key={entry.id} style={styles.logRow}>
-              <DenseText style={styles.logTime}>{formatTime(entry.timestamp)}</DenseText>
-              <DenseText
-                style={[styles.logText, {color: levelColor(entry.level, theme)}]}
-                selectable>
-                [{entry.tag}] {entry.message}
-              </DenseText>
-            </View>
-          ))}
-        </Section>
+        ) : null}
       </ScrollView>
-    </SafeAreaView>
+    </Screen>
   );
 }
 
@@ -747,26 +808,47 @@ const useStyles = makeStyles(t => ({
   safe: {flex: 1, backgroundColor: t.bg},
   content: {padding: spacing.lg, paddingBottom: spacing.xl},
 
+  flex: {flex: 1},
   brandRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: spacing.lg,
     gap: spacing.sm,
+    marginBottom: 14,
   },
-  brand: {...typography.display, color: t.text, flexShrink: 1},
-  brandAccent: {color: t.accent},
-  // Outlined rather than filled. Two solid accent buttons at the top of a diagnostics
-  // screen out-shout the diagnostics.
-  exportButton: {
+  brand: {fontSize: 26, fontWeight: '800', letterSpacing: -0.6, color: t.text},
+  brandMeta: {...typography.caption, color: t.textDim, marginTop: 2},
+
+  tabs: {
     flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
+    gap: 2,
+    backgroundColor: t.surfaceAlt,
+    borderRadius: 12,
+    padding: 3,
+    marginBottom: 18,
+  },
+  tab: {flex: 1, alignItems: 'center', paddingVertical: 8, borderRadius: 9},
+  // A raised chip, not a tint: the selected tab should look like it is on top of the
+  // track rather than a differently-coloured part of it.
+  tabActive: {
+    backgroundColor: t.surface,
+    shadowColor: '#000',
+    shadowOpacity: t.isDark ? 0.3 : 0.08,
+    shadowRadius: 2,
+    shadowOffset: {width: 0, height: 1},
+    elevation: 1,
+  },
+  tabText: {...typography.callout, color: t.textDim, fontWeight: '600'},
+  tabTextActive: {...typography.callout, color: t.text, fontWeight: '700'},
+
+  exportButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
     borderWidth: 1,
     borderColor: t.border,
-    borderRadius: radius.pill,
-    paddingVertical: 8,
-    paddingHorizontal: spacing.md,
+    backgroundColor: t.surface,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   exportText: {...typography.caption, color: t.text, fontWeight: '600'},
 
