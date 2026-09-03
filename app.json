@@ -1,0 +1,66 @@
+{
+  "expo": {
+    "name": "App Hub",
+    "slug": "app-hub",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "scheme": "apphub",
+    "userInterfaceStyle": "automatic",
+    "backgroundColor": "#070A12",
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.yg.apphub",
+      "infoPlist": {
+        "NSBluetoothAlwaysUsageDescription": "App Hub uses Bluetooth for offline chat and to show which other attendees are near you. It never uses your location.",
+        "NSBluetoothPeripheralUsageDescription": "App Hub broadcasts a temporary identifier so nearby devices running the same app can find you.",
+        "NSMotionUsageDescription": "EventPulse uses the compass and motion sensors to keep the event map oriented as you turn.",
+        "NSPhotoLibraryUsageDescription": "EventPulse needs access to your photos so you can choose a profile picture. The image is cropped and resized on your device.",
+        "UIBackgroundModes": [
+          "bluetooth-central",
+          "bluetooth-peripheral"
+        ]
+      }
+    },
+    "android": {
+      "package": "com.yg.apphub",
+      "adaptiveIcon": {
+        "backgroundColor": "#070A12",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "predictiveBackGestureEnabled": false,
+      "blockedPermissions": [
+        "android.permission.ACCESS_BACKGROUND_LOCATION"
+      ]
+    },
+    "plugins": [
+      "expo-audio",
+      "expo-asset",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "EventPulse needs access to your photos so you can choose a profile picture. The image is cropped and resized on your device."
+        }
+      ],
+      [
+        "react-native-ble-plx",
+        {
+          "isBackgroundEnabled": true,
+          "neverForLocation": true,
+          "modes": [
+            "peripheral",
+            "central"
+          ],
+          "bluetoothAlwaysPermission": "App Hub uses Bluetooth to chat with and discover nearby devices."
+        }
+      ],
+      "./plugins/withEventPulseBle.js",
+      "./plugins/withBleChatNative.js"
+    ]
+  }
+}

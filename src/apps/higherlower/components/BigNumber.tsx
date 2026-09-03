@@ -1,0 +1,90 @@
+import React from 'react';
+import { StyleSheet, Text, View } from 'react-native';
+import { Palette, fonts, spacing } from '../theme/tokens';
+import { useTheme, useThemedStyles } from '../theme/ThemeProvider';
+
+interface BigNumberProps {
+  /** Digits to show. Empty string renders the placeholder instead. */
+  value: string;
+  /** Shown before anything is typed; rendered small and dim so it reads as an
+   * empty field rather than as content. */
+  placeholder?: string;
+  caption?: string;
+  /** Ink for the digits. Defaults to the palette's primary text color. */
+  tone?: string;
+  /** Dims the digits -- used while the entry is not yet committed. */
+  muted?: boolean;
+}
+
+/** Font size shrinks as digits pile up so 1000 fits the same box as 7. */
+function sizeFor(length: number): number {
+  if (length <= 2) return 108;
+  if (length === 3) return 92;
+  if (length === 4) return 76;
+  return 60;
+}
+
+/**
+ * The headline readout -- the typed guess on the game screen, the revealed
+ * target on the result screen.
+ */
+export default function BigNumber({
+  value,
+  placeholder = '––',
+  caption,
+  tone,
+  muted = false,
+}: BigNumberProps) {
+  const { colors } = useTheme();
+  const styles = useThemedStyles(makeStyles);
+  const ink = tone ?? colors.textPrimary;
+  const empty = value.length === 0;
+  const showing = empty ? placeholder : value;
+  // At full weight and size a dash is a solid bar, which reads as content;
+  // shrink and fade the placeholder so the field reads as waiting for input.
+  const baseSize = sizeFor(showing.length);
+  const fontSize = baseSize * (empty ? 0.55 : 1);
+
+  return (
+    <View style={styles.wrap}>
+      {caption ? <Text style={styles.caption}>{caption}</Text> : null}
+      <Text
+        accessibilityRole="text"
+        accessibilityLabel={empty ? 'No guess entered' : `Guess ${value}`}
+        style={[
+          styles.number,
+          {
+            fontSize,
+            // Line box keeps the full height so typing the first digit does
+            // not shove the banner below it down the screen.
+            lineHeight: baseSize * 1.06,
+            color: empty ? colors.textMuted : ink,
+            opacity: muted ? 0.55 : empty ? 0.4 : 1,
+            // The glow is a dark-mode device; the light palette zeroes it out.
+            textShadowColor: empty ? 'transparent' : ink,
+            textShadowRadius: colors.numberGlow,
+          },
+        ]}
+      >
+        {showing}
+      </Text>
+    </View>
+  );
+}
+
+const makeStyles = (colors: Palette) => StyleSheet.create({
+  wrap: {
+    alignItems: 'center',
+  },
+  caption: {
+    ...fonts.label,
+    color: colors.textMuted,
+    fontSize: 11,
+    marginBottom: spacing.xs,
+  },
+  number: {
+    ...fonts.numeric,
+    letterSpacing: -2,
+    textShadowOffset: { width: 0, height: 0 },
+  },
+});
