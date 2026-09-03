@@ -1,6 +1,13 @@
 node_modules/
 .expo/
 dist/
-android/
-ios/
+# Anchored to the repo root on purpose. Unanchored `android/` and `ios/` match a
+# directory of that name at ANY depth, which silently excluded the config
+# plugins' native sources under modules/*/android and modules/*/ios — that is
+# why modules/blechat and modules/eventpulse-ble are absent from this repo even
+# though plugins/withBleChatNative.js and plugins/withEventPulseBle.js copy from
+# them on every prebuild. Only the generated Expo output at the root is build
+# output; modules/ is hand-written source and must be committed.
+/android/
+/ios/
 *.log

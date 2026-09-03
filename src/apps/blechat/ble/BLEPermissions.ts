@@ -16,9 +16,17 @@ export interface PermissionResult {
 /**
  * Which permissions BLE actually needs depends on the Android version:
  *
- *  API 31+ (Android 12+): BLUETOOTH_SCAN / BLUETOOTH_CONNECT / BLUETOOTH_ADVERTISE.
- *    Because the manifest declares BLUETOOTH_SCAN with neverForLocation, NO location
- *    permission is needed. Asking for one anyway would be requesting more than we use.
+ *  API 31+ (Android 12+): BLUETOOTH_SCAN / BLUETOOTH_CONNECT / BLUETOOTH_ADVERTISE,
+ *    plus ACCESS_FINE_LOCATION.
+ *
+ *    The location permission used to be unnecessary here, because the manifest
+ *    declared BLUETOOTH_SCAN with neverForLocation. The hub's merged manifest can no
+ *    longer set that flag: BLE Attendance shares this APK and the platform filters its
+ *    beacon-shaped employee advertisements out of every scan result when the flag is
+ *    present, so it had to be stripped app-wide — see plugins/withAttendanceNative.js.
+ *    Without it Android 12+ treats a scan as location-derived and returns nothing
+ *    unless this permission is held and Location is switched on. BLE Chat still never
+ *    reads a location; it just can no longer prove that to the OS for free.
  *
  *  API 23..30: BLE scanning genuinely required a location permission at the OS level —
  *    scan results come back empty without it. BLUETOOTH / BLUETOOTH_ADMIN are install-time.
@@ -35,6 +43,7 @@ function requiredAndroidPermissions(): Permission[] {
       PermissionsAndroid.PERMISSIONS.BLUETOOTH_SCAN,
       PermissionsAndroid.PERMISSIONS.BLUETOOTH_CONNECT,
       PermissionsAndroid.PERMISSIONS.BLUETOOTH_ADVERTISE,
+      PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION,
     ];
   }
 

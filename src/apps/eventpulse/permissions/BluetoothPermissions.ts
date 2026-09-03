@@ -35,7 +35,7 @@ export interface PermissionCopy {
 export const PERMISSION_RATIONALE: PermissionCopy = {
   title: 'See who is around you',
   body:
-    'EventPulse uses Bluetooth to notice which other attendees are nearby and roughly how far away they are. It never uses your location, and nothing about who is near you leaves your phone.',
+    'EventPulse uses Bluetooth to notice which other attendees are nearby and roughly how far away they are. Android asks for the location permission before it will let any app scan for Bluetooth devices — EventPulse never reads or stores your location, and nothing about who is near you leaves your phone.',
   primaryAction: 'Turn on Bluetooth access',
 };
 
@@ -61,10 +61,23 @@ export const UNSUPPORTED_COPY: PermissionCopy = {
   primaryAction: 'Browse attendees',
 };
 
+/**
+ * ACCESS_FINE_LOCATION is in this list, on Android 12+, for one reason only:
+ * the hub's merged manifest can no longer declare BLUETOOTH_SCAN with
+ * `neverForLocation`. BLE Attendance shares this APK and cannot see its own
+ * employee advertisements when that flag is set, so it had to go app-wide —
+ * see `plugins/withAttendanceNative.js`.
+ *
+ * Without the flag, Android 12+ treats a BLE scan as location-derived and
+ * returns an empty result set unless this permission is held and Location is
+ * switched on. EventPulse still never reads, stores or derives a location; it
+ * just can no longer prove that to the OS for free.
+ */
 const ANDROID_12_PERMISSIONS = [
   'android.permission.BLUETOOTH_SCAN',
   'android.permission.BLUETOOTH_ADVERTISE',
   'android.permission.BLUETOOTH_CONNECT',
+  'android.permission.ACCESS_FINE_LOCATION',
 ] as const;
 
 /**

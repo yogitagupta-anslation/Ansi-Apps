@@ -51,7 +51,7 @@
         "react-native-ble-plx",
         {
           "isBackgroundEnabled": true,
-          "neverForLocation": true,
+          "neverForLocation": false,
           "modes": [
             "peripheral",
             "central"
@@ -59,8 +59,10 @@
           "bluetoothAlwaysPermission": "App Hub uses Bluetooth to chat with and discover nearby devices."
         }
       ],
+      "@react-native-vector-icons/lucide",
       "./plugins/withEventPulseBle.js",
-      "./plugins/withBleChatNative.js"
+      "./plugins/withBleChatNative.js",
+      "./plugins/withAttendanceNative.js"
     ]
   }
 }

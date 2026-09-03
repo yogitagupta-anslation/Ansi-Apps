@@ -1,6 +1,6 @@
 # App Hub
 
-One Expo app that launches three existing apps from a single home screen.
+One Expo app that launches five existing apps from a single home screen.
 
 ```bash
 npm install
@@ -12,8 +12,8 @@ npm run android
 connected device or running emulator. The first run takes a while (NDK, CMake);
 after that it is incremental.
 
-Everything here needs a **development build**. There is no Expo Go path — three
-native modules and `react-native-ble-plx` are not in the Go client.
+Everything here needs a **development build**. There is no Expo Go path — the
+hand-written native modules and `react-native-ble-plx` are not in the Go client.
 
 ## What is inside
 
@@ -22,6 +22,8 @@ native modules and `react-native-ble-plx` are not in the Go client.
 | **BLE Chat** | Encrypted peer-to-peer chat over Bluetooth Low Energy | `test/BleChat` |
 | **EventPulse** | Live proximity radar for conferences and meetups | `networking app/mobile` |
 | **Higher or Lower** | Number-guessing race, solo / daily / multiplayer | `guess the number/mobile` |
+| **Bluetooth Attendance** | Offline roll call: employees advertise, the host records | `react-native-app` |
+| **Treasure Hunt** | Offline multiplayer treasure hunt in a virtual world | `Treasure-hunt-game` |
 
 ## Layout
 
@@ -35,7 +37,7 @@ modules/                Kotlin/Swift native sources the config plugins install
 plugins/                the config plugins that install them
 ```
 
-## How the three apps share one shell
+## How the apps share one shell
 
 **One navigation container.** React Navigation allows exactly one per tree, so
 the hub owns it and each app contributes a *nested* navigator underneath. Each
@@ -47,27 +49,45 @@ root stack returns to the hub.
 
 **One safe-area provider.** `AppFrame` renders the "‹ App Hub" strip in the band
 under the status bar, then hands the subtree a top inset of `0` via
-`SafeAreaInsetsContext`. Without that override every screen in all three apps
+`SafeAreaInsetsContext`. Without that override every screen in every app
 would pad past a strip that had already consumed that space.
 
 **Lazy apps.** Registry entries hold `lazy(() => import(...))`, so opening the
 hub does not pull in a BLE stack, a positioning engine and an audio bank.
 
 **Cheap to leave.** Closing an app back to the hub drops BLE Chat to its saver
-scan duty cycle, moves EventPulse's scanner to its `background` phase, and frees
-Higher or Lower's audio players. BLE Chat's radio deliberately keeps running:
-a BLE message exists only while both radios are on, so a missed one is missed
-permanently — which is what the foreground service is for.
+scan duty cycle, moves EventPulse's scanner to its `background` phase, frees
+Higher or Lower's audio players, flushes Attendance's pending records, and
+disposes Treasure Hunt's `GameManager` (which is built fresh on every open, so
+this is a clean teardown rather than a one-way door).
 
-**No key collisions.** The three storage namespaces (`@blechat/`, `eventpulse:`,
-`hol.`) were already disjoint, so nothing had to be renamed.
+Two radios deliberately keep running. BLE Chat's, because a BLE message exists
+only while both radios are on, so a missed one is missed permanently — which is
+what its foreground service is for. Attendance's, for the same reason: a hub
+exit is far closer to backgrounding than to quitting, and stopping the employee
+advertisement there would silently make that phone invisible to the host, which
+is precisely what its own foreground service and `android:stopWithTask="false"`
+exist to prevent. Both stay under the user's control from their own settings.
 
-## Adding a fourth app
+**One orientation, unlocked at runtime.** Treasure Hunt is a landscape game and
+shipped as `android:screenOrientation="sensorLandscape"`; the hub and the other
+four apps are portrait, and one Activity cannot be statically both. So its lock
+moved from the manifest into `TreasureHuntApp.tsx`, scoped to exactly the time
+that app is mounted and released on the way out. `app.json` stays `portrait`.
+
+**No key collisions.** The five storage namespaces (`@blechat/`, `eventpulse:`,
+`hol.`, `@bleattendance/`, `th.v1.`) are disjoint, so nothing had to be renamed.
+Each app funnels all of its AsyncStorage access through one small wrapper, so
+this is checkable rather than hopeful.
+
+## Adding another app
 
 1. Drop its `src/` under `src/apps/<name>/`.
 2. Add a `<Name>App.tsx` that renders the app without a `SafeAreaProvider`,
    `StatusBar` or `NavigationContainer` of its own.
-3. Add one entry to `src/hub/registry.ts`.
+3. Add one entry to `src/hub/registry.ts`, and its id to the `AppId` union.
+4. If it has hand-written native code, add a config plugin under `plugins/` and
+   its sources under `modules/<name>/` — never a committed `android/`.
 
 The grid, the search index, the category chips and the route table are all
 derived from that entry. No other file changes.
@@ -75,7 +95,7 @@ derived from that entry. No other file changes.
 ## Native modules
 
 `expo prebuild` regenerates `android/` and `ios/`, so nothing hand-written can
-live there. Two config plugins re-apply the native halves on every prebuild:
+live there. Three config plugins re-apply the native halves on every prebuild:
 
 - **`withBleChatNative.js`** — `BlePeripheral` (the GATT server half;
   `react-native-ble-plx` is central-only), `Presence` (the foreground service),
@@ -84,6 +104,11 @@ live there. Two config plugins re-apply the native halves on every prebuild:
   id at copy time, so changing `android.package` in `app.json` cannot silently
   break the build.
 - **`withEventPulseBle.js`** — `EventPulseBle`, plus the BLE manifest entries.
+- **`withAttendanceNative.js`** — `BleAdvertiser` (the peripheral half, with the
+  foreground service that keeps an advertisement on air) and `FileShare` (the
+  FileProvider that hands one exported report to the share sheet). Rewrites
+  `com.bleattendance.MainActivity` the same way, and owns the `neverForLocation`
+  decision described below.
 
 Both register their `ReactPackage`s through `plugins/addReactPackages.js`, which
 knows the several shapes `MainApplication` has taken across Expo SDKs.
@@ -103,3 +128,32 @@ actually required:
   `manipulate` / `renderAsync` / `saveAsync` API.
 - `react-native-get-random-values` is imported first in `index.ts`, before any
   module that generates an identifier.
+
+Bringing Attendance and Treasure Hunt across (React Native 0.87 → 0.86) needed:
+
+- **`neverForLocation` had to go, app-wide.** `react-native-ble-plx`'s *own*
+  library manifest declares `BLUETOOTH_SCAN` with that flag, and the merger
+  folds it in — setting `neverForLocation: false` on its plugin stops only the
+  plugin's copy, so `tools:remove` in `withAttendanceNative.js` is what actually
+  strips it. It had to go because the platform filters beacon-shaped
+  advertisements out of scan results when it is set, and Attendance's employee
+  advertisements are exactly that shape: the host would scan "successfully" and
+  see nobody. One APK has one manifest, so the cost is paid by everyone —
+  `ACCESS_FINE_LOCATION` is now held with no `maxSdkVersion`, and BLE Chat,
+  EventPulse and Treasure Hunt each request it on API 31+. None of them reads a
+  location; they simply can no longer prove that to the OS for free.
+- **`buffer` is now a direct dependency.** `react-native-ble-peripheral-manager`
+  does `import 'buffer'` without declaring it. Standalone it resolved to a copy
+  the RN CLI toolchain happened to hoist; Expo's tree has no such accident.
+- **`.gitignore` needed anchoring.** `android/` and `ios/` without a leading
+  slash match a directory of that name at *any* depth, which silently excluded
+  `modules/*/android` and `modules/*/ios` — the reason the plugins' native
+  sources are missing from this repo's history. Now `/android/` and `/ios/`.
+- RN 0.86 types are stricter than 0.87's in three places: a percentage built
+  with `.toFixed()` or a template literal needs `as DimensionValue`, `Image` no
+  longer lists `pointerEvents` in `ImageProps`, and `ScrollView`'s
+  `refreshControl` wants a `ReactElement<RefreshControlProps>` rather than a
+  bare `ReactElement`. All four were type-level only; no behaviour changed.
+- Attendance's teardown effect stopped both radios and destroyed the BLE
+  manager. That was right when only process death unmounted it, and wrong in a
+  hub where Back unmounts it — see "Cheap to leave" above.
