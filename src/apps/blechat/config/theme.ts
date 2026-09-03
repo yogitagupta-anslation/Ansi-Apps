@@ -60,8 +60,10 @@ export interface Theme {
   // ---- vivid system (Home + shared chrome) --------------------------------
   /**
    * The three-stop brand gradient used on the wordmark and the primary button —
-   * navy through indigo to violet. Kept as an explicit tuple rather than derived from
-   * `accent`, because a gradient needs deliberately chosen stops, not one colour faded.
+   * near-black through graphite to a light slate. Kept as an explicit tuple rather than
+   * derived from `accent`, because a gradient needs deliberately chosen stops, not one
+   * colour faded. The spread matters on the wordmark, where the lightest stop is what
+   * separates "Chat" from the near-black "BLE" beside it.
    */
   gradient: readonly [string, string, string];
   /** Soft icon-tile backgrounds, one per hue, paired with the matching text/icon colour. */
@@ -96,11 +98,14 @@ export const darkTheme: Theme = {
   onAccent: '#ffffff',
   onAccentDim: 'rgba(255,255,255,0.74)',
 
-  // The indigo from the brand gradient's middle stop rather than a stock blue: the
-  // accent, the outgoing bubble and the wordmark are then demonstrably the same
-  // colour, which is what makes the chrome read as one app rather than three.
-  accent: '#8B7CFF',
-  accentSoft: 'rgba(139,124,255,0.16)',
+  // Graphite, not a hue.
+  //
+  // The chrome deliberately carries no chroma of its own, which leaves status as the
+  // only coloured thing on screen: green is connected, amber is queued or waiting, red
+  // is failed. An accent competing with those is an accent that makes them harder to
+  // spot, and on this app spotting them is the whole job.
+  accent: '#94A3B8',
+  accentSoft: 'rgba(148,163,184,0.16)',
 
   ok: '#34d399',
   warn: '#fbbf24',
@@ -110,9 +115,9 @@ export const darkTheme: Theme = {
   neutral: '#64748b',
 
   // The gradient's middle stop, flat: the outgoing bubble is the one place in the chat
-  // itself that ties back to the brand identity on Home, rather than a generic blue that
-  // could belong to any app.
-  bubbleOut: '#4C3FE0',
+  // itself that ties back to the brand identity on Home. Neutral rather than tinted, so
+  // the only colour in a thread is a delivery tick that has something to report.
+  bubbleOut: '#334155',
   bubbleOutText: '#ffffff',
   bubbleIn: '#1b2330',
   bubbleInText: '#eef2f7',
@@ -121,7 +126,7 @@ export const darkTheme: Theme = {
   bannerFrom: 'rgba(47,129,247,0.14)',
   bannerTo: 'rgba(168,85,247,0.10)',
 
-  gradient: ['#241E4E', '#4C3FE0', '#9B6BFF'],
+  gradient: ['#0F172A', '#334155', '#64748B'],
   tileBlue: 'rgba(59,130,246,0.16)',
   tileBlueFg: '#5B9BFF',
   tileGreen: 'rgba(34,197,94,0.16)',
@@ -151,8 +156,8 @@ export const lightTheme: Theme = {
   // The accent stays dark blue in light mode, so this remains a light tint.
   onAccentDim: 'rgba(255,255,255,0.78)',
 
-  accent: '#4C3FE0',
-  accentSoft: '#EEF2FF',
+  accent: '#334155',
+  accentSoft: '#EDF0F4',
 
   ok: '#059669',
   warn: '#b45309',
@@ -161,7 +166,7 @@ export const lightTheme: Theme = {
   amber: '#b45309',
   neutral: '#64748b',
 
-  bubbleOut: '#4C3FE0',
+  bubbleOut: '#334155',
   bubbleOutText: '#ffffff',
   // White on the page's off-white ground, separated by a hairline rather than a fill:
   // a grey bubble against a grey thread makes every incoming message look muted, which
@@ -173,7 +178,7 @@ export const lightTheme: Theme = {
   bannerFrom: 'rgba(22,104,227,0.08)',
   bannerTo: 'rgba(126,34,206,0.06)',
 
-  gradient: ['#241E4E', '#4C3FE0', '#9B6BFF'],
+  gradient: ['#0F172A', '#334155', '#64748B'],
   tileBlue: '#DBEAFE',
   tileBlueFg: '#2563EB',
   tileGreen: '#DCFCE7',
@@ -207,7 +212,9 @@ export function themeForMode(mode: ThemeMode, systemIsDark: boolean): Theme {
  */
 export function speakerTint(theme: Theme, peerId: string): string {
   const palette = [
-    theme.accent,
+    // Not `accent`: the chrome accent is a neutral now, and a neutral cannot be one of
+    // five colours whose entire job is to be told apart.
+    theme.tileBlueFg,
     theme.ok,
     theme.purple,
     theme.amber,
@@ -258,7 +265,7 @@ export function avatarInitial(name: string | null | undefined): string {
 export function tintsFor(theme: Theme) {
   const soft = (hex: string) => hex + (theme.isDark ? '24' : '1f');
   return {
-    tx: [theme.accent, soft(theme.accent)] as const,
+    tx: [theme.tileBlueFg, soft(theme.tileBlueFg)] as const,
     rx: [theme.ok, soft(theme.ok)] as const,
     ack: [theme.purple, soft(theme.purple)] as const,
     failed: [theme.error, soft(theme.error)] as const,

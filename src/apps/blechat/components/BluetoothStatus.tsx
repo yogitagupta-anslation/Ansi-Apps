@@ -79,7 +79,7 @@ export function BluetoothStatus({
         <IconTile
           icon="bluetooth"
           bg={theme.glow}
-          fg={theme.tilePurpleFg}
+          fg={theme.accent}
           size={56}
           iconSize={26}
         />
