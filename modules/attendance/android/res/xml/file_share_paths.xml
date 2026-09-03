@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    FileProvider roots for exported reports.
+
+    Only the app's own cache/reports directory is exposed. Sharing a broader
+    root (external-path, root-path) would hand every chooser target a grant to
+    files that have nothing to do with the export.
+-->
+<paths>
+    <cache-path name="reports" path="reports/" />
+</paths>

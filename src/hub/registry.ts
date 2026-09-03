@@ -10,7 +10,12 @@
 import type { ComponentType } from 'react';
 import { lazy } from 'react';
 
-export type AppId = 'blechat' | 'eventpulse' | 'higherlower';
+export type AppId =
+  | 'blechat'
+  | 'eventpulse'
+  | 'higherlower'
+  | 'attendance'
+  | 'treasurehunt';
 
 export interface HubApp {
   id: AppId;
@@ -77,6 +82,53 @@ export const APPS: HubApp[] = [
     keywords: ['game', 'guess', 'number', 'race', 'daily', 'multiplayer', 'higher', 'lower'],
     featured: true,
     screen: lazy(() => import('../apps/higherlower/HigherLowerApp')),
+  },
+  {
+    id: 'attendance',
+    name: 'Bluetooth Attendance',
+    tagline: 'Roll call over BLE',
+    description:
+      'Offline attendance for a room full of people. Employee phones broadcast an identifier, the host phone picks them up and records who was present — no backend, no cloud, no internet.',
+    icon: '📋',
+    tags: ['Work', 'Tools'],
+    accent: '#34D399',
+    accentSoft: 'rgba(52,211,153,0.16)',
+    keywords: [
+      'attendance',
+      'bluetooth',
+      'ble',
+      'check-in',
+      'employees',
+      'host',
+      'roll call',
+      'reports',
+      'offline',
+    ],
+    screen: lazy(() => import('../apps/attendance/AttendanceApp')),
+  },
+  {
+    id: 'treasurehunt',
+    name: 'Treasure Hunt',
+    tagline: 'Multiplayer hunt over BLE',
+    description:
+      'An offline multiplayer treasure hunt played in a virtual world. Bluetooth carries the game between phones and nothing else — no GPS, no maps, no backend.',
+    icon: '🗺️',
+    tags: ['Games'],
+    accent: '#F472B6',
+    accentSoft: 'rgba(244,114,182,0.16)',
+    keywords: [
+      'treasure',
+      'hunt',
+      'game',
+      'multiplayer',
+      'bluetooth',
+      'ble',
+      'lobby',
+      'host',
+      'offline',
+      'compass',
+    ],
+    screen: lazy(() => import('../apps/treasure-hunt/TreasureHuntApp')),
   },
 ];
 

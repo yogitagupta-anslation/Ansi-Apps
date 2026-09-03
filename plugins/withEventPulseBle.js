@@ -98,20 +98,26 @@ function withBluetoothManifest(config) {
     };
 
     // Android 12+ split Bluetooth into purpose-scoped runtime permissions.
-    // `neverForLocation` is the important one: it is a promise to the OS (and
-    // to the user) that we do not derive location from scan results, and it is
-    // what lets EventPulse skip the location permission entirely.
-    add('android.permission.BLUETOOTH_SCAN', {
-      'android:usesPermissionFlags': 'neverForLocation',
-    });
+    //
+    // `neverForLocation` used to be set here, and it is what let EventPulse skip
+    // the location permission entirely. It is deliberately no longer set: BLE
+    // Attendance cannot work with that flag in the merged manifest, because the
+    // platform then filters its beacon-shaped employee advertisements out of
+    // every scan result. One APK has one manifest, so the flag had to go
+    // app-wide. `plugins/withAttendanceNative.js` carries the full reasoning and
+    // is what actually strips the copy that react-native-ble-plx's own library
+    // manifest contributes; this is only about not having two plugins set the
+    // same attribute to opposite values.
+    add('android.permission.BLUETOOTH_SCAN');
     add('android.permission.BLUETOOTH_ADVERTISE');
     add('android.permission.BLUETOOTH_CONNECT');
 
-    // Android 11 and below: the legacy permissions, plus the location permission
-    // the old scanning API insists on.
+    // Android 11 and below: the legacy permissions.
     add('android.permission.BLUETOOTH', { 'android:maxSdkVersion': '30' });
     add('android.permission.BLUETOOTH_ADMIN', { 'android:maxSdkVersion': '30' });
-    add('android.permission.ACCESS_FINE_LOCATION', { 'android:maxSdkVersion': '30' });
+    // No longer capped at API 30. With `neverForLocation` gone, scanning needs
+    // this on every version, not just the ones that always did.
+    add('android.permission.ACCESS_FINE_LOCATION');
 
     // Declare BLE as required-at-runtime rather than at install, so the app
     // still installs on a device without it and degrades to Discover only.
