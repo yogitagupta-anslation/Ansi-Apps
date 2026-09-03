@@ -391,7 +391,13 @@ export function AppStoreProvider({ children }: { children: React.ReactNode }) {
           log.warn('ADVERTISE', 'Could not restore advertising: ' + (result.error ?? 'unknown'));
         }
       }
-    })();
+    })().catch((error: unknown) => {
+      // This bootstrap awaits storage, a readiness probe and a REAL radio resume,
+      // any of which can reject. Unhandled, that becomes a RedBox over a screen
+      // that is otherwise perfectly usable. Readiness state already reports the
+      // failure in the UI, so the rejection only needs recording.
+      log.error('ATTENDANCE', 'bootstrap failed: ' + (error instanceof Error ? error.message : String(error)));
+    });
 
     return () => {
       cancelled = true;

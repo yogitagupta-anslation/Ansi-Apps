@@ -82,7 +82,14 @@ export default function App(): React.ReactElement {
           {APPS.map((app) => (
             <Stack.Screen key={app.id} name={app.id}>
               {({ navigation }) => (
-                <AppFrame app={app} onExit={() => navigation.navigate('Hub')}>
+                // popToTop, NOT navigate('Hub'): navigate pushes a SECOND Hub on top
+                // of the app instead of popping back to the first, so the app's subtree
+                // is never unmounted. Every effect cleanup the hub relies on to make
+                // leaving cheap -- Treasure Hunt's orientation unlock and GameManager
+                // dispose, BLE Chat's saver duty cycle, EventPulse's background phase,
+                // Higher or Lower's audio release, Attendance's record flush -- rides
+                // on that unmount, and the stack grows Hub/app/Hub/app without bound.
+                <AppFrame app={app} onExit={() => navigation.popToTop()}>
                   <app.screen />
                 </AppFrame>
               )}
