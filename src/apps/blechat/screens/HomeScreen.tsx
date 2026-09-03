@@ -408,8 +408,8 @@ export function HomeScreen({navigation}: RootTabScreenProps<'Home'>) {
                   ? [styles.newGroupRow, styles.listRowDivided]
                   : styles.newGroupRow
               }>
-              <View style={[styles.newGroupTile, {backgroundColor: theme.tilePurple}]}>
-                <Icon name="plus" color={theme.tilePurpleFg} size={13} />
+              <View style={[styles.newGroupTile, {backgroundColor: theme.accentSoft}]}>
+                <Icon name="plus" color={theme.accent} size={13} />
               </View>
               <DenseText style={styles.newGroupText}>New group</DenseText>
               <View style={styles.grow} />

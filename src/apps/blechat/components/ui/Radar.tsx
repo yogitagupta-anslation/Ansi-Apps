@@ -90,7 +90,9 @@ export function Radar({
               : blip.rssi >= -60
               ? theme.ok
               : blip.rssi >= -75
-              ? theme.accent
+              // Blue, not the chrome accent: that is a neutral now, and a neutral blip
+              // would read as "signal unknown", which is the one thing it is not.
+              ? theme.tileBlueFg
               : theme.tileAmberFg,
         };
       }),

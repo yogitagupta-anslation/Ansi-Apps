@@ -381,7 +381,7 @@ export function NearbyScreen({navigation}: RootTabScreenProps<'Nearby'>) {
               <Touchable scale={false} onPress={toggleScan} style={styles.stopButton}>
                 <Icon
                   name={scanning ? 'stop' : 'radar'}
-                  color={theme.tilePurpleFg}
+                  color={theme.accent}
                   size={scanning ? 12 : 14}
                 />
                 <DenseText style={styles.stopText}>
@@ -963,12 +963,12 @@ const useStyles = makeStyles(t => ({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 7,
-    backgroundColor: t.tilePurple,
+    backgroundColor: t.accentSoft,
     borderRadius: radius.pill,
     paddingVertical: 8,
     paddingHorizontal: 13,
   },
-  stopText: {...typography.callout, color: t.tilePurpleFg, fontWeight: '700'},
+  stopText: {...typography.callout, color: t.accent, fontWeight: '700'},
 
   // ---- sort --------------------------------------------------------------
   controls: {flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 14},

@@ -79,7 +79,7 @@ export function AppLockScreen({mode, onUnlock, onSetupComplete, onCancel}: Props
           keyboardShouldPersistTaps="handled">
           <View style={styles.card}>
             <View style={styles.iconWrap}>
-              <Icon name="shield" color={theme.tilePurpleFg} size={26} />
+              <Icon name="shield" color={theme.accent} size={26} />
             </View>
             <AppText style={styles.title}>
               {mode === 'unlock'
@@ -143,7 +143,7 @@ const useStyles = makeStyles(t => ({
     width: 56,
     height: 56,
     borderRadius: 28,
-    backgroundColor: t.tilePurple,
+    backgroundColor: t.accentSoft,
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: spacing.lg,
