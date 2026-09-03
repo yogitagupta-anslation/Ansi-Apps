@@ -5,6 +5,7 @@ import {makeStyles, useTheme} from '../theme/ThemeProvider';
 import type {Theme} from '../config/theme';
 import type {ChatMessage} from '../types/Message';
 import {AppText} from './AppText';
+import {LandIn} from './Motion';
 
 interface Props {
   message: ChatMessage;
@@ -118,25 +119,53 @@ export function MessageBubble({
         {outgoing && message.groupId ? (
           // Group delivery is per recipient, so a single tick would be a lie: show how
           // many members have actually acknowledged.
-          <AppText
-            style={[styles.tick, {color: statusColor(message.status, theme)}]}
-            numberOfLines={1}>
-            {(message.deliveredTo?.length ?? 0)}/{message.recipientCount ?? 0}
-            {' '}
-            {STATUS_TICK[message.status]}
-          </AppText>
+          <LandIn token={`${message.status}:${message.deliveredTo?.length ?? 0}`}>
+            <AppText
+              style={[styles.tick, {color: statusColor(message.status, theme)}]}
+              numberOfLines={1}>
+              {(message.deliveredTo?.length ?? 0)}/{message.recipientCount ?? 0}
+              {' '}
+              {STATUS_TICK[message.status]}
+            </AppText>
+          </LandIn>
+        ) : outgoing && message.status === 'sending' && message.fragmentProgress ? (
+          // A bar, not "3/7" in the same grey as the timestamp. A long message split
+          // across seven writes takes visibly longer than a short one, and a filling
+          // track is the only form of this that reads at a glance — which is the whole
+          // point of showing fragment progress rather than a spinner.
+          <View style={styles.progressRow}>
+            <View style={styles.progressTrack}>
+              <View
+                style={[
+                  styles.progressFill,
+                  {
+                    width: `${Math.round(
+                      (message.fragmentProgress.sent /
+                        Math.max(1, message.fragmentProgress.total)) *
+                        100,
+                    )}%`,
+                  },
+                ]}
+              />
+            </View>
+            <AppText style={styles.progressLabel} numberOfLines={1}>
+              Sending {message.fragmentProgress.sent}/{message.fragmentProgress.total}
+            </AppText>
+          </View>
         ) : outgoing ? (
           // The tick AND the word. A tick alone is a guess on the reader's part, and the
           // difference between "sent" (a BLE write completed) and "delivered" (the peer
           // acknowledged it) is exactly the thing a tick cannot express.
-          <AppText
-            style={[styles.tick, {color: statusColor(message.status, theme)}]}
-            numberOfLines={1}>
-            {STATUS_TICK[message.status]}{' '}
-            {message.status === 'sending' && message.fragmentProgress
-              ? `Sending ${message.fragmentProgress.sent}/${message.fragmentProgress.total}`
-              : STATUS_TEXT[message.status]}
-          </AppText>
+          // One tick is a completed BLE write; two is an application ACK. Keying the
+          // landing animation on the status means each tick appears at the moment its
+          // own event arrived — no timer ever advances it.
+          <LandIn token={message.status}>
+            <AppText
+              style={[styles.tick, {color: statusColor(message.status, theme)}]}
+              numberOfLines={1}>
+              {STATUS_TICK[message.status]} {STATUS_TEXT[message.status]}
+            </AppText>
+          </LandIn>
         ) : null}
         {outgoing && message.status === 'failed' && (
           <AppText style={styles.failedHint} numberOfLines={1}>
@@ -166,22 +195,28 @@ const useStyles = makeStyles(t => ({
   rowOut: {alignItems: 'flex-end'},
   rowIn: {alignItems: 'flex-start'},
   bubble: {
-    maxWidth: '80%',
+    maxWidth: '78%',
     // Guarantees room for the timestamp row even behind a very short message, so the
     // bubble is never sized narrower than its own metadata.
     minWidth: 96,
     // A larger radius with one corner tucked in: the tucked corner is what makes a
     // bubble read as coming FROM a side rather than floating.
-    borderRadius: 18,
-    paddingVertical: spacing.sm + 2,
-    paddingHorizontal: spacing.md,
+    borderRadius: 20,
+    paddingVertical: 11,
+    paddingHorizontal: 14,
   },
-  out: {backgroundColor: t.bubbleOut, borderBottomRightRadius: 5},
+  out: {backgroundColor: t.bubbleOut, borderBottomRightRadius: 6},
   in: {
     backgroundColor: t.bubbleIn,
-    borderBottomLeftRadius: 5,
+    borderBottomLeftRadius: 6,
     borderWidth: 1,
-    borderColor: t.border,
+    borderColor: t.divider,
+    // Barely there, and only on the incoming bubble: it is the one that shares a colour
+    // with the thread behind it, so it needs the lift to separate at all.
+    shadowColor: '#000',
+    shadowOpacity: t.isDark ? 0 : 0.04,
+    shadowRadius: 2,
+    shadowOffset: {width: 0, height: 1},
   },
   failed: {borderWidth: 1, borderColor: t.error},
   sender: {...typography.caption, fontWeight: '700', marginBottom: 3},
@@ -193,14 +228,29 @@ const useStyles = makeStyles(t => ({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'flex-end',
-    marginTop: 2,
+    marginTop: 3,
     // Wraps instead of clipping when "failed - tap to retry" cannot fit on one line.
     flexWrap: 'wrap',
     gap: spacing.xs,
   },
-  time: {...typography.caption, fontSize: 11},
+  time: {...typography.caption, fontSize: 10},
   metaOut: {color: t.onAccentDim},
   metaIn: {color: t.bubbleMeta},
-  tick: {...typography.caption, fontSize: 11, fontWeight: '600'},
+  tick: {...typography.caption, fontSize: 10, fontWeight: '600'},
+  progressRow: {flexDirection: 'row', alignItems: 'center', gap: 6, flex: 1, marginTop: 2},
+  progressTrack: {
+    flex: 1,
+    height: 3,
+    borderRadius: 2,
+    backgroundColor: 'rgba(255,255,255,0.25)',
+    overflow: 'hidden',
+  },
+  progressFill: {height: 3, borderRadius: 2, backgroundColor: '#ffffff'},
+  progressLabel: {
+    ...typography.caption,
+    fontSize: 10,
+    fontWeight: '600',
+    color: 'rgba(255,255,255,0.86)',
+  },
   failedHint: {...typography.caption, fontSize: 10, color: t.error},
 }));

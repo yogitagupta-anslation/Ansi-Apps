@@ -4,34 +4,40 @@ import {
   FlatList,
   LayoutAnimation,
   Platform,
+  RefreshControl,
   UIManager,
   View,
 } from 'react-native';
-import {SafeAreaView} from 'react-native-safe-area-context';
 import {useFocusEffect} from '@react-navigation/native';
-import {radius, spacing, typography, type Theme} from '../config/theme';
+import {radius, spacing, typography} from '../config/theme';
 import {makeStyles, useTheme} from '../theme/ThemeProvider';
 import {sharedInterests} from '../config/interests';
 import {EmptyState} from '../components/ui/Surface';
-import {FadeIn, Pulse, RadarPing, Touchable} from '../components/Motion';
+import {Screen} from '../components/ui/Screen';
+import {FadeIn, Pulse, Touchable} from '../components/Motion';
 import {Icon, type IconName} from '../components/ui/Icon';
-import {GradientSurface, brandGradient} from '../components/ui/Gradient';
 import {LABELS as LINK_STATE_LABELS} from '../components/ConnectionIndicator';
-import {QualityBadge} from '../components/ui/QualityBadge';
 import {PeerProfileSheet} from '../components/PeerProfileSheet';
 import {RECONNECT_MAX_ATTEMPTS} from '../config/constants';
 import {describeFailure} from '../ble/LinkErrors';
 import {AppText, DenseText} from '../components/AppText';
-import {SignalBars} from '../components/ui/Primitives';
+import {InitialAvatar, SignalBars} from '../components/ui/Primitives';
+import {Radar, isLive} from '../components/ui/Radar';
 import {
-  classifyDevice,
-  describeClass,
-  kindTone,
-  type DeviceClass,
-} from '../ble/DeviceClassifier';
+  ConnectRing,
+  ConnectedRing,
+  StageChecklist,
+  isConnecting,
+  stageCaption,
+} from '../components/ui/ConnectProgress';
+import {ByteSparkline, TrafficRing, trafficLabel} from '../components/ui/Traffic';
+import {useLinkTraffic} from '../peers/useLinkTraffic';
+import {qualityLabel} from '../peers/LinkMetrics';
+import {classifyDevice, type DeviceClass} from '../ble/DeviceClassifier';
 import {bleChat} from '../services/BleChatService';
 import {toggleFavoritePeer, useAppStore, type DiscoveredDevice} from '../state/appStore';
 import type {Peer} from '../types/Peer';
+import type {LinkState} from '../types/BLE';
 import type {RootTabScreenProps} from '../navigation/types';
 import {relativeTime} from '../utils/time';
 
@@ -46,13 +52,28 @@ if (
 
 type SortMode = 'match' | 'signal' | 'name' | 'recent';
 
-const SORT_LABEL: Record<SortMode, string> = {
-  match: 'Shared Interests',
-  signal: 'Signal Strength',
-  name: 'Name',
-  recent: 'Recently Seen',
-};
+const SORTS: Array<{key: SortMode; label: string}> = [
+  {key: 'match', label: 'Match'},
+  {key: 'signal', label: 'Signal'},
+  {key: 'name', label: 'Name'},
+  {key: 'recent', label: 'Recent'},
+];
 
+/**
+ * Nearby: who is around, why they are worth talking to, and what you can do about it.
+ *
+ * The row used to be two competing columns — identity down the left, a stack of badges
+ * and buttons down the right — which meant the action you wanted moved vertically
+ * depending on how much the left column had to say. It is now three stacked bands, in
+ * that order, so the buttons are in the same place on every card whatever state it is
+ * in. State, quality, MTU and RSSI collapse into one meta line under the name; the
+ * signal bars sit beside it. The three-figure stats banner became the subtitle, and the
+ * connect-to-everyone promo became a single dashed line.
+ *
+ * None of the underlying honesty moved: an unconnectable device still says so, a failed
+ * link still leads with its reason, and the quality score is still withheld until there
+ * is enough evidence for it to mean anything.
+ */
 export function NearbyScreen({navigation}: RootTabScreenProps<'Nearby'>) {
   const styles = useStyles();
   const theme = useTheme();
@@ -78,6 +99,27 @@ export function NearbyScreen({navigation}: RootTabScreenProps<'Nearby'>) {
       return () => bleChat.setScanIntensity('balanced');
     }, []),
   );
+  /**
+   * Pull-to-rescan.
+   *
+   * A discovery list is the one screen where "try again" is a real, cheap action, and a
+   * drag is how everybody already asks for it. The spinner is held for as long as a scan
+   * restart actually takes rather than a fixed beat — the gesture reports the radio's
+   * work, not a canned animation.
+   */
+  const [rescanning, setRescanning] = useState(false);
+
+  const onRescan = useCallback(() => {
+    setRescanning(true);
+    void bleChat
+      .stopScanning()
+      .then(() => bleChat.startScanning())
+      .catch(err =>
+        Alert.alert('Scanning', err instanceof Error ? err.message : String(err)),
+      )
+      .finally(() => setRescanning(false));
+  }, []);
+
   const [verifiedOnly, setVerifiedOnly] = useState(false);
   const [profilePeerId, setProfilePeerId] = useState<string | null>(null);
 
@@ -190,6 +232,23 @@ export function NearbyScreen({navigation}: RootTabScreenProps<'Nearby'>) {
   // counted as connectable rather than inventing a "not connectable" claim. Scoped to
   // chat-capable devices only — whether a stranger's headphones are "connectable" is not
   // a question this app has an answer worth showing.
+  /**
+   * The radar's contents: everything chat-capable in range, at its measured signal.
+   *
+   * `live` is what drives each blip's ripple, and it is a fact about the radio — heard
+   * from in the last few seconds — not a decorative loop.
+   */
+  const blips = useMemo(
+    () =>
+      chatRows.map(row => ({
+        key: row.device.linkId,
+        name: row.peer?.displayName ?? row.device.name ?? 'Someone',
+        rssi: row.device.rssi,
+        live: isLive(row.device.lastSeen),
+      })),
+    [chatRows],
+  );
+
   const notConnectable = chatRows.filter(r => r.device.isConnectable === false).length;
   const connectable = chatRows.length - notConnectable;
 
@@ -199,18 +258,6 @@ export function NearbyScreen({navigation}: RootTabScreenProps<'Nearby'>) {
       Alert.alert('Scanning', err instanceof Error ? err.message : String(err)),
     );
   }, [scanning]);
-
-  const cycleSort = useCallback(() => {
-    setSort(s =>
-      s === 'match'
-        ? 'signal'
-        : s === 'signal'
-        ? 'name'
-        : s === 'name'
-        ? 'recent'
-        : 'match',
-    );
-  }, []);
 
   const onConnectAll = useCallback(() => {
     const queued = bleChat.connectToEveryone();
@@ -270,149 +317,147 @@ export function NearbyScreen({navigation}: RootTabScreenProps<'Nearby'>) {
     );
   }, []);
 
+  /**
+   * The three figures that used to be a stat banner, as one line.
+   *
+   * They were never worth a card each: "3 peers · 3 connectable · 4 other devices
+   * hidden" says the same thing in a fifth of the height, and the count that matters is
+   * already the first thing on the line.
+   */
+  const subtitleTail = [
+    `${connectable} connectable`,
+    notConnectable > 0 ? `${notConnectable} not connectable` : null,
+    otherDevicesCount > 0
+      ? `${otherDevicesCount} other device${otherDevicesCount === 1 ? '' : 's'} hidden`
+      : null,
+  ]
+    .filter(Boolean)
+    .join(' · ');
+
   return (
-    <SafeAreaView style={styles.safe} edges={['top']}>
+    <Screen>
       <FlatList
         data={chatRows}
         keyExtractor={item => item.device.linkId}
         contentContainerStyle={styles.content}
+        refreshControl={
+          <RefreshControl
+            refreshing={rescanning}
+            onRefresh={onRescan}
+            tintColor={theme.accent}
+            colors={[theme.accent]}
+            progressBackgroundColor={theme.surface}
+          />
+        }
         ListHeaderComponent={
           <>
             <View style={styles.header}>
               <View style={styles.headerText}>
                 <AppText style={styles.title} numberOfLines={1}>
-                  Nearby Peers
+                  Nearby
                 </AppText>
                 <View style={styles.subtitleRow}>
-                  {scanning ? (
-                    <DenseText style={styles.subtitle} numberOfLines={1}>
-                      Scanning for{' '}
-                      <DenseText style={styles.subtitleAccent}>BLE</DenseText> devices...
+                  {/* The dot only lives while a scan does. A static one would look the
+                      same whether the radio is sweeping or wedged. */}
+                  <Pulse active={scanning}>
+                    <View
+                      style={[
+                        styles.subtitleDot,
+                        {backgroundColor: scanning ? theme.accent : theme.textFaint},
+                      ]}
+                    />
+                  </Pulse>
+                  <DenseText style={styles.subtitle} numberOfLines={1}>
+                    <DenseText style={styles.subtitleStrong}>
+                      {chatRows.length} peer{chatRows.length === 1 ? '' : 's'}
                     </DenseText>
-                  ) : (
-                    <DenseText style={styles.subtitle} numberOfLines={1}>
-                      {bluetoothState === 'PoweredOn'
-                        ? 'Scanner idle'
-                        : 'Bluetooth is ' + bluetoothState}
-                    </DenseText>
-                  )}
-                  {/* Purely decorative pulse, echoing the one on Home's scan chip — it
-                      does not encode a real value, only that a scan is in progress. */}
-                  {scanning && (
-                    <View style={styles.subtitleDots}>
-                      {[0, 1, 2].map(i => (
-                        <View
-                          key={i}
-                          style={[
-                            styles.subtitleDot,
-                            {backgroundColor: theme.accent, opacity: 1 - i * 0.3},
-                          ]}
-                        />
-                      ))}
-                    </View>
-                  )}
+                    {subtitleTail ? ` · ${subtitleTail}` : ''}
+                  </DenseText>
                 </View>
               </View>
               {/* Filled lavender chip rather than an outline, and purple rather than red
                   — this is a mode toggle (Scan/Stop), not a destructive action, so it
                   reads as the brand's own control language rather than a warning. */}
               <Touchable scale={false} onPress={toggleScan} style={styles.stopButton}>
-                <Icon name="stop" color={theme.tilePurpleFg} size={12} />
+                <Icon
+                  name={scanning ? 'stop' : 'radar'}
+                  color={theme.tilePurpleFg}
+                  size={scanning ? 12 : 14}
+                />
                 <DenseText style={styles.stopText}>
                   {scanning ? 'Stop' : 'Scan'}
                 </DenseText>
               </Touchable>
             </View>
 
-            <View style={styles.banner}>
-              <View style={styles.statRow}>
-                <BannerStat
-                  icon="bluetooth"
-                  value={chatRows.length}
-                  label="Devices found"
-                  fg={theme.tileBlueFg}
-                />
-                <View style={styles.statDivider} />
-                <BannerStat
-                  icon="link"
-                  value={connectable}
-                  label="Connectable"
-                  fg={theme.tileGreenFg}
-                />
-                <View style={styles.statDivider} />
-                <BannerStat
-                  icon="block"
-                  value={notConnectable}
-                  label="Not connectable"
-                  fg={theme.tilePurpleFg}
-                />
+            {/* Four sort modes, all visible. The old control was a single button that
+                cycled through them, so choosing one meant tapping until the right label
+                came up and there was no way to see what the others were. */}
+            <View style={styles.controls}>
+              <View style={styles.segmented}>
+                {SORTS.map(option => {
+                  const active = option.key === sort;
+                  return (
+                    <Touchable
+                      key={option.key}
+                      scale={false}
+                      onPress={() => setSort(option.key)}
+                      accessibilityLabel={`Sort by ${option.label}`}
+                      accessibilityState={{selected: active}}
+                      style={
+                        active ? [styles.segment, styles.segmentActive] : styles.segment
+                      }>
+                      <DenseText
+                        style={active ? styles.segmentTextActive : styles.segmentText}
+                        numberOfLines={1}
+                        maxFontSizeMultiplier={1}>
+                        {option.label}
+                      </DenseText>
+                    </Touchable>
+                  );
+                })}
               </View>
-            </View>
-
-            {/* One full-width action rather than a third control squeezed into the list
-                header — three competing items on one line is what made this look busy. */}
-            <Touchable scale={false} onPress={onConnectAll} style={styles.ctaCard}>
-              <View style={styles.ctaIconWrap}>
-                <Icon name="broadcast" color={theme.tilePurpleFg} size={24} />
-              </View>
-              <View style={styles.ctaText}>
-                <AppText style={styles.ctaTitle} numberOfLines={1}>
-                  Connect to everyone in range
-                </AppText>
-                <DenseText style={styles.ctaSubtitle} numberOfLines={1}>
-                  Start discovering and chatting instantly.
-                </DenseText>
-              </View>
-              <View style={styles.ctaButton}>
-                <Icon name="people" color={theme.tilePurpleFg} size={14} />
-                <DenseText style={styles.ctaButtonText}>Connect</DenseText>
-              </View>
-            </Touchable>
-
-            <View style={styles.listHeader}>
-              <AppText style={styles.listTitle}>Nearby devices</AppText>
-              <View style={styles.flex} />
               <Touchable
                 scale={false}
                 onPress={() => setVerifiedOnly(v => !v)}
+                accessibilityLabel="Show verified peers only"
+                accessibilityState={{selected: verifiedOnly}}
                 style={
                   verifiedOnly
-                    ? [styles.filterChip, styles.filterChipActive]
-                    : styles.filterChip
+                    ? [styles.filterButton, styles.filterButtonActive]
+                    : styles.filterButton
                 }>
                 <Icon
                   name="shield"
-                  color={verifiedOnly ? theme.tileGreenFg : theme.textDim}
-                  size={13}
+                  color={verifiedOnly ? theme.ok : theme.textDim}
+                  size={15}
                 />
-                <DenseText
-                  style={[
-                    styles.filterChipText,
-                    verifiedOnly && {color: theme.tileGreenFg},
-                  ]}
-                  numberOfLines={1}>
-                  Verified only
-                </DenseText>
-              </Touchable>
-              <Touchable scale={false} onPress={cycleSort} style={styles.sortButton}>
-                <Icon name="sort" color={theme.tilePurpleFg} size={13} />
-                <DenseText style={styles.sortText} numberOfLines={1}>
-                  {SORT_LABEL[sort]}
-                </DenseText>
               </Touchable>
             </View>
-            {otherDevicesCount > 0 && (
-              <DenseText style={styles.otherDevicesNote}>
-                +{otherDevicesCount} other Bluetooth device
-                {otherDevicesCount === 1 ? '' : 's'} nearby — not shown, nothing to chat
-                with there.
-              </DenseText>
-            )}
+
+            {/* The map, above the list. Not instead of it: the radar answers "who is
+                around and how close", the rows answer "what can I do about them". */}
+            {chatRows.length > 0 ? (
+              <DiscoveryRadar blips={blips} scanning={scanning} />
+            ) : null}
+
+            {/* Dashed, and one line. As a full promo card with an icon tile and two
+                lines of copy it read as an advertisement for a feature rather than a
+                thing you could tap. */}
+            {chatRows.length > 0 ? (
+              <Touchable scale={false} onPress={onConnectAll} style={styles.connectAll}>
+                <Icon name="broadcast" color={theme.textDim} size={15} />
+                <DenseText style={styles.connectAllText} numberOfLines={1}>
+                  Connect to all {chatRows.length} — dialled one at a time
+                </DenseText>
+                <DenseText style={styles.connectAllGo}>Go</DenseText>
+              </Touchable>
+            ) : null}
           </>
         }
         renderItem={({item, index}) => (
           <FadeIn index={index}>
-            <DeviceRow
+            <PeerCard
               device={item.device}
               cls={item.cls}
               peer={item.peer}
@@ -428,24 +473,16 @@ export function NearbyScreen({navigation}: RootTabScreenProps<'Nearby'>) {
         ListFooterComponent={
           recent.length > 0 ? (
             <View style={styles.recentBlock}>
-              <View style={styles.listHeader}>
-                <AppText style={styles.listGlyph} maxFontSizeMultiplier={1}>
-                  ◷
-                </AppText>
-                <AppText style={styles.listTitle}>Recently Connected</AppText>
+              <View style={styles.ruleHeader}>
+                <DenseText style={styles.ruleTitle}>RECENTLY CONNECTED</DenseText>
+                <View style={styles.rule} />
               </View>
-              <DenseText style={styles.recentHint}>
-                Not in range right now. They are dialled again automatically when they
-                come back.
-              </DenseText>
               {recent.map((peer, index) => (
                 <FadeIn key={peer.peerId!} index={index}>
                   <RecentRow
                     peer={peer}
-                    myInterests={myInterests}
                     onConnect={onConnect}
                     onOpenChat={onOpenChat}
-                    onBlock={onBlock}
                     onOpenProfile={setProfilePeerId}
                   />
                 </FadeIn>
@@ -455,7 +492,7 @@ export function NearbyScreen({navigation}: RootTabScreenProps<'Nearby'>) {
         }
         ListEmptyComponent={
           bluetoothState === 'PoweredOn' && scanning ? (
-            <RadarEmptyState />
+            <DiscoveryRadar blips={blips} scanning={scanning} />
           ) : (
             <EmptyState
               glyph={bluetoothState === 'PoweredOn' ? '◎' : '⃠'}
@@ -498,114 +535,36 @@ export function NearbyScreen({navigation}: RootTabScreenProps<'Nearby'>) {
             : undefined
         }
       />
-    </SafeAreaView>
+    </Screen>
   );
 }
 
 /**
- * The scanning empty state: a radar sweep rather than a plain icon-and-text block.
+ * The scanning empty state — the radar the pull gesture turns into.
  *
- * Only shown while a scan is actually running with Bluetooth on — the one state where
- * "still looking" is true and an animated illustration does not lie about what the app is
- * doing. Bluetooth-off and not-scanning fall back to the plain `EmptyState`, since a
- * pinging radar behind "turn Bluetooth on" would say the opposite of what is true. The
- * rings genuinely ping — this component is only ever mounted while `scanning` is true, so
- * `active` needs no prop of its own; it unmounts (and the animation stops) the moment
- * scanning does.
+ * Only shown while a scan is actually running with Bluetooth on: that is the one state
+ * where "still looking" is true and an animated illustration does not lie about what the
+ * app is doing. Bluetooth-off and not-scanning fall back to the plain `EmptyState`, since
+ * a sweeping radar behind "turn Bluetooth on" would say the opposite of what is true.
+ *
+ * With peers in range this is not an empty state at all — it is the map of them, which is
+ * why it also renders above the list.
  */
-function RadarEmptyState() {
+function DiscoveryRadar({
+  blips,
+  scanning,
+}: {
+  blips: React.ComponentProps<typeof Radar>['blips'];
+  scanning: boolean;
+}) {
   const styles = useStyles();
-  const theme = useTheme();
   return (
     <View style={styles.radarWrap}>
-      <View style={styles.radarRings}>
-        <View style={[styles.ring, styles.ring1]} />
-        <RadarPing active size={220} color={theme.tilePurpleFg} delay={0} />
-        <RadarPing active size={220} color={theme.tilePurpleFg} delay={600} />
-        <RadarPing active size={220} color={theme.tilePurpleFg} delay={1200} />
-        <GradientSurface
-          gradient={brandGradient(theme)}
-          radius={999}
-          style={styles.radarCore}>
-          <Icon name="bluetooth" color={theme.onAccent} size={22} />
-        </GradientSurface>
-        <View style={[styles.radarDot, {backgroundColor: theme.tileGreenFg, top: 18, left: 34}]} />
-        <View style={[styles.radarDot, {backgroundColor: theme.tileBlueFg, bottom: 30, right: 10}]} />
-        <View style={[styles.radarDot, {backgroundColor: theme.tilePurpleFg, bottom: 8, left: 6}]} />
-      </View>
-      <AppText style={styles.radarTitle}>Looking for devices</AppText>
-      <DenseText style={styles.radarDetail}>
-        Anything advertising in range will appear here.
-      </DenseText>
-      <View style={styles.featureRow}>
-        <FeaturePill icon="search" label="Scanning nearby" fg={theme.tileBlueFg} />
-        <FeaturePill icon="broadcast" label="Low energy" fg={theme.tileGreenFg} />
-        <FeaturePill icon="shield" label="Private & secure" fg={theme.tilePurpleFg} />
-      </View>
-    </View>
-  );
-}
-
-function FeaturePill({icon, label, fg}: {icon: IconName; label: string; fg: string}) {
-  const styles = useStyles();
-  return (
-    <View style={styles.featurePill}>
-      <Icon name={icon} color={fg} size={13} />
-      <DenseText style={styles.featurePillText} numberOfLines={1}>
-        {label}
-      </DenseText>
-    </View>
-  );
-}
-
-function BannerStat({
-  icon,
-  value,
-  label,
-  fg,
-}: {
-  icon: IconName;
-  value: number;
-  label: string;
-  fg: string;
-}) {
-  const styles = useStyles();
-  return (
-    <View style={styles.stat}>
-      <Icon name={icon} color={fg} size={18} />
-      <AppText style={styles.statValue}>{String(value)}</AppText>
-      <DenseText style={styles.statLabel} numberOfLines={1}>
-        {label}
-      </DenseText>
-    </View>
-  );
-}
-
-/**
- * "Visual cues like icons or colour changes to show if the device is connected,
- * connecting, or offline" — one small badge, reused everywhere a link state needs to be
- * named rather than guessed from a button's shape.
- */
-function ConnectionBadge({
-  icon,
-  label,
-  tone,
-  pulse,
-}: {
-  icon: IconName;
-  label: string;
-  tone: string;
-  /** Set only for a state that is genuinely still in progress — reconnecting, dialling. */
-  pulse?: boolean;
-}) {
-  const styles = useStyles();
-  return (
-    <View style={[styles.badge, {backgroundColor: tone + '1f'}]}>
-      <Pulse active={!!pulse}>
-        <Icon name={icon} color={tone} size={12} strokeWidth={2.2} />
-      </Pulse>
-      <DenseText style={[styles.badgeText, {color: tone}]} numberOfLines={1}>
-        {label}
+      <Radar size={260} blips={blips} scanning={scanning} />
+      <DenseText style={styles.radarCaption}>
+        {blips.length === 0
+          ? 'Anything advertising in range will appear here.'
+          : 'Distance from centre is measured RSSI — nothing is placed for looks.'}
       </DenseText>
     </View>
   );
@@ -624,14 +583,21 @@ function FavoriteStar({peerId}: {peerId: string}) {
       accessibilityLabel={isFavorite ? 'Remove from favorites' : 'Add to favorites'}>
       <Icon
         name={isFavorite ? 'starFilled' : 'star'}
-        color={isFavorite ? theme.tileAmberFg : theme.textDim}
+        color={isFavorite ? theme.tileAmberFg : theme.textFaint}
         size={14}
       />
     </Touchable>
   );
 }
 
-function DeviceRow({
+/**
+ * One person, in three bands: who they are, why they are worth your time, and what you
+ * can do about it.
+ *
+ * The action band is always last and always the same height, so the button you want does
+ * not move between a peer with four shared interests and one with none.
+ */
+function PeerCard({
   device,
   cls,
   peer,
@@ -655,669 +621,525 @@ function DeviceRow({
   const styles = useStyles();
   const theme = useTheme();
 
-  const tone = toneColor(kindTone(cls.kind), theme);
-  const isChat = cls.kind === 'chat';
   const connected = peer?.state === 'connected';
   const reconnecting = peer?.state === 'reconnecting' || (peer?.reconnectAttempt ?? 0) > 0;
+  const connecting = peer !== null && isConnecting(peer.state);
+  const traffic = useLinkTraffic(peer);
   const busy =
     peer !== null &&
     peer.state !== 'connected' &&
     peer.state !== 'disconnected' &&
     peer.state !== 'failed' &&
     peer.state !== 'discovering';
+  const failed = !connected && !busy && !reconnecting && !!peer?.failure;
+  const unconnectable = device.isConnectable === false;
+
+  const name = peer?.displayName ?? device.name ?? 'Someone nearby';
+
+  /**
+   * One line, not four badges.
+   *
+   * State, quality, MTU and signal were a pill, a pill, a fragment and a number spread
+   * across two columns. Every one of them is still here — they are just facts about the
+   * same link, so they read as one sentence about it.
+   */
+  const meta = failed
+    ? describeFailure(peer!.failure!)
+    : [
+        connected
+          ? traffic.active
+            ? trafficLabel(traffic)
+            : 'Connected'
+          : connecting
+          ? stageCaption(peer!.state)
+          : reconnecting
+          ? `Reconnecting ${peer!.reconnectAttempt}/${RECONNECT_MAX_ATTEMPTS}`
+          : busy
+          ? LINK_STATE_LABELS[peer!.state]
+          : unconnectable
+          ? 'Not connectable'
+          : 'Available',
+        connected ? qualityLabel(peer?.metrics?.quality ?? null) : null,
+        connected && peer?.gatt ? `MTU ${peer.gatt.mtu}` : null,
+        device.rssi !== null ? `${device.rssi} dBm` : null,
+        connected ? null : `seen ${relativeTime(device.lastSeen)}`,
+      ]
+        .filter(Boolean)
+        .join(' · ');
+
+  const shared = peer ? sharedInterests(myInterests, peer.interests) : [];
+  const rest = (peer?.interests ?? []).filter(
+    i => !shared.some(s => s.toLowerCase() === i.toLowerCase()),
+  );
 
   return (
-    <View style={[styles.row, isChat && styles.rowChat]}>
-      {/* A known identity only — blocking a device we have never handshaken with would
-          block nothing real, since there is no proven peerId to refuse yet. */}
-      {isChat && peer?.peerId && (
-        <Touchable
-          scale={false}
-          onPress={() =>
-            onBlock(peer.peerId!, peer.displayName ?? device.name ?? 'this device')
-          }
-          hitSlop={10}
-          style={styles.blockCorner}
-          accessibilityLabel="Block">
-          <Icon name="block" color={theme.textDim} size={14} />
-        </Touchable>
-      )}
-
-      {/* The avatar doubles as the entry point to the profile card — a tap target that
-          does not compete with the row's per-state action buttons on the other side. */}
-      {isChat && peer?.peerId ? (
-        <Touchable
-          scale={false}
-          onPress={() => onOpenProfile(peer.peerId!)}
-          style={[styles.avatar, {backgroundColor: tone + '1f'}]}
-          accessibilityLabel="View profile">
-          <AppText style={[styles.avatarGlyph, {color: tone}]} maxFontSizeMultiplier={1}>
-            {cls.glyph}
-          </AppText>
-        </Touchable>
-      ) : (
-        <View style={[styles.avatar, {backgroundColor: tone + '1f'}]}>
-          <AppText style={[styles.avatarGlyph, {color: tone}]} maxFontSizeMultiplier={1}>
-            {cls.glyph}
-          </AppText>
-        </View>
-      )}
-
-      <View style={styles.rowBody}>
-        <View style={styles.nameRow}>
-          <AppText style={[styles.deviceName, styles.nameText]} numberOfLines={1}>
-            {/* A person, if we know one. Never a hex address. */}
-            {isChat
-              ? peer?.displayName ?? device.name ?? 'Someone nearby'
-              : device.name ?? 'Unknown Device'}
-          </AppText>
-          {/* Every handshake is authenticated or the link never reaches "connected" —
-              this is not a claim beyond what the crypto already proved, just making that
-              proof visible rather than silent. */}
-          {peer?.authenticated && (
-            <Icon name="shield" color={theme.tileGreenFg} size={13} strokeWidth={2} />
+    <View style={failed ? [styles.card, styles.cardFailed] : styles.card}>
+      {/* ---- who ---- */}
+      <View style={styles.cardHead}>
+        <Ringed
+          state={peer?.state ?? null}
+          trafficActive={traffic.active}
+          uptimeMs={peer?.metrics?.currentUptimeMs ?? 0}>
+          {peer?.peerId ? (
+            <Touchable
+              scale={false}
+              onPress={() => onOpenProfile(peer.peerId!)}
+              accessibilityLabel={`View ${name}'s profile`}>
+              <InitialAvatar
+                name={name}
+                seed={peer.peerId}
+                size={44}
+                online={connected ? true : undefined}
+                bg={failed ? theme.error + '1f' : undefined}
+                fg={failed ? theme.error : undefined}
+              />
+            </Touchable>
+          ) : (
+            <InitialAvatar
+              name={name}
+              seed={device.linkId}
+              size={44}
+              bg={failed ? theme.error + '1f' : undefined}
+              fg={failed ? theme.error : undefined}
+            />
           )}
-          {isChat && peer?.peerId && <FavoriteStar peerId={peer.peerId} />}
-        </View>
+        </Ringed>
 
-        {isChat ? (
-          <InterestTags
-            interests={peer?.interests ?? []}
-            mine={myInterests}
-            placeholder={
-              peer?.peerId
-                ? 'No interests shared'
-                : 'No interests advertised'
-            }
-          />
-        ) : (
-          // A sensor or a pair of earbuds has no name to introduce itself with, so its
-          // address is the only identifier there is — and it is genuinely useful there.
-          <View style={styles.idRow}>
-            <View style={styles.bleBadge}>
-              <DenseText style={styles.bleBadgeText}>BLE</DenseText>
-            </View>
-            <DenseText style={styles.deviceId} numberOfLines={1}>
-              {device.address}
-            </DenseText>
+        <View style={styles.cardHeadBody}>
+          <View style={styles.nameRow}>
+            <AppText style={styles.name} numberOfLines={1}>
+              {name}
+            </AppText>
+            {/* Every handshake is authenticated or the link never reaches "connected" —
+                this is not a claim beyond what the crypto already proved. */}
+            {peer?.authenticated ? (
+              <Icon name="shield" color={theme.ok} size={13} strokeWidth={2} />
+            ) : null}
+            {peer?.peerId ? <FavoriteStar peerId={peer.peerId} /> : null}
+            {failed ? (
+              <View style={[styles.statePill, {backgroundColor: theme.error + '1f'}]}>
+                <DenseText
+                  style={[styles.statePillText, {color: theme.error}]}
+                  maxFontSizeMultiplier={1}>
+                  FAILED
+                </DenseText>
+              </View>
+            ) : null}
+            <View style={styles.grow} />
+            {!failed ? <SignalBars rssi={device.rssi} size="sm" /> : null}
           </View>
-        )}
-
-        <DenseText style={styles.category} numberOfLines={1}>
-          {describeClass(cls) + '   ·   Last seen ' + relativeTime(device.lastSeen)}
-        </DenseText>
-
-        {/*
-          "Connected" on its own does not distinguish a link carrying messages instantly
-          from one limping at the edge of range — and the second is what explains a slow
-          message. Every value here is measured, and the score is withheld entirely until
-          there is enough evidence for it to mean anything.
-        */}
-        {connected && peer && (
-          <View style={styles.healthRow}>
-            <QualityBadge score={peer.metrics?.quality ?? null} />
-            <DenseText style={styles.health} numberOfLines={1}>
-              {[
-                peer.gatt ? `MTU ${peer.gatt.mtu}` : null,
-                peer.rssi !== null ? `${peer.rssi} dBm` : null,
-              ]
-                .filter(Boolean)
-                .join('   ·   ')}
-            </DenseText>
-          </View>
-        )}
-      </View>
-
-      <View style={styles.rowRight}>
-        <View style={styles.rssiRow}>
-          <SignalBars rssi={device.rssi} size="sm" />
-          <DenseText style={styles.rssiText}>
-            {device.rssi !== null ? device.rssi + ' dBm' : '—'}
+          <DenseText
+            style={failed ? [styles.meta, {color: theme.error}] : styles.meta}
+            numberOfLines={2}>
+            {meta}
           </DenseText>
         </View>
+      </View>
 
-        {device.isConnectable === false ? (
-          <ConnectionBadge icon="block" label="Not connectable" tone={theme.textDim} />
-        ) : !isChat ? (
-          // Honest: reachable over BLE, but it does not speak our protocol, so offering
-          // "Connect" would start a handshake that can never succeed.
-          <View style={styles.notChat}>
-            <DenseText style={styles.notChatText} numberOfLines={2}>
-              Not a BLE Chat device
+      {/* The five stages, named. The ring says how far; this says which — and the name
+          is the only part a bug report can use. */}
+      {connecting ? <StageChecklist state={peer!.state} /> : null}
+
+      {/* What is actually on the link, for the last few seconds. Rendered only while
+          connected: on any other state there is no link to have traffic on. */}
+      {connected && traffic.history.some(v => v > 0) ? (
+        <ByteSparkline traffic={traffic} />
+      ) : null}
+
+      {/* ---- why ---- */}
+      {!failed && !connecting && (shared.length > 0 || rest.length > 0) ? (
+        <View style={styles.interests}>
+          {shared.map(interest => (
+            <View key={interest} style={styles.chipShared}>
+              <DenseText style={styles.chipSharedText} maxFontSizeMultiplier={1}>
+                {interest}
+              </DenseText>
+            </View>
+          ))}
+          {shared.length > 0 ? (
+            <DenseText style={styles.sharedCount} maxFontSizeMultiplier={1}>
+              {shared.length} shared
+            </DenseText>
+          ) : null}
+          {rest.map(interest => (
+            <View key={interest} style={styles.chip}>
+              <DenseText style={styles.chipText} maxFontSizeMultiplier={1}>
+                {interest}
+              </DenseText>
+            </View>
+          ))}
+        </View>
+      ) : null}
+
+      {/* ---- what you can do ---- */}
+      <View style={styles.actions}>
+        {unconnectable ? (
+          <View style={[styles.actionPrimary, styles.actionDisabled]}>
+            <DenseText style={styles.actionDisabledText} numberOfLines={1}>
+              {cls.kind === 'chat' ? 'Not connectable' : 'Not a BLE Chat device'}
             </DenseText>
           </View>
         ) : connected && peer ? (
-          <View style={styles.stack}>
-            <ConnectionBadge icon="link" label="Connected" tone={theme.tileGreenFg} />
-            <Touchable
-              scale={false}
-              onPress={() => onOpenChat(peer)}
-              style={styles.connectFilled}>
-              <DenseText style={styles.connectFilledText}>Open chat</DenseText>
-            </Touchable>
-          </View>
-        ) : reconnecting && peer ? (
-          // Still being worked on. Showing "disconnected" here would read as a dead end
-          // when the app is mid-retry.
-          <View style={styles.stack}>
-            <ConnectionBadge
-              icon="clock"
-              label={`Reconnecting ${peer.reconnectAttempt}/${RECONNECT_MAX_ATTEMPTS}`}
-              tone={theme.tileAmberFg}
-              pulse
-            />
-            <Touchable
-              scale={false}
-              onPress={() => onCancel(device.linkId)}
-              style={styles.cancelButton}>
-              <DenseText style={styles.cancelText}>Cancel</DenseText>
-            </Touchable>
-          </View>
-        ) : busy && peer ? (
+          <Touchable
+            scale={false}
+            onPress={() => onOpenChat(peer)}
+            style={[styles.actionPrimary, styles.actionFilled]}>
+            <Icon name="chatBubble" color={theme.onAccent} size={14} />
+            <DenseText style={styles.actionFilledText}>Open chat</DenseText>
+          </Touchable>
+        ) : busy || reconnecting ? (
           // Every attempt gets a way out. Tapping Connect by accident should not commit
           // the phone to a full timeout plus the whole retry budget.
-          <View style={styles.stack}>
-            <ConnectionBadge
-              icon="clock"
-              label={LINK_STATE_LABELS[peer.state]}
-              tone={theme.tileAmberFg}
-              pulse
-            />
-            <Touchable
-              scale={false}
-              onPress={() => onCancel(device.linkId)}
-              style={styles.cancelButton}>
-              <DenseText style={styles.cancelText}>Cancel</DenseText>
-            </Touchable>
-          </View>
-        ) : peer?.failure ? (
-          // The reason, not just "failed" — "Peer is not running the chat service" and
-          // "Bluetooth is turned off" call for completely different actions.
-          <View style={styles.stack}>
-            <ConnectionBadge icon="alert" label="Failed" tone={theme.error} />
-            <DenseText style={styles.failureText} numberOfLines={3}>
-              {describeFailure(peer.failure)}
-            </DenseText>
+          <Touchable
+            scale={false}
+            onPress={() => onCancel(device.linkId)}
+            style={[styles.actionPrimary, styles.actionOutlineNeutral]}>
+            <DenseText style={styles.actionOutlineNeutralText}>Cancel</DenseText>
+          </Touchable>
+        ) : failed ? (
+          <>
             <Touchable
               scale={false}
               onPress={() => onConnect(device.linkId)}
-              style={styles.connectOutline}>
-              <DenseText style={styles.connectOutlineText}>Retry</DenseText>
+              style={[styles.actionPrimary, styles.actionOutlineNeutral]}>
+              <DenseText style={styles.actionOutlineNeutralText}>Retry</DenseText>
             </Touchable>
-          </View>
+            <Touchable
+              scale={false}
+              onPress={() =>
+                Alert.alert('Why did this fail?', describeFailure(peer!.failure!))
+              }
+              style={[styles.actionPrimary, styles.actionPlain]}>
+              <DenseText style={styles.actionPlainText} numberOfLines={1}>
+                Why did this fail?
+              </DenseText>
+            </Touchable>
+          </>
         ) : (
-          <View style={styles.stack}>
-            <ConnectionBadge icon="target" label="Available" tone={theme.tileBlueFg} />
+          <Touchable
+            scale={false}
+            onPress={() => onConnect(device.linkId)}
+            style={[styles.actionPrimary, styles.actionOutline]}>
+            <Icon name="link" color={theme.accent} size={14} />
+            <DenseText style={styles.actionOutlineText}>Connect</DenseText>
+          </Touchable>
+        )}
+
+        {/* A known identity only — blocking a device we have never handshaken with would
+            block nothing real, since there is no proven peerId to refuse yet. */}
+        {!failed && peer?.peerId ? (
+          <>
             <Touchable
               scale={false}
-              onPress={() => onConnect(device.linkId)}
-              style={styles.connectOutline}>
-              <DenseText style={styles.connectOutlineText}>Connect</DenseText>
+              onPress={() => onOpenProfile(peer.peerId!)}
+              style={styles.actionIcon}
+              accessibilityLabel="View profile">
+              <Icon name="device" color={theme.textDim} size={15} />
             </Touchable>
-          </View>
-        )}
+            <Touchable
+              scale={false}
+              onPress={() => onBlock(peer.peerId!, name)}
+              style={styles.actionIcon}
+              accessibilityLabel="Block">
+              <Icon name="block" color={theme.textDim} size={15} />
+            </Touchable>
+          </>
+        ) : null}
       </View>
     </View>
   );
 }
 
 /**
+ * Whatever ring the link has earned, if any.
+ *
+ * Four states, four different things worth saying: mid-connect it is a five-segment
+ * progress ring, just-connected it is those segments closed into one with a tick,
+ * live-and-carrying-bytes it is an expanding traffic ring, and live-and-idle it is
+ * nothing at all. That last one is the important case — a still avatar means
+ * a healthy link with nothing on it, which is a different thing from a link in trouble,
+ * and a ring that always pulsed could not tell them apart.
+ */
+function Ringed({
+  state,
+  trafficActive,
+  uptimeMs,
+  children,
+}: {
+  state: LinkState | null;
+  trafficActive: boolean;
+  /** How long this link has been up, from the transport's own metrics. */
+  uptimeMs: number;
+  children: React.ReactNode;
+}) {
+  // Every branch occupies the same box. Letting the ring add its own width would move
+  // the name and the meta line sideways the moment a connection started, which is the
+  // one place in this card where nothing has actually changed about the text.
+  const body =
+    state !== null && isConnecting(state) ? (
+      <ConnectRing size={44} state={state}>
+        {children}
+      </ConnectRing>
+    ) : // The five segments closing into one. Held on the link's real uptime rather than
+    // a timer of our own, so the completion mark cannot outlive the link it marks.
+    state === 'connected' && uptimeMs > 0 && uptimeMs < 2500 ? (
+      <ConnectedRing size={44}>{children}</ConnectedRing>
+    ) : state === 'connected' ? (
+      <TrafficRing size={54} active={trafficActive}>
+        {children}
+      </TrafficRing>
+    ) : (
+      children
+    );
+
+  return <View style={{width: 54, height: 54, alignItems: 'center', justifyContent: 'center'}}>{body}</View>;
+}
+
+/**
  * A peer we know but cannot see this second.
  *
- * Deliberately plainer than a live row: there is no signal to show and no state to watch,
- * only who they are, what you had in common, and when they were last around.
+ * Deliberately plainer than a live card: there is no signal to show and no state to
+ * watch, only who they are and when they were last around. Giving it the full three-band
+ * treatment would make an unreachable person look as actionable as a present one.
  */
 function RecentRow({
   peer,
-  myInterests,
   onConnect,
   onOpenChat,
-  onBlock,
   onOpenProfile,
 }: {
   peer: Peer;
-  myInterests: string[];
   onConnect: (linkId: string) => void;
   onOpenChat: (peer: Peer) => void;
-  onBlock: (peerId: string, name: string) => void;
   onOpenProfile: (peerId: string) => void;
 }) {
   const styles = useStyles();
   const theme = useTheme();
   return (
-    <View style={styles.row}>
-      {peer.peerId && (
-        <Touchable
-          scale={false}
-          onPress={() => onBlock(peer.peerId!, peer.displayName ?? 'this person')}
-          hitSlop={10}
-          style={styles.blockCorner}
-          accessibilityLabel="Block">
-          <Icon name="block" color={theme.textDim} size={14} />
-        </Touchable>
-      )}
-      {peer.peerId ? (
-        <Touchable
-          scale={false}
-          onPress={() => onOpenProfile(peer.peerId!)}
-          style={[styles.avatar, styles.recentAvatar]}
-          accessibilityLabel="View profile">
-          <AppText style={styles.avatarGlyph} maxFontSizeMultiplier={1}>
-            ◍
-          </AppText>
-        </Touchable>
-      ) : (
-        <View style={[styles.avatar, styles.recentAvatar]}>
-          <AppText style={styles.avatarGlyph} maxFontSizeMultiplier={1}>
-            ◍
-          </AppText>
-        </View>
-      )}
-      <View style={styles.rowBody}>
-        <View style={styles.nameRow}>
-          <AppText style={[styles.deviceName, styles.nameText]} numberOfLines={1}>
-            {peer.displayName ?? 'Someone you have met'}
-          </AppText>
-          {peer.authenticated && (
-            <Icon name="shield" color={theme.tileGreenFg} size={13} strokeWidth={2} />
-          )}
-          {peer.peerId && <FavoriteStar peerId={peer.peerId} />}
-        </View>
-        <InterestTags
-          interests={peer.interests}
-          mine={myInterests}
-          placeholder="No interests shared"
+    <Touchable
+      scale={false}
+      onPress={() => (peer.linkId ? onConnect(peer.linkId) : onOpenChat(peer))}
+      style={styles.recentRow}>
+      <Touchable
+        scale={false}
+        onPress={() => (peer.peerId ? onOpenProfile(peer.peerId) : undefined)}
+        accessibilityLabel="View profile">
+        <InitialAvatar
+          name={peer.displayName}
+          seed={peer.peerId ?? ''}
+          size={38}
+          bg={theme.surfaceAlt}
+          fg={theme.textFaint}
         />
-        <DenseText style={styles.category} numberOfLines={1}>
-          {'Last seen ' + relativeTime(peer.lastSeen)}
+      </Touchable>
+      <View style={styles.grow}>
+        <AppText style={styles.recentName} numberOfLines={1}>
+          {peer.displayName ?? 'Someone you have met'}
+        </AppText>
+        <DenseText style={styles.recentMeta} numberOfLines={1}>
+          Not in range · seen {relativeTime(peer.lastSeen)} · redialled automatically
         </DenseText>
       </View>
-      <View style={styles.rowRight}>
-        <Touchable
-          scale={false}
-          onPress={() => (peer.linkId ? onConnect(peer.linkId) : onOpenChat(peer))}
-          style={styles.connectOutline}>
-          <DenseText style={styles.connectOutlineText}>
-            {peer.linkId ? 'Connect' : 'Open chat'}
-          </DenseText>
-        </Touchable>
-      </View>
-    </View>
+      <DenseText style={styles.recentAction}>
+        {peer.linkId ? 'Connect' : 'Chat'}
+      </DenseText>
+    </Touchable>
   );
-}
-
-/** Shared interests first and highlighted; the rest as quiet context. */
-function InterestTags({
-  interests,
-  mine,
-  placeholder,
-}: {
-  interests: string[];
-  mine: string[];
-  placeholder: string;
-}) {
-  const styles = useStyles();
-  if (interests.length === 0) {
-    return <DenseText style={styles.tagPlaceholder}>{placeholder}</DenseText>;
-  }
-  const shared = sharedInterests(mine, interests);
-  const rest = interests.filter(
-    i => !shared.some(s => s.toLowerCase() === i.toLowerCase()),
-  );
-  return (
-    <View style={styles.tagRow}>
-      {/* maxFontSizeMultiplier=1: a short badge label like this has no slack between the
-          text's un-scaled auto-measured width and the pill's rounded edge — any
-          accessibility scaling here is exactly what clips a trailing character with no
-          ellipsis. */}
-      {shared.map(interest => (
-        <View key={interest} style={[styles.tag, styles.tagShared]}>
-          <DenseText
-            style={[styles.tagText, styles.tagTextShared]}
-            maxFontSizeMultiplier={1}>
-            {interest}
-          </DenseText>
-        </View>
-      ))}
-      {rest.map(interest => (
-        <View key={interest} style={styles.tag}>
-          <DenseText style={styles.tagText} maxFontSizeMultiplier={1}>
-            {interest}
-          </DenseText>
-        </View>
-      ))}
-    </View>
-  );
-}
-
-function toneColor(tone: ReturnType<typeof kindTone>, t: Theme): string {
-  switch (tone) {
-    case 'accent':
-      return t.accent;
-    case 'ok':
-      return t.ok;
-    case 'purple':
-      return t.purple;
-    case 'amber':
-      return t.amber;
-    default:
-      return t.neutral;
-  }
 }
 
 const useStyles = makeStyles(t => ({
-  safe: {flex: 1, backgroundColor: t.bg},
-  content: {padding: spacing.lg, paddingBottom: spacing.xl},
-  flex: {flex: 1},
+  content: {padding: spacing.lg + 4, paddingBottom: spacing.xl},
+  grow: {flex: 1},
 
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.md,
-    marginBottom: spacing.lg,
-  },
+  // ---- header ------------------------------------------------------------
+  header: {flexDirection: 'row', alignItems: 'center', gap: spacing.md},
   headerText: {flex: 1},
-  title: {...typography.display, color: t.text},
-  subtitleRow: {flexDirection: 'row', alignItems: 'center', gap: spacing.xs, marginTop: 2},
-  subtitle: {...typography.caption, color: t.textDim},
-  subtitleAccent: {color: t.accent, fontWeight: '700'},
-  subtitleDots: {flexDirection: 'row', gap: 3},
-  subtitleDot: {width: 4, height: 4, borderRadius: 2},
-  // Filled lavender rather than outlined — a mode toggle, in the brand's own colour.
+  title: {fontSize: 26, fontWeight: '800', letterSpacing: -0.6, color: t.text},
+  subtitleRow: {flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 3},
+  subtitleDot: {width: 6, height: 6, borderRadius: 3},
+  subtitle: {...typography.caption, color: t.textDim, flex: 1},
+  subtitleStrong: {color: t.text, fontWeight: '700'},
   stopButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: spacing.sm,
+    gap: 7,
     backgroundColor: t.tilePurple,
     borderRadius: radius.pill,
-    paddingVertical: spacing.sm,
-    paddingHorizontal: spacing.md,
+    paddingVertical: 8,
+    paddingHorizontal: 13,
   },
   stopText: {...typography.callout, color: t.tilePurpleFg, fontWeight: '700'},
 
-  // A plain surface rather than a tinted panel. A coloured block at the top of a list
-  // reads as a promotion; this is status, and status should be quiet.
-  banner: {
+  // ---- sort --------------------------------------------------------------
+  controls: {flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 14},
+  segmented: {
+    flex: 1,
+    flexDirection: 'row',
+    gap: 2,
+    backgroundColor: t.surfaceAlt,
+    borderRadius: 12,
+    padding: 3,
+  },
+  segment: {flex: 1, alignItems: 'center', paddingVertical: 7, borderRadius: 9},
+  // A raised chip, not a tint: the selected segment should look like it is on top of the
+  // track rather than a differently-coloured part of it.
+  segmentActive: {
     backgroundColor: t.surface,
+    shadowColor: '#000',
+    shadowOpacity: t.isDark ? 0.3 : 0.08,
+    shadowRadius: 2,
+    shadowOffset: {width: 0, height: 1},
+    elevation: 1,
+  },
+  segmentText: {...typography.caption, color: t.textDim, fontWeight: '600'},
+  segmentTextActive: {...typography.caption, color: t.text, fontWeight: '700'},
+  filterButton: {
+    width: 34,
+    height: 34,
+    borderRadius: 11,
     borderWidth: 1,
     borderColor: t.border,
-    borderRadius: radius.lg,
-    padding: spacing.lg,
-    marginBottom: spacing.lg,
-  },
-
-  statRow: {flexDirection: 'row', alignItems: 'center'},
-  stat: {flex: 1, alignItems: 'center', gap: 6},
-  statValue: {...typography.numeric, fontSize: 19, color: t.text},
-  statLabel: {...typography.caption, color: t.textDim, textAlign: 'center'},
-  statDivider: {width: 1, height: 40, backgroundColor: t.border},
-
-  listHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.sm,
-    marginBottom: spacing.md,
-  },
-  listGlyph: {color: t.textDim, fontSize: 12},
-  listTitle: {...typography.overline, color: t.textDim},
-  otherDevicesNote: {
-    ...typography.caption,
-    color: t.textDim,
-    fontSize: 11,
-    marginTop: -spacing.xs,
-    marginBottom: spacing.md,
-  },
-  sortButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.xs,
-    borderWidth: 1,
-    borderColor: t.border,
-    borderRadius: radius.pill,
-    paddingHorizontal: spacing.md,
-    paddingVertical: 4,
-  },
-  sortGlyph: {color: t.textDim, fontSize: 13},
-  sortText: {...typography.caption, color: t.textDim},
-  filterChip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.xs,
-    borderWidth: 1,
-    borderColor: t.border,
-    borderRadius: radius.pill,
-    paddingHorizontal: spacing.sm + 2,
-    paddingVertical: 4,
-  },
-  filterChipActive: {backgroundColor: t.tileGreen, borderColor: t.tileGreenFg + '55'},
-  filterChipText: {...typography.caption, color: t.textDim},
-
-  row: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.md,
     backgroundColor: t.surface,
-    borderWidth: 1,
-    borderColor: t.border,
-    borderRadius: radius.lg,
-    padding: spacing.md,
-    marginBottom: spacing.md,
-    overflow: 'hidden',
-  },
-  // Top-right corner, out of the way of every state-dependent layout `rowRight` already
-  // has to juggle — a block affordance earns a fixed spot, not another branch in that
-  // conditional.
-  blockCorner: {
-    position: 'absolute',
-    top: spacing.sm,
-    right: spacing.sm,
-    padding: 4,
-    zIndex: 1,
-  },
-  // A chat peer is distinguished by a slightly brighter border, not by a coloured
-  // stripe down the side. The stripe was the loudest element in a list whose whole job
-  // is to be scanned quickly.
-  rowChat: {borderColor: t.accent + '44'},
-  avatar: {
-    width: 46,
-    height: 46,
-    borderRadius: 23,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  // A default colour, overridden inline per row: without one, a plain RN Text falls
-  // back to the platform default (black), which is close to invisible on the dark
-  // surfaceAlt background the "recently connected" avatar uses.
-  avatarGlyph: {fontSize: 20, color: t.textDim},
-  rowBody: {flex: 1, minWidth: 0},
+  filterButtonActive: {borderColor: t.ok, backgroundColor: t.tileGreen},
+
+  connectAll: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    backgroundColor: t.surface,
+    borderWidth: 1,
+    borderStyle: 'dashed',
+    borderColor: t.textFaint + '77',
+    borderRadius: 14,
+    paddingHorizontal: 13,
+    paddingVertical: 11,
+    marginTop: 14,
+    marginBottom: 14,
+  },
+  connectAllText: {...typography.callout, color: t.text, fontWeight: '600', flex: 1},
+  connectAllGo: {...typography.callout, color: t.accent, fontWeight: '700'},
+
+  // ---- peer card ---------------------------------------------------------
+  card: {
+    backgroundColor: t.surface,
+    borderWidth: 1,
+    borderColor: t.border,
+    borderRadius: 20,
+    padding: 14,
+    marginBottom: 10,
+    shadowColor: '#000',
+    shadowOpacity: t.isDark ? 0.2 : 0.05,
+    shadowRadius: 3,
+    shadowOffset: {width: 0, height: 1},
+    elevation: 1,
+  },
+  cardFailed: {borderColor: t.error + '55'},
+  cardHead: {flexDirection: 'row', alignItems: 'center', gap: spacing.md},
+  cardHeadBody: {flex: 1, minWidth: 0},
   nameRow: {flexDirection: 'row', alignItems: 'center', gap: 5},
-  deviceName: {color: t.text, fontSize: 16, fontWeight: '700'},
-  nameText: {flexShrink: 1},
-  idRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.sm,
-    marginTop: 3,
-  },
-  bleBadge: {
-    backgroundColor: t.accentSoft,
-    borderRadius: 4,
-    paddingHorizontal: 5,
-    paddingVertical: 1,
-  },
-  bleBadgeText: {color: t.accent, fontSize: 10, fontWeight: '800'},
+  name: {fontSize: 16, fontWeight: '700', color: t.text, flexShrink: 1},
+  statePill: {borderRadius: radius.pill, paddingHorizontal: 8, paddingVertical: 2},
+  statePillText: {fontSize: 10, fontWeight: '800', letterSpacing: 0.4},
+  meta: {...typography.caption, color: t.textDim, fontSize: 11, marginTop: 3},
 
-  // The "connect to everyone" action as a small promo card rather than a plain button —
-  // it is the one action on this screen that acts on every row at once, which is worth
-  // more visual weight than a row-level Connect.
-  ctaCard: {
+  interests: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: spacing.md,
-    backgroundColor: t.glow,
-    borderRadius: radius.lg,
-    padding: spacing.md,
-    marginBottom: spacing.lg,
-  },
-  ctaIconWrap: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: t.surface,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  ctaText: {flex: 1},
-  ctaTitle: {...typography.headline, color: t.text},
-  ctaSubtitle: {...typography.caption, color: t.textDim, marginTop: 2},
-  ctaButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    backgroundColor: t.surface,
-    borderRadius: radius.pill,
-    paddingHorizontal: spacing.md,
-    paddingVertical: 8,
-  },
-  ctaButtonText: {...typography.callout, color: t.tilePurpleFg, fontWeight: '700'},
-
-  stack: {alignItems: 'flex-end', gap: spacing.xs},
-  recentBlock: {marginTop: spacing.lg},
-  recentHint: {
-    color: t.textDim,
-    fontSize: 11,
-    marginBottom: spacing.sm,
-    paddingHorizontal: spacing.xs,
-  },
-  recentAvatar: {backgroundColor: t.surfaceAlt},
-  cancelButton: {
-    borderWidth: 1,
-    borderColor: t.border,
-    borderRadius: radius.md,
-    paddingHorizontal: spacing.md,
-    paddingVertical: 4,
-  },
-  cancelText: {color: t.textDim, fontSize: 12},
-  failureText: {
-    color: t.error,
-    fontSize: 11,
-    textAlign: 'right',
-    maxWidth: 130,
-  },
-  healthRow: {flexDirection: 'row', alignItems: 'center', gap: spacing.xs, marginTop: 4},
-  health: {color: t.ok, fontSize: 11},
-  tagRow: {
-    flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: spacing.xs,
-    marginTop: spacing.xs,
+    gap: 5,
+    marginTop: 11,
   },
-  // flexShrink: 0 — this sits in a flexWrap row; without it, a flex layout is allowed to
-  // squeeze a chip narrower than its text needs before it wraps to the next line, which
-  // can clip the last character or two with no ellipsis to show for it.
-  tag: {
+  // flexShrink: 0 — in a wrapping row a flex layout may squeeze a chip narrower than its
+  // text needs before wrapping it, which clips the last character with no ellipsis.
+  chipShared: {
+    backgroundColor: t.accentSoft,
     borderWidth: 1,
-    borderColor: t.border,
-    borderRadius: radius.xl,
-    paddingHorizontal: spacing.sm,
-    paddingVertical: 2,
+    borderColor: t.accent + '33',
+    borderRadius: radius.pill,
+    paddingHorizontal: 9,
+    paddingVertical: 3,
     flexShrink: 0,
   },
-  tagShared: {backgroundColor: t.accentSoft, borderColor: t.accent},
-  tagText: {color: t.textDim, fontSize: 11},
-  tagTextShared: {color: t.accent, fontWeight: '700'},
-  tagPlaceholder: {color: t.textDim, fontSize: 11, marginTop: spacing.xs},
-  deviceId: {
-    color: t.textDim,
-    fontSize: 11,
-    fontFamily: 'monospace',
-    flexShrink: 1,
+  chipSharedText: {fontSize: 11, fontWeight: '700', color: t.accent},
+  sharedCount: {fontSize: 11, fontWeight: '600', color: t.textFaint},
+  chip: {
+    borderWidth: 1,
+    borderColor: t.divider,
+    borderRadius: radius.pill,
+    paddingHorizontal: 9,
+    paddingVertical: 3,
+    flexShrink: 0,
   },
-  category: {color: t.textDim, fontSize: 11, marginTop: 3},
+  chipText: {fontSize: 11, color: t.textFaint},
 
-  rowRight: {alignItems: 'flex-end', gap: spacing.sm},
-  rssiRow: {flexDirection: 'row', alignItems: 'center', gap: spacing.xs},
-  rssiText: {color: t.ok, fontSize: 12, fontWeight: '600'},
-
-  // The badge every connection state renders through — one shape, coloured per state,
-  // so "connected / connecting / offline" is read from the icon and tint rather than
-  // guessed from which of several differently-shaped buttons happens to be showing.
-  badge: {
+  actions: {flexDirection: 'row', alignItems: 'center', gap: spacing.sm, marginTop: 12},
+  actionPrimary: {
+    flex: 1,
+    height: 38,
+    borderRadius: radius.pill,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 5,
-    borderRadius: radius.pill,
-    paddingHorizontal: spacing.sm + 2,
-    paddingVertical: 4,
-  },
-  badgeText: {...typography.caption, fontWeight: '700'},
-
-  connectFilled: {
-    backgroundColor: t.accent,
-    borderRadius: radius.pill,
-    paddingVertical: spacing.sm,
-    paddingHorizontal: spacing.md,
-  },
-  connectFilledText: {color: t.onAccent, fontWeight: '700', fontSize: 13},
-  connectOutline: {
-    borderWidth: 1,
-    borderColor: t.accent,
-    borderRadius: radius.pill,
-    paddingVertical: spacing.sm,
-    paddingHorizontal: spacing.md,
-  },
-  connectOutlineText: {color: t.accent, fontWeight: '700', fontSize: 13},
-  notChat: {maxWidth: 110},
-  notChatText: {color: t.textDim, fontSize: 11, textAlign: 'right'},
-
-  radarWrap: {alignItems: 'center', paddingVertical: spacing.xl, paddingTop: spacing.lg},
-  radarRings: {
-    width: 220,
-    height: 220,
-    alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: spacing.lg,
+    gap: 6,
   },
-  ring: {
-    position: 'absolute',
-    borderRadius: 999,
+  actionFilled: {backgroundColor: t.accent},
+  actionFilledText: {...typography.callout, color: t.onAccent, fontWeight: '700'},
+  actionOutline: {borderWidth: 1, borderColor: t.accent},
+  actionOutlineText: {...typography.callout, color: t.accent, fontWeight: '700'},
+  actionOutlineNeutral: {borderWidth: 1, borderColor: t.border},
+  actionOutlineNeutralText: {...typography.callout, color: t.text, fontWeight: '700'},
+  actionPlain: {},
+  actionPlainText: {...typography.callout, color: t.textDim, fontWeight: '600'},
+  actionDisabled: {borderWidth: 1, borderColor: t.border, backgroundColor: t.surfaceAlt},
+  actionDisabledText: {...typography.callout, color: t.textDim, fontWeight: '600'},
+  actionIcon: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
     borderWidth: 1,
     borderColor: t.border,
-  },
-  ring1: {width: 220, height: 220},
-  radarCore: {
-    width: 64,
-    height: 64,
-    borderRadius: 32,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  radarDot: {position: 'absolute', width: 8, height: 8, borderRadius: 4},
-  radarTitle: {...typography.headline, color: t.text},
-  radarDetail: {
-    ...typography.caption,
-    color: t.textDim,
-    textAlign: 'center',
-    marginTop: spacing.xs,
-    maxWidth: 260,
-  },
-  featureRow: {
+
+  // ---- recently connected ------------------------------------------------
+  recentBlock: {marginTop: 6},
+  ruleHeader: {
     flexDirection: 'row',
-    flexWrap: 'wrap',
-    justifyContent: 'center',
+    alignItems: 'center',
     gap: spacing.sm,
-    marginTop: spacing.lg,
+    marginTop: 16,
+    marginBottom: 8,
   },
-  featurePill: {
+  ruleTitle: {...typography.overline, color: t.textDim},
+  rule: {flex: 1, height: 1, backgroundColor: t.divider},
+  recentRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
+    gap: spacing.md,
     backgroundColor: t.surface,
     borderWidth: 1,
-    borderColor: t.border,
-    borderRadius: radius.pill,
-    paddingHorizontal: spacing.md,
-    paddingVertical: 7,
+    borderColor: t.divider,
+    borderRadius: 18,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    marginBottom: spacing.sm,
   },
-  featurePillText: {...typography.caption, color: t.text, fontWeight: '600'},
+  recentName: {...typography.callout, fontSize: 14, fontWeight: '700', color: t.text},
+  recentMeta: {...typography.caption, color: t.textFaint, fontSize: 11, marginTop: 2},
+  recentAction: {...typography.callout, color: t.textDim, fontWeight: '700'},
+
+  // ---- radar ---------------------------------------------------------------
+  radarWrap: {alignItems: 'center', paddingTop: 6, paddingBottom: spacing.lg},
+  radarCaption: {
+    ...typography.caption,
+    color: t.textFaint,
+    fontSize: 11,
+    marginTop: spacing.md,
+    textAlign: 'center',
+    paddingHorizontal: spacing.xl,
+  },
 }));

@@ -14,21 +14,22 @@ import {
   Vibration,
   View,
 } from 'react-native';
-import {SafeAreaView, useSafeAreaInsets} from 'react-native-safe-area-context';
+import {useSafeAreaInsets} from 'react-native-safe-area-context';
 import {
   ConnectionIndicator,
   dotColor,
   LABELS as LINK_STATE_LABELS,
 } from '../components/ConnectionIndicator';
-import {PeerAvatar, SignalBars} from '../components/ui/Primitives';
-import {QualityBadge} from '../components/ui/QualityBadge';
+import {GroupAvatar, InitialAvatar, SignalBars} from '../components/ui/Primitives';
 import {MessageBubble} from '../components/MessageBubble';
 import {MessageInput} from '../components/MessageInput';
+import {Screen} from '../components/ui/Screen';
 import {PeerProfileSheet} from '../components/PeerProfileSheet';
 import {AppText, DenseText} from '../components/AppText';
-import {FadeIn, Touchable} from '../components/Motion';
+import {FadeIn, SendIn, Touchable} from '../components/Motion';
 import {Icon} from '../components/ui/Icon';
 import {describeFailure} from '../ble/LinkErrors';
+import {qualityLabel} from '../peers/LinkMetrics';
 import {elevation, radius, spacing, speakerTint, typography} from '../config/theme';
 import {makeStyles, useTheme} from '../theme/ThemeProvider';
 import {bleChat} from '../services/BleChatService';
@@ -401,6 +402,17 @@ export function ChatScreen({route, navigation}: RootStackScreenProps<'Chat'>) {
     );
   }, [group, navigation]);
 
+  /**
+   * Messages that already existed when this thread was opened.
+   *
+   * Only an outgoing message written *here* should be seen leaving the composer;
+   * replaying that on every bubble in the history would animate a scroll, not a send.
+   */
+  const openedWith = useRef<Set<string> | null>(null);
+  if (openedWith.current === null) {
+    openedWith.current = new Set(messages.map(m => m.id));
+  }
+
   const [profileVisible, setProfileVisible] = useState(false);
   const blockedPeerIds = useAppStore(st => st.blockedPeerIds);
 
@@ -417,7 +429,17 @@ export function ChatScreen({route, navigation}: RootStackScreenProps<'Chat'>) {
   }, [peer]);
 
   return (
-    <SafeAreaView style={styles.safe} edges={['top', 'bottom']} onLayout={onLayout}>
+    <Screen edges={['top', 'bottom']} style={styles.safe}>
+      <View style={styles.flex} onLayout={onLayout}>
+      {/*
+        One header, not four strips.
+
+        The name, who it is, whether the link is up, how good it is and what MTU it
+        negotiated are all facts about the same conversation, so they belong in the same
+        block. They used to be a header, a pill bar, a retry banner and a queued banner
+        stacked above the first message — four chrome layers between opening a chat and
+        reading it.
+      */}
       <View style={styles.header}>
         <Touchable
           scale={false}
@@ -427,47 +449,98 @@ export function ChatScreen({route, navigation}: RootStackScreenProps<'Chat'>) {
           accessibilityLabel="Back">
           <Icon name="chevronLeft" color={theme.text} size={22} />
         </Touchable>
-        {!isGroup && peer?.peerId ? (
-          <Touchable
-            scale={false}
-            onPress={() => setProfileVisible(true)}
-            style={styles.headerIdentity}
-            accessibilityLabel="View profile">
-            <PeerAvatar size={40} muted={!connected} />
-            <View style={styles.headerText}>
-              <View style={styles.headerNameRow}>
-                <AppText style={styles.headerName} numberOfLines={1}>
-                  {peer?.displayName ?? displayName}
-                </AppText>
-                {/* Every handshake is authenticated or the link never reaches
-                    "connected" — this makes that proof visible rather than a silent
-                    precondition. */}
-                {peer?.authenticated && (
-                  <Icon name="shield" color={theme.tileGreenFg} size={14} strokeWidth={2} />
-                )}
-              </View>
-              <AppText style={styles.headerMeta} numberOfLines={1}>
-                {(peer?.gatt ? 'MTU ' + peer.gatt.mtu : 'no GATT') +
-                  (peer?.role ? '  ·  ' + peer.role : '')}
-              </AppText>
-            </View>
-          </Touchable>
-        ) : (
-          <>
-            <PeerAvatar size={40} muted={!connected} />
-            <View style={styles.headerText}>
+
+        <Touchable
+          scale={false}
+          disabled={isGroup ? false : !peer?.peerId}
+          onPress={() => (isGroup ? setMembersVisible(true) : setProfileVisible(true))}
+          style={styles.headerIdentity}
+          accessibilityLabel={isGroup ? 'Group members' : 'View profile'}>
+          {isGroup ? (
+            <GroupAvatar size={40} online={reachableMembers > 0} />
+          ) : (
+            <InitialAvatar
+              name={peer?.displayName ?? displayName}
+              seed={peer?.peerId ?? displayName}
+              size={40}
+              online={connected}
+            />
+          )}
+          <View style={styles.headerText}>
+            <View style={styles.headerNameRow}>
               <AppText style={styles.headerName} numberOfLines={1}>
                 {group?.name ?? peer?.displayName ?? displayName}
               </AppText>
-              <AppText style={styles.headerMeta} numberOfLines={1}>
-                {isGroup
-                  ? `${group?.members.length ?? 0} members · ${reachableMembers} reachable`
-                  : (peer?.gatt ? 'MTU ' + peer.gatt.mtu : 'no GATT') +
-                    (peer?.role ? '  ·  ' + peer.role : '')}
-              </AppText>
+              {/* Every handshake is authenticated or the link never reaches
+                  "connected" — this makes that proof visible rather than a silent
+                  precondition. */}
+              {!isGroup && peer?.authenticated ? (
+                <Icon name="shield" color={theme.ok} size={14} strokeWidth={2} />
+              ) : null}
             </View>
-          </>
-        )}
+
+            {/* Line two carries everything the status pill bar used to: state first and
+                in its own colour, then the quality word, then the negotiated MTU, then
+                the bars. Nothing was dropped — it stopped being a separate strip. */}
+            <View style={styles.headerMetaRow}>
+              {isGroup ? (
+                <DenseText style={styles.headerMeta} numberOfLines={1}>
+                  <DenseText
+                    style={[
+                      styles.headerState,
+                      {color: reachableMembers > 0 ? theme.ok : theme.textDim},
+                    ]}>
+                    {reachableMembers}/{group?.members.length ?? 1} reachable
+                  </DenseText>
+                  {' \u00b7 ' + (group?.members.length ?? 0) + ' members'}
+                </DenseText>
+              ) : (
+                <>
+                  <DenseText style={styles.headerMeta} numberOfLines={1}>
+                    <DenseText
+                      style={[
+                        styles.headerState,
+                        {
+                          color: connected
+                            ? theme.ok
+                            : dotColor(peer?.state ?? 'disconnected', theme),
+                        },
+                      ]}>
+                      {peer ? LINK_STATE_LABELS[peer.state] : 'Disconnected'}
+                    </DenseText>
+                    {connected && qualityLabel(peer?.metrics?.quality ?? null)
+                      ? ' \u00b7 ' + qualityLabel(peer?.metrics?.quality ?? null)
+                      : ''}
+                    {peer?.gatt ? ' \u00b7 MTU ' + peer.gatt.mtu : ''}
+                  </DenseText>
+                  <SignalBars rssi={peer?.rssi ?? null} size="sm" />
+                </>
+              )}
+            </View>
+          </View>
+        </Touchable>
+
+        {/* The encryption warning keeps its own affordance rather than folding into the
+            overflow menu: "anyone in range can read this" is not a setting. */}
+        {!isGroup ? (
+          <Touchable
+            scale={false}
+            onPress={() =>
+              Alert.alert(
+                'Not encrypted',
+                'Messages travel as plaintext over the Bluetooth link. Anyone ' +
+                  'intercepting the radio signal within range could read them. ' +
+                  'End-to-end encryption is planned for a future phase — until then, ' +
+                  "treat this the way you'd treat a conversation someone nearby " +
+                  'could overhear.',
+              )
+            }
+            style={styles.headerWarn}
+            accessibilityLabel="About encryption">
+            <Icon name="unlock" color={theme.tileAmberFg} size={15} />
+          </Touchable>
+        ) : null}
+
         {isGroup ? (
           <Touchable
             scale={false}
@@ -475,7 +548,7 @@ export function ChatScreen({route, navigation}: RootStackScreenProps<'Chat'>) {
             hitSlop={12}
             style={styles.headerIconButton}
             accessibilityLabel="Group options">
-            <Icon name="more" color={theme.textDim} size={20} />
+            <Icon name="more" color={theme.textFaint} size={20} />
           </Touchable>
         ) : (
           peer?.peerId && (
@@ -485,58 +558,9 @@ export function ChatScreen({route, navigation}: RootStackScreenProps<'Chat'>) {
               hitSlop={12}
               style={styles.headerIconButton}
               accessibilityLabel="Block this person">
-              <Icon name="more" color={theme.textDim} size={20} />
+              <Icon name="more" color={theme.textFaint} size={20} />
             </Touchable>
           )
-        )}
-      </View>
-
-      {/* The link state, straight from the transport — never a decorative badge. */}
-      <View style={styles.statusBar}>
-        <View style={styles.statusLeft}>
-          <ConnectionIndicator
-            state={
-              isGroup
-                ? reachableMembers > 0
-                  ? 'connected'
-                  : 'disconnected'
-                : peer?.state ?? 'disconnected'
-            }
-            label={
-              isGroup
-                ? `${reachableMembers}/${group?.members.length ?? 1} members reachable`
-                : undefined
-            }
-          />
-        </View>
-        {!isGroup && (
-          <View style={styles.statusRight}>
-            <Touchable
-              scale={false}
-              onPress={() =>
-                Alert.alert(
-                  'Not encrypted',
-                  'Messages travel as plaintext over the Bluetooth link. Anyone ' +
-                    'intercepting the radio signal within range could read them. ' +
-                    'End-to-end encryption is planned for a future phase — until then, ' +
-                    "treat this the way you'd treat a conversation someone nearby " +
-                    'could overhear.',
-                )
-              }
-              accessibilityLabel="About encryption"
-              hitSlop={6}>
-              <Icon name="unlock" color={theme.textDim} size={14} />
-            </Touchable>
-            <QualityBadge score={peer?.metrics?.quality ?? null} />
-            <SignalBars rssi={peer?.rssi ?? null} size="sm" />
-            <AppText style={styles.rssi} numberOfLines={1}>
-              {peer?.rssi !== null && peer?.rssi !== undefined
-                ? peer.rssi + ' dBm'
-                : peer?.role === 'peripheral'
-                ? 'n/a'
-                : '—'}
-            </AppText>
-          </View>
         )}
       </View>
 
@@ -581,7 +605,7 @@ export function ChatScreen({route, navigation}: RootStackScreenProps<'Chat'>) {
               {item.id === firstUnreadId && (
                 <View style={styles.unreadSeparator}>
                   <View style={styles.unreadLine} />
-                  <DenseText style={styles.unreadLabel}>New messages</DenseText>
+                  <DenseText style={styles.unreadLabel}>NEW MESSAGES</DenseText>
                   <View style={styles.unreadLine} />
                 </View>
               )}
@@ -600,7 +624,10 @@ export function ChatScreen({route, navigation}: RootStackScreenProps<'Chat'>) {
                   </AppText>
                 </View>
               ) : null}
-              <FadeIn>
+              <Entrance
+                sent={
+                  item.direction === 'outgoing' && !openedWith.current!.has(item.id)
+                }>
                 <MessageBubble
                   message={item}
                   onRetry={onRetry}
@@ -618,7 +645,7 @@ export function ChatScreen({route, navigation}: RootStackScreenProps<'Chat'>) {
                     isGroup ? speakerTint(theme, item.originId) : undefined
                   }
                 />
-              </FadeIn>
+              </Entrance>
             </>
           )}
           ListEmptyComponent={
@@ -651,14 +678,16 @@ export function ChatScreen({route, navigation}: RootStackScreenProps<'Chat'>) {
         */}
         {queuedCount > 0 && (
           <View style={styles.queuedBanner}>
-            <AppText style={styles.queuedText} numberOfLines={2}>
-              {queuedCount} message{queuedCount === 1 ? '' : 's'} queued · waiting for{' '}
-              {group?.name ?? peer?.displayName ?? displayName}
-            </AppText>
+            <Icon name="clock" color={theme.tileAmberFg} size={13} />
+            <DenseText style={styles.queuedText} numberOfLines={2}>
+              {queuedCount} queued — they go out when{' '}
+              {group?.name ?? peer?.displayName ?? displayName} is back in range
+            </DenseText>
           </View>
         )}
 
         <MessageInput
+          placeholder={`Message ${group?.name ?? peer?.displayName ?? displayName}`}
           enabled={connected}
           disabledReason={
             isGroup
@@ -697,8 +726,20 @@ export function ChatScreen({route, navigation}: RootStackScreenProps<'Chat'>) {
           onUnblock={() => bleChat.peerManager.unblockPeer(peer.peerId!)}
         />
       )}
-    </SafeAreaView>
+      </View>
+    </Screen>
   );
+}
+
+/**
+ * A bubble arrives one of two ways.
+ *
+ * Something you just wrote travels up out of the composer; everything else settles in
+ * the way the rest of the app's content does. Same component so the choice is made in
+ * one place rather than duplicated at the call site.
+ */
+function Entrance({sent, children}: {sent: boolean; children: React.ReactNode}) {
+  return sent ? <SendIn>{children}</SendIn> : <FadeIn>{children}</FadeIn>;
 }
 
 /**
@@ -801,65 +842,82 @@ function GroupMembersSheet({
 const useStyles = makeStyles(t => ({
   safe: {flex: 1, backgroundColor: t.bg},
   flex: {flex: 1},
+  // Surface-coloured, with a hairline under it: the header is the one piece of chrome
+  // left above the thread, so it separates itself by being a different plane rather
+  // than by stacking more strips.
   header: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: spacing.md,
-    paddingHorizontal: spacing.lg,
-    paddingVertical: spacing.md,
-    backgroundColor: t.bg,
+    gap: 11,
+    paddingLeft: spacing.md,
+    paddingRight: spacing.lg,
+    paddingTop: spacing.sm,
+    paddingBottom: spacing.md,
+    backgroundColor: t.surface,
+    borderBottomWidth: 1,
+    borderBottomColor: t.divider,
   },
   headerIconButton: {padding: 4},
-  headerIdentity: {flex: 1, flexDirection: 'row', alignItems: 'center', gap: spacing.md},
-  headerText: {flex: 1},
-  headerNameRow: {flexDirection: 'row', alignItems: 'center', gap: 6},
-  headerName: {...typography.title, color: t.text, flexShrink: 1},
-  headerMeta: {...typography.caption, color: t.textDim, marginTop: 1},
-
-  statusBar: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginHorizontal: spacing.lg,
-    marginBottom: spacing.sm,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
-    borderRadius: 999,
-    borderWidth: 1,
-    borderColor: t.border,
-    backgroundColor: t.surface,
-    gap: spacing.sm,
+  headerIdentity: {flex: 1, flexDirection: 'row', alignItems: 'center', gap: 11},
+  headerText: {flex: 1, minWidth: 0},
+  headerNameRow: {flexDirection: 'row', alignItems: 'center', gap: 5},
+  headerName: {
+    fontSize: 17,
+    fontWeight: '700',
+    letterSpacing: -0.2,
+    color: t.text,
+    flexShrink: 1,
   },
-  statusLeft: {flexShrink: 1},
-  statusRight: {flexDirection: 'row', alignItems: 'center', gap: spacing.sm},
-  rssi: {...typography.caption, color: t.ok, fontWeight: '600'},
+  headerMetaRow: {flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 1},
+  headerMeta: {...typography.caption, color: t.textDim, fontSize: 11, flexShrink: 1},
+  headerState: {fontWeight: '700'},
+  headerWarn: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: t.tileAmber,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   list: {paddingVertical: spacing.md, flexGrow: 1},
   dayHeader: {alignItems: 'center', marginVertical: spacing.md},
   dayLabel: {
     ...typography.caption,
-    color: t.textDim,
+    color: t.textFaint,
     fontSize: 11,
+    fontWeight: '600',
     backgroundColor: t.surfaceAlt,
     paddingHorizontal: spacing.md,
-    paddingVertical: 3,
-    borderRadius: 10,
+    paddingVertical: 4,
+    borderRadius: radius.pill,
     overflow: 'hidden',
   },
+  // Sits with the composer, because that is what it is about: it explains what will
+  // happen to what you type next, not something that happened in the thread.
   queuedBanner: {
-    backgroundColor: t.surfaceAlt,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
     paddingHorizontal: spacing.lg,
-    paddingVertical: spacing.sm,
+    paddingVertical: 7,
   },
-  queuedText: {...typography.caption, color: t.textDim},
+  queuedText: {
+    ...typography.caption,
+    color: t.tileAmberFg,
+    fontSize: 11,
+    fontWeight: '600',
+    flex: 1,
+  },
   gap: {alignItems: 'center', marginVertical: spacing.sm},
   gapLabel: {
     ...typography.caption,
-    color: t.warn,
+    color: t.tileAmberFg,
     fontSize: 11,
-    backgroundColor: t.surfaceAlt,
+    fontWeight: '600',
+    backgroundColor: t.tileAmber,
     paddingHorizontal: spacing.md,
-    paddingVertical: 3,
-    borderRadius: 10,
+    paddingVertical: 5,
+    borderRadius: radius.pill,
     overflow: 'hidden',
   },
   empty: {flex: 1, justifyContent: 'center', alignItems: 'center', padding: spacing.xl},
@@ -872,8 +930,14 @@ const useStyles = makeStyles(t => ({
     marginHorizontal: spacing.lg,
     marginVertical: spacing.sm,
   },
-  unreadLine: {flex: 1, height: 1, backgroundColor: t.accent + '55'},
-  unreadLabel: {...typography.caption, color: t.accent, fontWeight: '700', fontSize: 11},
+  unreadLine: {flex: 1, height: 1, backgroundColor: t.accent + '44'},
+  unreadLabel: {
+    ...typography.caption,
+    color: t.accent,
+    fontWeight: '800',
+    fontSize: 10,
+    letterSpacing: 0.6,
+  },
 
   jumpButton: {
     position: 'absolute',

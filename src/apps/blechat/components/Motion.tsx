@@ -118,6 +118,89 @@ export function FadeIn({children, index = 0, style}: FadeInProps) {
   );
 }
 
+/**
+ * The bubble leaving the composer.
+ *
+ * A larger rise than `FadeIn`'s, and only for a message you just wrote: the point is
+ * that the thing you typed visibly travels from the box at the bottom into the thread,
+ * so the send is acknowledged before any tick can be. It runs once, on mount, and only
+ * for outgoing messages that arrive while the screen is open — a thread being scrolled
+ * back through must not re-animate its history.
+ */
+export function SendIn({children}: {children: React.ReactNode}) {
+  const reduced = useReduceMotion();
+  const progress = useRef(new Animated.Value(reduced ? 1 : 0)).current;
+
+  useEffect(() => {
+    if (reduced) {
+      progress.setValue(1);
+      return;
+    }
+    const animation = Animated.timing(progress, {
+      toValue: 1,
+      duration: 260,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: true,
+    });
+    animation.start();
+    return () => animation.stop();
+  }, [progress, reduced]);
+
+  return (
+    <Animated.View
+      style={{
+        opacity: progress,
+        transform: [
+          {translateY: progress.interpolate({inputRange: [0, 1], outputRange: [22, 0]})},
+          {scale: progress.interpolate({inputRange: [0, 1], outputRange: [0.94, 1]})},
+        ],
+      }}>
+      {children}
+    </Animated.View>
+  );
+}
+
+/**
+ * A tick landing.
+ *
+ * Replays whenever `token` changes, which callers key on delivery status — so the first
+ * tick lands when the BLE write completes and the second when the peer's ACK arrives,
+ * and nothing moves in between. That is the entire point: the motion marks a real event
+ * on the wire, so a message that is merely sitting there never appears to progress.
+ */
+export function LandIn({token, children}: {token: string; children: React.ReactNode}) {
+  const reduced = useReduceMotion();
+  const progress = useRef(new Animated.Value(reduced ? 1 : 0)).current;
+
+  useEffect(() => {
+    if (reduced) {
+      progress.setValue(1);
+      return;
+    }
+    progress.setValue(0);
+    const animation = Animated.timing(progress, {
+      toValue: 1,
+      duration: 200,
+      easing: Easing.out(Easing.back(1.6)),
+      useNativeDriver: true,
+    });
+    animation.start();
+    return () => animation.stop();
+  }, [progress, reduced, token]);
+
+  return (
+    <Animated.View
+      style={{
+        opacity: progress,
+        transform: [
+          {scale: progress.interpolate({inputRange: [0, 1], outputRange: [0.5, 1]})},
+        ],
+      }}>
+      {children}
+    </Animated.View>
+  );
+}
+
 interface TouchableProps extends PressableProps {
   children: React.ReactNode;
   style?: ViewStyle | ViewStyle[];

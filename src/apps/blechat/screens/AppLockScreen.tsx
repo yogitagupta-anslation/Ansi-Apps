@@ -1,7 +1,7 @@
 import React, {useState} from 'react';
 import {KeyboardAvoidingView, Platform, ScrollView, TextInput, View} from 'react-native';
-import {SafeAreaView} from 'react-native-safe-area-context';
 import {AppText, DenseText} from '../components/AppText';
+import {Screen} from '../components/ui/Screen';
 import {Touchable} from '../components/Motion';
 import {Icon} from '../components/ui/Icon';
 import {radius, spacing, typography} from '../config/theme';
@@ -69,7 +69,7 @@ export function AppLockScreen({mode, onUnlock, onSetupComplete, onCancel}: Props
     // keyboard can eat enough height to push "Unlock"/"Continue" off-screen with no
     // way to reach them; SafeAreaView + KeyboardAvoidingView + a scrollable fallback
     // fixes that the same way every other input screen in the app already handles it.
-    <SafeAreaView style={styles.safe}>
+    <Screen edges={['top', 'bottom']} style={styles.safe}>
       <KeyboardAvoidingView
         style={styles.flex}
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
@@ -125,7 +125,7 @@ export function AppLockScreen({mode, onUnlock, onSetupComplete, onCancel}: Props
           </View>
         </ScrollView>
       </KeyboardAvoidingView>
-    </SafeAreaView>
+    </Screen>
   );
 }
 

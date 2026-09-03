@@ -8,7 +8,6 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import {SafeAreaView} from 'react-native-safe-area-context';
 import {radius, spacing, typography} from '../config/theme';
 import {makeStyles, useTheme} from '../theme/ThemeProvider';
 import {bleChat} from '../services/BleChatService';
@@ -18,6 +17,8 @@ import type {AppSettings} from '../storage/LocalStorage';
 import {InterestPicker} from '../components/InterestPicker';
 import {AppText, DenseText} from '../components/AppText';
 import {Button, Card, KeyValue, SectionHeader} from '../components/ui/Surface';
+import {Mascot} from '../components/ui/Mascot';
+import {Screen} from '../components/ui/Screen';
 import {Icon, type IconName} from '../components/ui/Icon';
 import {Touchable} from '../components/Motion';
 import {AppLockScreen} from './AppLockScreen';
@@ -30,6 +31,12 @@ import {relativeTime} from '../utils/time';
 import type {RootStackScreenProps} from '../navigation/types';
 
 type Category = 'profile' | 'app' | 'system';
+
+const TABS: Array<{key: Category; label: string}> = [
+  {key: 'profile', label: 'Profile'},
+  {key: 'app', label: 'App'},
+  {key: 'system', label: 'System'},
+];
 
 export function SettingsScreen({route, navigation}: RootStackScreenProps<'Settings'>) {
   const styles = useStyles();
@@ -45,25 +52,20 @@ export function SettingsScreen({route, navigation}: RootStackScreenProps<'Settin
   // and does not change while the app runs.
   const [keyProtection, setKeyProtection] = useState(storage.getKeyProtection());
 
-  const scrollRef = useRef<ScrollView>(null);
-  const categoryY = useRef<Partial<Record<Category, number>>>({});
+  /**
+   * Which category is on screen — a tab, not a scroll offset.
+   *
+   * Profile, App and System used to be coloured headings inside one very long scroll,
+   * and arriving from Home's menu meant measuring each heading's y position and
+   * animating to it after a timeout, because the measurement had not landed on first
+   * render. A deep link is now a tab selection: nothing to measure, nothing to race.
+   */
+  const [tab, setTab] = useState<Category>(route.params?.section ?? 'profile');
 
-  // Jumps to the category the caller asked for — Home's profile menu, mainly. A short
-  // delay because onLayout for the target category may not have fired yet on the very
-  // first render after navigating here; scrollTo before that measurement lands would
-  // silently do nothing.
   useEffect(() => {
-    const target = route.params?.section;
-    if (!target) {
-      return;
+    if (route.params?.section) {
+      setTab(route.params.section);
     }
-    const id = setTimeout(() => {
-      const y = categoryY.current[target];
-      if (y !== undefined) {
-        scrollRef.current?.scrollTo({y: Math.max(0, y - spacing.sm), animated: true});
-      }
-    }, 80);
-    return () => clearTimeout(id);
   }, [route.params?.section]);
 
   // A blocked peerId alone is not a name — the person may not be in range, or may never
@@ -111,7 +113,7 @@ export function SettingsScreen({route, navigation}: RootStackScreenProps<'Settin
     // A Stack screen, not a Tab screen — unlike Home/Chats/Nearby/Debug there is no tab
     // bar underneath reserving the bottom gesture-nav inset, so this one has to claim it
     // itself or the last rows (Unblock, Clear chat history) can rest right under the strip.
-    <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
+    <Screen edges={['top', 'bottom']}>
       <View style={styles.header}>
         <Touchable
           scale={false}
@@ -123,17 +125,50 @@ export function SettingsScreen({route, navigation}: RootStackScreenProps<'Settin
         </Touchable>
         <AppText style={styles.heading}>Settings</AppText>
       </View>
-      <ScrollView ref={scrollRef} contentContainerStyle={styles.content}>
-        <View
-          onLayout={e => {
-            categoryY.current.profile = e.nativeEvent.layout.y;
-          }}>
-          <CategoryHeader
-            icon="pencil"
-            label="Profile settings"
-            tint={theme.tilePurpleFg}
-            bg={theme.tilePurple}
-          />
+
+      <View style={styles.tabsWrap}>
+        <View style={styles.tabs}>
+          {TABS.map(option => {
+            const active = option.key === tab;
+            return (
+              <Touchable
+                key={option.key}
+                scale={false}
+                onPress={() => setTab(option.key)}
+                accessibilityRole="tab"
+                accessibilityState={{selected: active}}
+                style={active ? [styles.tab, styles.tabActive] : styles.tab}>
+                <AppText
+                  style={active ? styles.tabTextActive : styles.tabText}
+                  numberOfLines={1}
+                  maxFontSizeMultiplier={1.1}>
+                  {option.label}
+                </AppText>
+              </Touchable>
+            );
+          })}
+        </View>
+      </View>
+
+      <ScrollView contentContainerStyle={styles.content}>
+        {tab === 'profile' ? (
+          <>
+            {/* Who you are, as other people see it — the same card the hub's avatar
+                button leads to. It sits above the fields rather than being assembled
+                from them, so the first thing this tab shows is the result. */}
+            <View style={styles.identityCard}>
+              <Mascot size={54} />
+              <View style={styles.flex}>
+                <AppText style={styles.identityName} numberOfLines={1}>
+                  {settings.displayName || 'No name set'}
+                </AppText>
+                <DenseText style={styles.identityMeta} numberOfLines={1}>
+                  {settings.interests.length > 0
+                    ? settings.interests.join(' · ')
+                    : 'No interests yet'}
+                </DenseText>
+              </View>
+            </View>
           <Section title="Identity">
             <AppText style={styles.label}>Display name</AppText>
             <TextInput
@@ -173,18 +208,11 @@ export function SettingsScreen({route, navigation}: RootStackScreenProps<'Settin
               people are shown your name, never this — it lives here for diagnostics.
             </DenseText>
           </Section>
-        </View>
+          </>
+        ) : null}
 
-        <View
-          onLayout={e => {
-            categoryY.current.app = e.nativeEvent.layout.y;
-          }}>
-          <CategoryHeader
-            icon="gear"
-            label="App settings"
-            tint={theme.tileBlueFg}
-            bg={theme.tileBlue}
-          />
+        {tab === 'app' ? (
+          <>
 
         <Section title="Appearance">
           <AppText style={styles.label}>Theme</AppText>
@@ -441,18 +469,11 @@ export function SettingsScreen({route, navigation}: RootStackScreenProps<'Settin
             }
           />
         </Section>
-        </View>
+          </>
+        ) : null}
 
-        <View
-          onLayout={e => {
-            categoryY.current.system = e.nativeEvent.layout.y;
-          }}>
-          <CategoryHeader
-            icon="device"
-            label="System settings"
-            tint={theme.tileAmberFg}
-            bg={theme.tileAmber}
-          />
+        {tab === 'system' ? (
+          <>
 
         <Section title="Peripheral capability">
           {peripheral.capabilities ? (
@@ -522,7 +543,8 @@ export function SettingsScreen({route, navigation}: RootStackScreenProps<'Settin
             development. Re-enable before treating this as anything but a test build.
           </DenseText>
         </Section>
-        </View>
+          </>
+        ) : null}
 
         <DenseText style={styles.footnote}>
           Phase 1 packets are plaintext JSON. Authentication and end-to-end encryption are
@@ -545,35 +567,7 @@ export function SettingsScreen({route, navigation}: RootStackScreenProps<'Settin
           }}
         />
       </Modal>
-    </SafeAreaView>
-  );
-}
-
-/**
- * The top-level grouping above Section: Profile / App / System. Three different kinds of
- * setting were sitting in one flat list — who you are, how the app behaves, and what the
- * hardware reports — with nothing marking the boundaries between them. This is that
- * boundary, one per category, coloured so the eye can jump straight to the right one.
- */
-function CategoryHeader({
-  icon,
-  label,
-  tint,
-  bg,
-}: {
-  icon: IconName;
-  label: string;
-  tint: string;
-  bg: string;
-}) {
-  const styles = useStyles();
-  return (
-    <View style={styles.categoryHeader}>
-      <View style={[styles.categoryIcon, {backgroundColor: bg}]}>
-        <Icon name={icon} color={tint} size={16} />
-      </View>
-      <AppText style={[styles.categoryLabel, {color: tint}]}>{label}</AppText>
-    </View>
+    </Screen>
   );
 }
 
@@ -632,6 +626,41 @@ function Row({label, value}: {label: string; value: string}) {
 
 const useStyles = makeStyles(t => ({
   safe: {flex: 1, backgroundColor: t.bg},
+
+  tabsWrap: {paddingHorizontal: spacing.lg + 4, paddingBottom: spacing.md},
+  tabs: {
+    flexDirection: 'row',
+    gap: 2,
+    backgroundColor: t.surfaceAlt,
+    borderRadius: 12,
+    padding: 3,
+  },
+  tab: {flex: 1, alignItems: 'center', paddingVertical: 8, borderRadius: 9},
+  // A raised chip, not a tint: the selected tab should look like it is on top of the
+  // track rather than a differently-coloured part of it.
+  tabActive: {
+    backgroundColor: t.surface,
+    shadowColor: '#000',
+    shadowOpacity: t.isDark ? 0.3 : 0.08,
+    shadowRadius: 2,
+    shadowOffset: {width: 0, height: 1},
+    elevation: 1,
+  },
+  tabText: {...typography.callout, color: t.textDim, fontWeight: '600'},
+  tabTextActive: {...typography.callout, color: t.text, fontWeight: '700'},
+
+  identityCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
+    backgroundColor: t.surface,
+    borderWidth: 1,
+    borderColor: t.border,
+    borderRadius: 22,
+    padding: spacing.lg,
+  },
+  identityName: {fontSize: 19, fontWeight: '700', letterSpacing: -0.3, color: t.text},
+  identityMeta: {...typography.caption, color: t.textDim, marginTop: 2},
   header: {
     flexDirection: 'row',
     alignItems: 'center',

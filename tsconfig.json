@@ -1,7 +1,10 @@
 {
   "extends": "expo/tsconfig.base",
   "compilerOptions": {
-    "strict": true
+    "strict": true,
+    // Jest's globals are ambient, so the test files need them declared here rather than
+    // imported. `node` comes along because the suites use timers and `crypto`.
+    "types": ["jest", "node"]
   },
   "include": ["**/*.ts", "**/*.tsx"],
   "exclude": ["node_modules", "android", "ios", ".expo"]

@@ -19,9 +19,18 @@ export interface Theme {
   /** Tiles inside a card. */
   card: string;
   border: string;
+  /** Separator *inside* a card — lighter than `border`, which outlines it. */
+  divider: string;
 
   text: string;
   textDim: string;
+  /**
+   * The third text tone. Two greys is one too few for these screens: a card
+   * routinely carries a name, a supporting line, and a timestamp or unit that
+   * must not compete with either. Without this, that third thing borrows
+   * `textDim` and the supporting line stops reading as the more important one.
+   */
+  textFaint: string;
   /** Text on top of an accent-filled surface. */
   onAccent: string;
   /** Secondary text on an accent-filled surface (timestamps, ticks). */
@@ -79,16 +88,19 @@ export const darkTheme: Theme = {
   surfaceAlt: '#1b2330',
   card: '#171e29',
   border: '#252d3a',
+  divider: '#1e2632',
 
   text: '#eef2f7',
   textDim: '#8b97a8',
+  textFaint: '#66738a',
   onAccent: '#ffffff',
   onAccentDim: 'rgba(255,255,255,0.74)',
 
-  // Deeper and less saturated than a stock blue. Used sparingly, it reads as considered
-  // rather than loud, which is most of what "trustworthy" means visually.
-  accent: '#3b82f6',
-  accentSoft: 'rgba(59,130,246,0.14)',
+  // The indigo from the brand gradient's middle stop rather than a stock blue: the
+  // accent, the outgoing bubble and the wordmark are then demonstrably the same
+  // colour, which is what makes the chrome read as one app rather than three.
+  accent: '#8B7CFF',
+  accentSoft: 'rgba(139,124,255,0.16)',
 
   ok: '#34d399',
   warn: '#fbbf24',
@@ -130,15 +142,17 @@ export const lightTheme: Theme = {
   surfaceAlt: '#f1f3f7',
   card: '#fbfcfd',
   border: '#e3e7ee',
+  divider: '#eef1f6',
 
   text: '#141a24',
   textDim: '#6b7688',
+  textFaint: '#98a1b0',
   onAccent: '#ffffff',
   // The accent stays dark blue in light mode, so this remains a light tint.
   onAccentDim: 'rgba(255,255,255,0.78)',
 
-  accent: '#2563eb',
-  accentSoft: 'rgba(37,99,235,0.08)',
+  accent: '#4C3FE0',
+  accentSoft: '#EEF2FF',
 
   ok: '#059669',
   warn: '#b45309',
@@ -147,11 +161,12 @@ export const lightTheme: Theme = {
   amber: '#b45309',
   neutral: '#64748b',
 
-  // Same brand tie-in as dark mode, a shade deeper for contrast against a light card.
-  bubbleOut: '#4433C7',
+  bubbleOut: '#4C3FE0',
   bubbleOutText: '#ffffff',
-  // An incoming bubble in light mode must not be white-on-white.
-  bubbleIn: '#eef1f6',
+  // White on the page's off-white ground, separated by a hairline rather than a fill:
+  // a grey bubble against a grey thread makes every incoming message look muted, which
+  // is the wrong emphasis for the half of the conversation you did not write.
+  bubbleIn: '#ffffff',
   bubbleInText: '#141a24',
   bubbleMeta: 'rgba(15,23,42,0.55)',
 
@@ -160,7 +175,7 @@ export const lightTheme: Theme = {
 
   gradient: ['#241E4E', '#4C3FE0', '#9B6BFF'],
   tileBlue: '#DBEAFE',
-  tileBlueFg: '#3B82F6',
+  tileBlueFg: '#2563EB',
   tileGreen: '#DCFCE7',
   tileGreenFg: '#16A34A',
   tilePurple: '#EDE9FE',
@@ -205,6 +220,38 @@ export function speakerTint(theme: Theme, peerId: string): string {
     hash = (hash * 31 + peerId.charCodeAt(i)) % 1_000_003;
   }
   return palette[hash % palette.length];
+}
+
+/**
+ * The tint an avatar wears, derived from the peer's id.
+ *
+ * Same reasoning as `speakerTint`: keyed on identity rather than list position, so
+ * somebody is the same colour whether or not they are currently connected, in the
+ * nearby list or the chat header, and across restarts. Four hues is deliberate — enough
+ * that a screenful of avatars reads as varied, few enough that the colour stays a weak
+ * recognition cue rather than pretending to encode something.
+ */
+export function avatarHue(theme: Theme, seed: string): {bg: string; fg: string} {
+  const palette = [
+    {bg: theme.tileBlue, fg: theme.tileBlueFg},
+    {bg: theme.tileGreen, fg: theme.tileGreenFg},
+    {bg: theme.tileAmber, fg: theme.tileAmberFg},
+    {bg: theme.tilePurple, fg: theme.tilePurpleFg},
+  ];
+  let hash = 0;
+  for (let i = 0; i < seed.length; i++) {
+    hash = (hash * 31 + seed.charCodeAt(i)) % 1_000_003;
+  }
+  return palette[hash % palette.length];
+}
+
+/**
+ * The letter an avatar shows. Falls back to a bullet rather than a letter for an
+ * unnamed peer — an invented initial would be a claim about somebody we cannot make.
+ */
+export function avatarInitial(name: string | null | undefined): string {
+  const trimmed = (name ?? '').trim();
+  return trimmed.length > 0 ? trimmed[0].toUpperCase() : '•';
 }
 
 /** Icon colour / icon background pairs for the packet stat cards. */

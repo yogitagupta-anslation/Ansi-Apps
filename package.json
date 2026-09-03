@@ -8,7 +8,10 @@
     "android": "expo run:android",
     "ios": "expo run:ios",
     "prebuild": "expo prebuild --clean",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "jest",
+    "test:watch": "jest --watch",
+    "verify": "tsc --noEmit && jest --silent"
   },
   "dependencies": {
     "@expo/vector-icons": "^15.0.2",
@@ -22,6 +25,7 @@
     "@react-navigation/bottom-tabs": "^7.18.17",
     "@react-navigation/native": "^7.3.17",
     "@react-navigation/native-stack": "^7.18.9",
+    "babel-preset-expo": "~57.0.0",
     "buffer": "^5.7.1",
     "expo": "~57.0.16",
     "expo-asset": "~57.0.16",
@@ -49,7 +53,12 @@
     "zustand": "^5.0.15"
   },
   "devDependencies": {
+    "@react-native/jest-preset": "^0.86.2",
+    "@types/jest": "^30.0.0",
     "@types/react": "~19.2.2",
+    "@types/react-test-renderer": "^19.1.0",
+    "jest": "^30.5.1",
+    "react-test-renderer": "^19.2.3",
     "typescript": "~6.0.3"
   }
 }
