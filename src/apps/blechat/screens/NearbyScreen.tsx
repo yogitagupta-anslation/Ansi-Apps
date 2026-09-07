@@ -12,7 +12,9 @@ import {useFocusEffect} from '@react-navigation/native';
 import {avatarHue, radius, spacing, typography} from '../config/theme';
 import {makeStyles, useTheme} from '../theme/ThemeProvider';
 import {sharedInterests} from '../config/interests';
+import {RECONNECT_MAX_ATTEMPTS} from '../config/constants';
 import {EmptyState} from '../components/ui/Surface';
+import {ConnectFailedSheet} from '../components/ConnectFailedSheet';
 import {Screen} from '../components/ui/Screen';
 import {BreathingDot, FadeIn, Spinner, Touchable} from '../components/Motion';
 import {Icon, type IconName} from '../components/ui/Icon';
@@ -118,6 +120,9 @@ export function NearbyScreen({navigation}: RootTabScreenProps<'Nearby'>) {
 
   const [verifiedOnly, setVerifiedOnly] = useState(false);
   const [profilePeerId, setProfilePeerId] = useState<string | null>(null);
+  // Held as {peer, name} rather than an id: the row already knows the display name it
+  // rendered, and re-deriving it here could disagree with what the tap was next to.
+  const [failureFor, setFailureFor] = useState<{peer: Peer; name: string} | null>(null);
 
   /** Chat peers carry live connection state; other devices are display-only. */
   const peerByLink = useMemo(() => {
@@ -493,6 +498,7 @@ export function NearbyScreen({navigation}: RootTabScreenProps<'Nearby'>) {
               onOpenChat={onOpenChat}
               onBlock={onBlock}
               onOpenProfile={setProfilePeerId}
+              onExplainFailure={(p, n) => setFailureFor({peer: p, name: n})}
             />
           </FadeIn>
         )}
@@ -521,16 +527,53 @@ export function NearbyScreen({navigation}: RootTabScreenProps<'Nearby'>) {
           ) : (
             <EmptyState
               icon={bluetoothState === 'PoweredOn' ? 'radar' : 'bluetooth'}
-              title={bluetoothState !== 'PoweredOn' ? 'Bluetooth is off' : 'Not scanning'}
+              title={
+                bluetoothState !== 'PoweredOn' ? 'Bluetooth is off' : 'Nobody here yet'
+              }
               detail={
                 bluetoothState !== 'PoweredOn'
-                  ? 'Turn Bluetooth on to find people nearby.'
-                  : 'Tap Scan to look for nearby Bluetooth LE devices.'
+                  ? 'It is the only way BLE Chat reaches other phones — there is no internet fallback.'
+                  : "Anyone who opens BLE Chat within about a room's distance turns up on their own."
+              }
+              action={
+                bluetoothState === 'PoweredOn' ? (
+                  <Touchable scale={false} onPress={onRescan} style={styles.lookAgain}>
+                    <Icon name="radar" size={14} color={theme.text} />
+                    <DenseText style={styles.lookAgainText}>Look again</DenseText>
+                  </Touchable>
+                ) : undefined
+              }
+              footnote={
+                // Only when there genuinely are some. "0 other devices" is noise, and
+                // the count is the answer to the question this screen actually raises:
+                // is the radio working, or is nobody here? Hearing headphones and
+                // watches proves it is scanning.
+                bluetoothState === 'PoweredOn' && otherDevicesCount > 0
+                  ? `${otherDevicesCount} other Bluetooth device${
+                      otherDevicesCount === 1 ? '' : 's'
+                    } in range — headphones, watches, that sort of thing. Nothing to chat with.`
+                  : undefined
               }
             />
           )
         }
       />
+      <ConnectFailedSheet
+        visible={failureFor !== null}
+        name={failureFor?.name ?? ''}
+        failure={failureFor?.peer.failure ?? null}
+        attempts={failureFor?.peer.attempts}
+        maxAttempts={RECONNECT_MAX_ATTEMPTS}
+        onRetry={() => {
+          const link = failureFor?.peer.linkId;
+          setFailureFor(null);
+          if (link) {
+            onConnect(link);
+          }
+        }}
+        onClose={() => setFailureFor(null)}
+      />
+
       <PeerProfileSheet
         visible={profilePeerId !== null}
         peer={peers.find(p => p.peerId === profilePeerId) ?? null}
@@ -632,6 +675,7 @@ function PeerCard({
   onOpenChat,
   onBlock,
   onOpenProfile,
+  onExplainFailure,
 }: {
   device: DiscoveredDevice;
   cls: DeviceClass;
@@ -642,6 +686,7 @@ function PeerCard({
   onOpenChat: (peer: Peer) => void;
   onBlock: (peerId: string, name: string) => void;
   onOpenProfile: (peerId: string) => void;
+  onExplainFailure: (peer: Peer, name: string) => void;
 }) {
   const styles = useStyles();
   const theme = useTheme();
@@ -798,7 +843,7 @@ function PeerCard({
               openPeerMenu({
                 name,
                 peerId: peer?.peerId ?? null,
-                failure: failed ? describeFailure(peer!.failure!) : null,
+                onWhyFailed: failed ? () => onExplainFailure(peer!, name) : null,
                 onOpenProfile,
                 onBlock,
               })
@@ -961,13 +1006,13 @@ function RowAction({
 function openPeerMenu({
   name,
   peerId,
-  failure,
+  onWhyFailed,
   onOpenProfile,
   onBlock,
 }: {
   name: string;
   peerId: string | null;
-  failure: string | null;
+  onWhyFailed: (() => void) | null;
   onOpenProfile: (peerId: string) => void;
   onBlock: (peerId: string, name: string) => void;
 }): void {
@@ -977,11 +1022,8 @@ function openPeerMenu({
     onPress?: () => void;
   }> = [];
 
-  if (failure !== null) {
-    buttons.push({
-      text: 'Why did this fail?',
-      onPress: () => Alert.alert('Why did this fail?', failure),
-    });
+  if (onWhyFailed !== null) {
+    buttons.push({text: 'Why did this fail?', onPress: onWhyFailed});
   }
   if (peerId !== null) {
     buttons.push({text: 'View profile', onPress: () => onOpenProfile(peerId)});
@@ -1213,6 +1255,18 @@ const useStyles = makeStyles(t => ({
 
   // ---- recently connected ------------------------------------------------
   recentBlock: {marginTop: 6},
+  lookAgain: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    borderWidth: 1,
+    borderColor: t.border,
+    borderRadius: radius.pill,
+    paddingVertical: 10,
+    paddingHorizontal: 20,
+  },
+  lookAgainText: {...typography.callout, color: t.text},
+
   // A label and space, no rule line. The hairlines under the rows already say where one
   // group stops; a second horizontal line above the label was drawing the same boundary
   // twice.

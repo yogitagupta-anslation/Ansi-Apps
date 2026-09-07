@@ -1,5 +1,5 @@
 import React from 'react';
-import {View, type ViewStyle} from 'react-native';
+import {StyleSheet, View, type ViewStyle} from 'react-native';
 import {elevation, radius, spacing, typography} from '../../config/theme';
 import {makeStyles, useTheme} from '../../theme/ThemeProvider';
 import {AppText, DenseText} from '../AppText';
@@ -144,6 +144,7 @@ export function EmptyState({
   title,
   detail,
   action,
+  footnote,
 }: {
   /** Preferred. A drawn icon rather than whatever the platform font makes of a symbol. */
   icon?: IconName;
@@ -153,6 +154,11 @@ export function EmptyState({
   detail?: string;
   /** The one thing to do about the emptiness, when there is one. */
   action?: React.ReactNode;
+  /**
+   * A quieter line under the action, for context that explains the emptiness rather
+   * than asking anything of the reader.
+   */
+  footnote?: string;
 }) {
   const styles = useStyles();
   const theme = useTheme();
@@ -171,6 +177,7 @@ export function EmptyState({
       <AppText style={styles.emptyTitle}>{title}</AppText>
       {detail ? <DenseText style={styles.emptyDetail}>{detail}</DenseText> : null}
       {action ? <View style={styles.emptyAction}>{action}</View> : null}
+      {footnote ? <DenseText style={styles.emptyFootnote}>{footnote}</DenseText> : null}
     </View>
   );
 }
@@ -296,6 +303,16 @@ const useStyles = makeStyles(t => ({
   },
   emptyGlyph: {fontSize: 26, color: t.textFaint},
   emptyAction: {marginTop: spacing.lg},
+  emptyFootnote: {
+    ...typography.caption,
+    color: t.textFaint,
+    textAlign: 'center',
+    marginTop: spacing.xl,
+    paddingTop: spacing.lg,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: t.divider,
+    maxWidth: 280,
+  },
   emptyTitle: {...typography.title, color: t.text},
   emptyDetail: {
     ...typography.body,
