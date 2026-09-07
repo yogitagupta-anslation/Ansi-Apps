@@ -1,13 +1,5 @@
 import React, {useCallback, useEffect, useMemo, useState} from 'react';
-import {
-  Alert,
-  FlatList,
-  LayoutAnimation,
-  Platform,
-  RefreshControl,
-  UIManager,
-  View,
-} from 'react-native';
+import {Alert, FlatList, LayoutAnimation, Linking, Platform, RefreshControl, UIManager, View} from 'react-native';
 import {useFocusEffect} from '@react-navigation/native';
 import {avatarHue, radius, spacing, typography} from '../config/theme';
 import {makeStyles, useTheme} from '../theme/ThemeProvider';
@@ -37,6 +29,7 @@ import type {Peer} from '../types/Peer';
 import type {LinkState} from '../types/BLE';
 import type {RootTabScreenProps} from '../navigation/types';
 import {relativeTime} from '../utils/time';
+import {formatDuration} from '../peers/LinkMetrics';
 import {isCentralLink} from '../utils/linkId';
 
 // Opt-in flag Android needs for LayoutAnimation outside a native-driver context. A no-op
@@ -87,6 +80,21 @@ export function NearbyScreen({navigation}: RootTabScreenProps<'Nearby'>) {
   // radio in the room.
   const [sort, setSort] = useState<SortMode>('match');
   const myInterests = useAppStore(s => s.settings.interests);
+  const links = useAppStore(s => s.links);
+  const permission = useAppStore(s => s.permission);
+  /** Refused permanently — Android will not show the dialog again. */
+  const permissionBlocked = permission.blocked.length > 0;
+  const connectedPeers = useMemo(
+    () => peers.filter(p => p.state === 'connected'),
+    [peers],
+  );
+
+  /** Hand the slot back. The scheduler will offer it to whoever is waiting. */
+  const onDisconnect = useCallback((peer: Peer) => {
+    if (peer.linkId) {
+      bleChat.peerManager.disconnect(peer.linkId).catch(() => undefined);
+    }
+  }, []);
 
   // Scan continuously while this screen is actually being looked at, and fall back to
   // the paced profile on the way out. Someone watching a discovery list wants results
@@ -477,6 +485,57 @@ export function NearbyScreen({navigation}: RootTabScreenProps<'Nearby'>) {
               </Touchable>
             ) : null}
 
+            {/*
+              At the radio's limit, said as a fact rather than a failure.
+
+              `budgetLearned` is only true once the chip has actually refused a link and
+              the scheduler lowered its budget to match — so this is never a guess about
+              capacity, it is the number the hardware gave us. Without it, the seventh
+              "Say hi" simply fails and looks like the app is broken.
+
+              The connected peers are listed with how long each link has been up, not with
+              an idleness ranking: the transport measures uptime and does not measure
+              time-since-last-byte, and inventing "idle 14 minutes" from uptime would be a
+              number that reads precise and is not.
+            */}
+            {links.budgetLearned && connectedPeers.length >= links.effectiveBudget ? (
+              <View style={styles.limitBlock}>
+                <View style={styles.limitHead}>
+                  <Icon name="alert" color={theme.warn} size={17} strokeWidth={1.9} />
+                  <AppText style={styles.limitTitle}>This phone is at its limit</AppText>
+                </View>
+                <DenseText style={styles.limitBody}>
+                  Bluetooth chips only hold a handful of links at once. Yours holds{' '}
+                  {links.effectiveBudget} and refused another — nothing is broken.
+                </DenseText>
+                <DenseText style={styles.limitLabel}>FREE UP A SLOT</DenseText>
+                {connectedPeers.map(p => (
+                  <View key={p.peerId ?? p.linkId} style={styles.limitRow}>
+                    <MascotAvatar
+                      size={32}
+                      tint={avatarHue(theme, p.peerId ?? p.linkId ?? 'x').fg}
+                    />
+                    <View style={styles.grow}>
+                      <AppText style={styles.limitName} numberOfLines={1}>
+                        {p.displayName ?? 'Someone nearby'}
+                      </AppText>
+                      <DenseText style={styles.limitMeta}>
+                        Connected {formatDuration(p.metrics?.currentUptimeMs ?? 0)}
+                      </DenseText>
+                    </View>
+                    <Touchable
+                      scale={false}
+                      onPress={() => onDisconnect(p)}
+                      style={[styles.pill, styles.pillNeutral]}>
+                      <DenseText style={[styles.pillText, styles.pillNeutralText]}>
+                        Disconnect
+                      </DenseText>
+                    </Touchable>
+                  </View>
+                ))}
+              </View>
+            ) : null}
+
             {/* The list below is people who are in range right now; the footer's EARLIER
                 is people who were. Naming both is what makes the second one legible. */}
             {chatRows.length > 0 ? (
@@ -522,21 +581,61 @@ export function NearbyScreen({navigation}: RootTabScreenProps<'Nearby'>) {
           ) : null
         }
         ListEmptyComponent={
-          bluetoothState === 'PoweredOn' && scanning ? (
-            <DiscoveryRadar blips={blips} scanning={scanning} />
+          // The radar AND the words, not one or the other. A sweeping dial with no blips
+          // proves the radio is working but says nothing about what to do; the sentence
+          // under it is the part that answers "so is it broken, or is nobody here?".
+          bluetoothState === 'PoweredOn' && scanning && !permissionBlocked ? (
+            <>
+              <DiscoveryRadar blips={blips} scanning={scanning} caption={false} />
+              <EmptyState
+                title="Nobody here yet"
+                detail="Anyone who opens BLE Chat within about a room's distance turns up on their own."
+                footnote={
+                  otherDevicesCount > 0
+                    ? `${otherDevicesCount} other Bluetooth device${
+                        otherDevicesCount === 1 ? '' : 's'
+                      } in range — headphones, watches, that sort of thing. Nothing to chat with.`
+                    : undefined
+                }
+              />
+            </>
           ) : (
             <EmptyState
-              icon={bluetoothState === 'PoweredOn' ? 'radar' : 'bluetooth'}
+              icon={
+                permissionBlocked
+                  ? 'block'
+                  : bluetoothState === 'PoweredOn'
+                  ? 'radar'
+                  : 'bluetooth'
+              }
               title={
-                bluetoothState !== 'PoweredOn' ? 'Bluetooth is off' : 'Nobody here yet'
+                // Three different situations that all used to read "Not scanning".
+                // A permission Android will not ask for again is not the same problem
+                // as a radio that is switched off, and neither is the same as an empty
+                // room — they need three different next steps.
+                permissionBlocked
+                  ? "BLE Chat can't look for people"
+                  : bluetoothState !== 'PoweredOn'
+                  ? 'Bluetooth is off'
+                  : 'Nobody here yet'
               }
               detail={
-                bluetoothState !== 'PoweredOn'
+                permissionBlocked
+                  ? "The nearby-devices permission was turned off, and Android won't ask again — it has to be changed in Settings."
+                  : bluetoothState !== 'PoweredOn'
                   ? 'It is the only way BLE Chat reaches other phones — there is no internet fallback.'
                   : "Anyone who opens BLE Chat within about a room's distance turns up on their own."
               }
               action={
-                bluetoothState === 'PoweredOn' ? (
+                permissionBlocked ? (
+                  <Touchable
+                    scale={false}
+                    onPress={() => Linking.openSettings()}
+                    style={styles.lookAgain}>
+                    <Icon name="gear" size={14} color={theme.text} />
+                    <DenseText style={styles.lookAgainText}>Open Settings</DenseText>
+                  </Touchable>
+                ) : bluetoothState === 'PoweredOn' ? (
                   <Touchable scale={false} onPress={onRescan} style={styles.lookAgain}>
                     <Icon name="radar" size={14} color={theme.text} />
                     <DenseText style={styles.lookAgainText}>Look again</DenseText>
@@ -544,6 +643,11 @@ export function NearbyScreen({navigation}: RootTabScreenProps<'Nearby'>) {
                 ) : undefined
               }
               footnote={
+                // The one thing people actually worry about when Android says "nearby
+                // devices", answered on the screen that asks for it.
+                permissionBlocked
+                  ? 'This does not include location. BLE Chat reads signal strength and a service ID, nothing about where you are.'
+                  :
                 // Only when there genuinely are some. "0 other devices" is noise, and
                 // the count is the answer to the question this screen actually raises:
                 // is the radio working, or is nobody here? Hearing headphones and
@@ -621,19 +725,26 @@ export function NearbyScreen({navigation}: RootTabScreenProps<'Nearby'>) {
 function DiscoveryRadar({
   blips,
   scanning,
+  /**
+   * Suppressed when an empty state is rendering directly beneath, which already says
+   * that nothing is here. Two sentences a line apart making the same point is exactly
+   * the noise the caption exists to avoid.
+   */
+  caption = true,
 }: {
   blips: React.ComponentProps<typeof Radar>['blips'];
   scanning: boolean;
+  caption?: boolean;
 }) {
   const styles = useStyles();
   return (
     <View style={styles.radarWrap}>
       <Radar size={260} blips={blips} scanning={scanning} />
-      <DenseText style={styles.radarCaption}>
-        {blips.length === 0
-          ? 'Anything advertising in range will appear here.'
-          : 'Distance from centre is measured RSSI — nothing is placed for looks.'}
-      </DenseText>
+      {caption && blips.length > 0 ? (
+        <DenseText style={styles.radarCaption}>
+          Distance from centre is measured RSSI — nothing is placed for looks.
+        </DenseText>
+      ) : null}
     </View>
   );
 }
@@ -1266,6 +1377,25 @@ const useStyles = makeStyles(t => ({
     paddingHorizontal: 20,
   },
   lookAgainText: {...typography.callout, color: t.text},
+
+  limitBlock: {
+    marginTop: 22,
+    paddingTop: 18,
+    borderTopWidth: 1,
+    borderTopColor: t.divider,
+  },
+  limitHead: {flexDirection: 'row', alignItems: 'center', gap: 10},
+  limitTitle: {...typography.title, fontSize: 18, color: t.text, flex: 1},
+  limitBody: {...typography.caption, color: t.textDim, marginTop: 8},
+  limitLabel: {...typography.overline, color: t.textDim, marginTop: 20, marginBottom: 4},
+  limitRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingVertical: 10,
+  },
+  limitName: {...typography.headline, fontSize: 15, color: t.text},
+  limitMeta: {...typography.caption, color: t.textDim, marginTop: 2},
 
   // A label and space, no rule line. The hairlines under the rows already say where one
   // group stops; a second horizontal line above the label was drawing the same boundary

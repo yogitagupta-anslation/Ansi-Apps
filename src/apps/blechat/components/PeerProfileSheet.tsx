@@ -1,7 +1,7 @@
 import React, {useState} from 'react';
-import {Modal, Pressable, StyleSheet, View} from 'react-native';
+import {Alert, Clipboard, Modal, Pressable, StyleSheet, View} from 'react-native';
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
-import {radius, spacing, speakerTint, typography} from '../config/theme';
+import {fonts, radius, spacing, speakerTint, typography} from '../config/theme';
 import {makeStyles, useTheme} from '../theme/ThemeProvider';
 import {AppText, DenseText} from './AppText';
 import {Touchable} from './Motion';
@@ -19,6 +19,18 @@ import {
 } from '../state/appStore';
 import {describeAssessment, isSuspicious} from '../security/IdentityWatch';
 import type {Peer} from '../types/Peer';
+
+/**
+ * The first two groups only.
+ *
+ * Enough to tell two identities apart at a glance in a warning, which is all that block
+ * is for. The full code lives behind "View security code", because a comparison you are
+ * meant to read aloud should be made deliberately rather than skimmed inside an alert.
+ */
+function shortCode(peerId: string): string {
+  const groups = peerId.match(/.{1,4}/g) ?? [peerId];
+  return groups.slice(0, 2).join(' ').toUpperCase();
+}
 
 /**
  * Groups a 32-hex-char peerId into "XXXX XXXX  XXXX XXXX" — the same idea as Signal's
@@ -164,11 +176,48 @@ export function PeerProfileSheet({
                       styles.identityWarningTitle,
                       {color: severe ? theme.error : theme.warn},
                     ]}>
-                    {severe ? 'This may not be who you think' : 'Name already in use'}
+                    {severe
+                      ? `This might not be the ${peer.displayName ?? 'person'} you know`
+                      : 'Name already in use'}
                   </AppText>
                   <DenseText style={styles.identityWarningBody}>
                     {describeAssessment(alert)}
                   </DenseText>
+
+                  {/*
+                    Both codes, side by side.
+
+                    A warning that says "this may not be who you think" and stops leaves
+                    the reader with no way to check. The identity we already confirmed is
+                    in `conflictsWith`, so the comparison the warning is asking for can
+                    actually be made here rather than described.
+                  */}
+                  {alert.conflictsWith.length > 0 ? (
+                    <View style={styles.codeCompare}>
+                      {alert.conflictsWith.slice(0, 1).map(known => (
+                        <View key={known.peerId} style={styles.codeRow}>
+                          <Icon name="shield" color={theme.ok} size={14} strokeWidth={1.9} />
+                          <DenseText style={styles.codeWho}>
+                            {known.verified ? 'The one you confirmed' : 'The one you knew'}
+                          </DenseText>
+                          <DenseText style={[styles.codeValue, {color: theme.ok}]}>
+                            {shortCode(known.peerId)}
+                          </DenseText>
+                        </View>
+                      ))}
+                      <View style={styles.codeRow}>
+                        <Icon name="alert" color={theme.error} size={14} strokeWidth={1.9} />
+                        <DenseText style={styles.codeWho}>This phone</DenseText>
+                        <DenseText style={[styles.codeValue, {color: theme.error}]}>
+                          {shortCode(peerId)}
+                        </DenseText>
+                      </View>
+                      <DenseText style={styles.codeFootnote}>
+                        It could be innocent — a new phone gets a new identity. Reading the
+                        code aloud together is the only way to be sure.
+                      </DenseText>
+                    </View>
+                  ) : null}
                 </View>
               </View>
             );
@@ -265,14 +314,51 @@ export function PeerProfileSheet({
 
             {showFingerprint && (
               <View style={styles.fingerprintBox}>
-                <DenseText style={styles.fingerprintHint}>
-                  Compare this code with {peer.displayName ?? 'them'}'s own screen, in
-                  person. It is derived from their identity key, the same thing the
-                  handshake already proved — matching codes rule out someone else
-                  claiming to be them from the very first connection.
+                {/*
+                  The limit of what the cryptography can tell you, said plainly.
+
+                  The handshake is real and it is checked, but it proves the session
+                  matches a key — not that the key belongs to the person whose name is on
+                  the row. Only reading the code aloud closes that gap, and a screen that
+                  showed the code without saying why would leave people believing the tick
+                  already meant this.
+                */}
+                <View style={styles.fingerprintNote}>
+                  <Icon name="info" color={theme.textDim} size={14} strokeWidth={2} />
+                  <DenseText style={styles.fingerprintHint}>
+                    A handshake proves the session matches a key. It cannot prove that key
+                    belongs to the person you think. Reading this aloud, in person, does.
+                  </DenseText>
+                </View>
+
+                <DenseText style={styles.fingerprintLabel}>
+                  {(peer.displayName ?? 'THEIR').toUpperCase()}
+                  {peer.displayName ? "'S CODE" : ' CODE'}
                 </DenseText>
                 <DenseText style={styles.fingerprintCode} selectable>
                   {formatFingerprint(peerId)}
+                </DenseText>
+
+                <Touchable
+                  scale={false}
+                  onPress={() => {
+                    // Flattened to one line: the two-line layout is for reading aloud
+                    // off the screen, not for what lands on the clipboard.
+                    Clipboard.setString(formatFingerprint(peerId).split('\n').join(' '));
+                    Alert.alert(
+                      'Copied',
+                      'The code is on the clipboard. It is only useful read aloud against their screen — sending it over a channel someone could tamper with proves nothing.',
+                    );
+                  }}
+                  style={styles.copyCode}
+                  accessibilityLabel="Copy security code">
+                  <Icon name="copy" color={theme.textDim} size={12} />
+                  <DenseText style={styles.copyCodeText}>Copy</DenseText>
+                </Touchable>
+
+                <DenseText style={styles.fingerprintAsk}>
+                  Ask {peer.displayName ?? 'them'} to open the same screen and read theirs
+                  out loud.
                 </DenseText>
                 <Touchable
                   scale={false}
@@ -423,16 +509,45 @@ const useStyles = makeStyles(t => ({
   },
   fingerprintToggleText: {...typography.callout, color: t.textDim, fontWeight: '600'},
   fingerprintBox: {
-    marginTop: spacing.sm,
+    marginTop: spacing.md,
     backgroundColor: t.surfaceAlt,
     borderRadius: radius.md,
     padding: spacing.md,
   },
-  fingerprintHint: {...typography.caption, color: t.textDim, lineHeight: 16},
+  codeCompare: {marginTop: spacing.md, gap: 2},
+  codeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingVertical: 8,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: t.divider,
+  },
+  codeWho: {...typography.caption, color: t.textDim, flex: 1},
+  codeValue: {...typography.monoSmall},
+  codeFootnote: {...typography.caption, color: t.textDim, marginTop: spacing.sm},
+
+  fingerprintNote: {flexDirection: 'row', alignItems: 'flex-start', gap: 9},
+  fingerprintHint: {...typography.caption, color: t.textDim, flex: 1},
+  fingerprintLabel: {...typography.overline, color: t.textDim, marginTop: spacing.lg},
+  fingerprintAsk: {...typography.caption, color: t.textDim, marginTop: spacing.md},
+  copyCode: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    alignSelf: 'center',
+    borderWidth: 1,
+    borderColor: t.border,
+    borderRadius: radius.pill,
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    marginTop: spacing.md,
+  },
+  copyCodeText: {...typography.caption, color: t.textDim},
   fingerprintCode: {
-    fontFamily: 'monospace',
-    fontSize: 15,
-    fontWeight: '700',
+    fontFamily: fonts.mono,
+    fontSize: 17,
+    fontWeight: '500',
     color: t.text,
     textAlign: 'center',
     letterSpacing: 1,

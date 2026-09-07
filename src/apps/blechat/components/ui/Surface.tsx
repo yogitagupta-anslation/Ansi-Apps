@@ -164,6 +164,7 @@ export function EmptyState({
   const theme = useTheme();
   return (
     <View style={styles.empty}>
+      {icon || glyph ? (
       <View style={styles.emptyGlyphWrap}>
         {icon ? (
           // Drawn at the same weight as the rest of the chrome. "✉" and "◎" were
@@ -174,6 +175,7 @@ export function EmptyState({
           <AppText style={styles.emptyGlyph}>{glyph}</AppText>
         )}
       </View>
+      ) : null}
       <AppText style={styles.emptyTitle}>{title}</AppText>
       {detail ? <DenseText style={styles.emptyDetail}>{detail}</DenseText> : null}
       {action ? <View style={styles.emptyAction}>{action}</View> : null}
