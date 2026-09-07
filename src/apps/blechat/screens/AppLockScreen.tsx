@@ -1,5 +1,5 @@
 import React, {useState} from 'react';
-import {KeyboardAvoidingView, Platform, ScrollView, TextInput, View} from 'react-native';
+import {KeyboardAvoidingView, Platform, ScrollView, View} from 'react-native';
 import {AppText, DenseText} from '../components/AppText';
 import {Screen} from '../components/ui/Screen';
 import {Touchable} from '../components/Motion';
@@ -32,13 +32,43 @@ export function AppLockScreen({mode, onUnlock, onSetupComplete, onCancel}: Props
   const [confirmStage, setConfirmStage] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const submit = () => {
-    if (pin.length < MIN_PIN_LENGTH) {
+  /**
+   * A key press, with submit folded in.
+   *
+   * The pad has no Enter: reaching the length IS the submission, which is how every
+   * other PIN screen on the phone behaves. Anything shorter than the minimum simply
+   * cannot be submitted, so there is no failure state to report for a half-typed one.
+   */
+  const press = (key: string) => {
+    setError(null);
+    if (key === 'del') {
+      setPin(p => p.slice(0, -1));
+      return;
+    }
+    setPin(p => {
+      const next = (p + key).slice(0, 8);
+      if (next.length >= MIN_PIN_LENGTH) {
+        // Deferred so the last dot paints before the screen changes under it.
+        setTimeout(() => submitWith(next), 60);
+      }
+      return next;
+    });
+  };
+
+  /**
+   * Takes the PIN as an argument rather than reading state.
+   *
+   * The keypad submits in the same tick it appends the last digit, and `pin` would still
+   * hold the previous value at that point — a check against stale state would reject a
+   * correct PIN on its final keystroke.
+   */
+  const submitWith = (value: string) => {
+    if (value.length < MIN_PIN_LENGTH) {
       setError(`At least ${MIN_PIN_LENGTH} digits.`);
       return;
     }
     if (mode === 'unlock') {
-      const ok = onUnlock?.(pin) ?? false;
+      const ok = onUnlock?.(value) ?? false;
       if (!ok) {
         setError('Wrong PIN.');
         setPin('');
@@ -46,20 +76,20 @@ export function AppLockScreen({mode, onUnlock, onSetupComplete, onCancel}: Props
       return;
     }
     if (!confirmStage) {
-      setFirstPin(pin);
+      setFirstPin(value);
       setPin('');
       setConfirmStage(true);
       setError(null);
       return;
     }
-    if (pin !== firstPin) {
+    if (value !== firstPin) {
       setError("Those didn't match. Start over.");
       setPin('');
       setFirstPin('');
       setConfirmStage(false);
       return;
     }
-    onSetupComplete?.(pin);
+    onSetupComplete?.(value);
   };
 
   return (
@@ -79,7 +109,7 @@ export function AppLockScreen({mode, onUnlock, onSetupComplete, onCancel}: Props
           keyboardShouldPersistTaps="handled">
           <View style={styles.card}>
             <View style={styles.iconWrap}>
-              <Icon name="shield" color={theme.accent} size={26} />
+              <Icon name="key" color={theme.textDim} size={26} strokeWidth={1.8} />
             </View>
             <AppText style={styles.title}>
               {mode === 'unlock'
@@ -90,39 +120,64 @@ export function AppLockScreen({mode, onUnlock, onSetupComplete, onCancel}: Props
             </AppText>
             <DenseText style={styles.subtitle}>
               {mode === 'unlock'
-                ? 'BLE Chat is locked.'
+                ? 'BLE Chat is locked'
                 : confirmStage
-                ? 'Type it again to make sure.'
-                : "Keeps anyone who picks up this phone out of your conversations. It's " +
-                  'a local screen lock, not encryption.'}
+                ? 'Type it again to make sure'
+                : 'A local screen lock, not encryption'}
             </DenseText>
-            <TextInput
-              style={styles.input}
-              value={pin}
-              onChangeText={t => {
-                setPin(t.replace(/[^0-9]/g, '').slice(0, 8));
-                setError(null);
-              }}
-              secureTextEntry
-              keyboardType="number-pad"
-              maxLength={8}
-              autoFocus
-              placeholder="••••"
-              placeholderTextColor={theme.textDim}
-              onSubmitEditing={submit}
-            />
+
+            {/*
+              Dots, not a text field.
+
+              A PIN pad has one job and the OS keyboard is not shaped for it: it offers
+              autocorrect, a paste target and a layout that changes between phones. Fixed
+              dots also make the length visible without showing the digits, which is the
+              only thing a shoulder-surfer could read off a masked field anyway.
+            */}
+            <View style={styles.dots}>
+              {Array.from({length: Math.max(MIN_PIN_LENGTH, pin.length)}).map((_, i) => (
+                <View
+                  key={i}
+                  style={[
+                    styles.dot,
+                    i < pin.length
+                      ? {backgroundColor: theme.accent}
+                      : {borderWidth: 1.5, borderColor: theme.border},
+                  ]}
+                />
+              ))}
+            </View>
+
             {error ? <DenseText style={styles.error}>{error}</DenseText> : null}
-            <Touchable scale={false} onPress={submit} style={styles.button}>
-              <DenseText style={styles.buttonText}>
-                {mode === 'unlock' ? 'Unlock' : confirmStage ? 'Confirm' : 'Continue'}
-              </DenseText>
-            </Touchable>
-            {onCancel && (
-              <Touchable scale={false} onPress={onCancel} style={styles.cancelButton}>
-                <DenseText style={styles.cancelText}>Cancel</DenseText>
-              </Touchable>
+          </View>
+
+          <View style={styles.keypad}>
+            {['1', '2', '3', '4', '5', '6', '7', '8', '9', '', '0', 'del'].map((key, i) =>
+              key === '' ? (
+                <View key={`gap-${i}`} style={styles.key} />
+              ) : (
+                <Touchable
+                  key={key}
+                  scale={false}
+                  onPress={() => press(key)}
+                  style={styles.key}
+                  accessibilityRole="button"
+                  accessibilityLabel={key === 'del' ? 'Delete' : key}>
+                  {key === 'del' ? (
+                    <Icon name="chevronLeft" color={theme.text} size={20} />
+                  ) : (
+                    <AppText style={styles.keyLabel}>{key}</AppText>
+                  )}
+                </Touchable>
+              ),
             )}
           </View>
+
+          {onCancel ? (
+            <Touchable scale={false} onPress={onCancel} style={styles.cancelButton}>
+              <DenseText style={styles.cancelText}>Cancel</DenseText>
+            </Touchable>
+          ) : null}
         </ScrollView>
       </KeyboardAvoidingView>
     </Screen>
@@ -138,6 +193,28 @@ const useStyles = makeStyles(t => ({
     justifyContent: 'center',
     padding: spacing.xl,
   },
+  dots: {flexDirection: 'row', gap: 13, marginTop: 28},
+  dot: {width: 12, height: 12, borderRadius: 6},
+  keypad: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+    width: '100%',
+    maxWidth: 340,
+    paddingHorizontal: 4,
+    marginTop: spacing.xl,
+  },
+  // Three to a row, sized off the container so the pad fits any width without a
+  // hardcoded key size.
+  key: {
+    width: '31.5%',
+    height: 52,
+    borderRadius: 14,
+    backgroundColor: t.surfaceAlt,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  keyLabel: {fontSize: 20, color: t.text},
   card: {width: '100%', maxWidth: 320, alignItems: 'center'},
   iconWrap: {
     width: 56,
@@ -155,19 +232,6 @@ const useStyles = makeStyles(t => ({
     textAlign: 'center',
     marginTop: spacing.sm,
     lineHeight: 17,
-  },
-  input: {
-    width: '100%',
-    backgroundColor: t.surface,
-    borderWidth: 1,
-    borderColor: t.border,
-    borderRadius: radius.lg,
-    marginTop: spacing.xl,
-    paddingVertical: spacing.md,
-    textAlign: 'center',
-    fontSize: 24,
-    letterSpacing: 8,
-    color: t.text,
   },
   error: {...typography.caption, color: t.error, marginTop: spacing.sm},
   button: {

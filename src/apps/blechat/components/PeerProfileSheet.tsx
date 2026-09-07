@@ -10,6 +10,7 @@ import {QualityBadge} from './ui/QualityBadge';
 import {SignalBars} from './ui/Primitives';
 import {sharedInterests} from '../config/interests';
 import {relativeTime} from '../utils/time';
+import {formatDuration} from '../peers/LinkMetrics';
 import {describeFailure} from '../ble/LinkErrors';
 import {
   markPeerVerified,
@@ -122,6 +123,9 @@ export function PeerProfileSheet({
             styles.card,
             {paddingBottom: Math.max(spacing.xl, insets.bottom + spacing.md)},
           ]}>
+          {/* The grip. A sheet you dismiss by dragging needs something to say so. */}
+          <View style={styles.grip} />
+
           <View style={styles.header}>
             <View style={[styles.avatar, {backgroundColor: speakerTint(theme, peerId) + '33'}]}>
               <Icon name="bluetooth" color={speakerTint(theme, peerId)} size={22} />
@@ -161,6 +165,37 @@ export function PeerProfileSheet({
               style={styles.closeButton}
               accessibilityLabel="Close">
               <Icon name="close" color={theme.textDim} size={18} />
+            </Touchable>
+          </View>
+
+
+          {/* Directly under the name, as drawn: one filled action and two round ones.
+              A sheet you opened by tapping somebody has an obvious main verb, and it
+              should not be at the bottom past everything else about them. */}
+          <View style={styles.actions}>
+            {onOpenChat ? (
+              <Touchable scale={false} onPress={onOpenChat} style={styles.primaryAction}>
+                <Icon name="tabChats" color={theme.onAccent} size={15} strokeWidth={2} />
+                <DenseText style={styles.primaryActionText}>Open chat</DenseText>
+              </Touchable>
+            ) : null}
+            <Touchable
+              scale={false}
+              onPress={() => toggleFavoritePeer(peerId)}
+              style={styles.roundAction}
+              accessibilityLabel={isFavorite ? 'Remove from favourites' : 'Add to favourites'}>
+              <Icon
+                name={isFavorite ? 'starFilled' : 'star'}
+                color={isFavorite ? theme.tileAmberFg : theme.textDim}
+                size={17}
+              />
+            </Touchable>
+            <Touchable
+              scale={false}
+              onPress={blocked ? onUnblock : onBlock}
+              style={styles.roundAction}
+              accessibilityLabel={blocked ? 'Unblock' : 'Block'}>
+              <Icon name="block" color={theme.error} size={17} />
             </Touchable>
           </View>
 
@@ -234,77 +269,65 @@ export function PeerProfileSheet({
             );
           })()}
 
-          <View style={styles.statRow}>
-            <View style={styles.stat}>
-              <SignalBars rssi={peer.rssi} size="sm" />
-              <DenseText style={styles.statLabel}>
-                {/* Bars, not a number. dBm is a measurement, and the sheet's job is to
-                    say how well this is likely to go — the exact figure lives in
-                    Diagnostics for anyone who needs it. */}
-                {peer.rssi !== null ? qualityWord(peer.rssi) : 'No signal yet'}
-              </DenseText>
-            </View>
-            <View style={styles.stat}>
-              <AppText style={styles.statValue}>{peer.connectCount}</AppText>
-              <DenseText style={styles.statLabel}>Times connected</DenseText>
-            </View>
-            <View style={styles.stat}>
-              <AppText style={styles.statValue} numberOfLines={1}>
-                {relativeTime(peer.lastSeen)}
-              </AppText>
-              <DenseText style={styles.statLabel}>Last seen</DenseText>
-            </View>
-            <View style={styles.stat}>
-              <AppText style={styles.statValue} numberOfLines={1}>
-                {relativeTime(peer.firstSeen)}
-              </AppText>
-              {/* Now meaningful: both this and the connection count survive a restart,
-                  so they describe the relationship rather than the current session. */}
-              <DenseText style={styles.statLabel}>Known since</DenseText>
-            </View>
+          <DenseText style={styles.sectionLabel}>CONNECTION</DenseText>
+
+          <View style={styles.connRow}>
+            <SignalBars rssi={peer.rssi} size="sm" />
+            <DenseText style={styles.connLabel}>Signal</DenseText>
+            <DenseText style={styles.connValue}>
+              {peer.rssi !== null ? qualityWord(peer.rssi) : 'Not measured'}
+            </DenseText>
           </View>
 
-          {/* Only the two reasons that actually mean "this link did not trust the
-              identity it was talking to" — a timeout or an out-of-range drop is not a
-              security event and does not belong here. */}
-          {peer.failure &&
-            (peer.failure.reason === 'AuthenticationFailed' ||
-              peer.failure.reason === 'Blocked') && (
-              <View style={styles.warningBox}>
-                <Icon name="alert" color={theme.error} size={14} />
-                <DenseText style={styles.warningText}>
-                  {describeFailure(peer.failure)}
-                </DenseText>
-              </View>
-            )}
+          {/* "Message size limit", not MTU. It is the same negotiated number, said as
+              the thing it decides — how much fits in one go before a message has to be
+              split up. */}
+          {peer.gatt ? (
+            <View style={styles.connRow}>
+              <Icon name="inbox" color={theme.textDim} size={15} strokeWidth={1.9} />
+              <DenseText style={styles.connLabel}>Message size limit</DenseText>
+              <DenseText style={styles.connMono}>{peer.gatt.mtu} bytes</DenseText>
+            </View>
+          ) : null}
 
-          {(shared.length > 0 || other.length > 0) && (
-            <View style={styles.section}>
-              <DenseText style={styles.sectionLabel}>INTERESTS</DenseText>
+          <View style={[styles.connRow, styles.connRowLast]}>
+            <Icon name="clock" color={theme.textDim} size={15} strokeWidth={1.9} />
+            <DenseText style={styles.connLabel}>
+              {peer.state === 'connected' ? 'Connected for' : 'Last seen'}
+            </DenseText>
+            <DenseText style={styles.connMono}>
+              {peer.state === 'connected'
+                ? formatDuration(peer.metrics?.currentUptimeMs ?? 0)
+                : relativeTime(peer.lastSeen)}
+            </DenseText>
+          </View>
+
+          {shared.length > 0 || other.length > 0 ? (
+            <>
+              <DenseText style={styles.sectionLabel}>
+                {shared.length > 0 ? 'SHARED INTERESTS' : 'INTERESTS'}
+              </DenseText>
               {/* maxFontSizeMultiplier=1: a short badge label like this has no slack
                   between the text's un-scaled auto-measured width and the pill's rounded
                   edge — any accessibility scaling here is exactly what clips a trailing
                   character with no ellipsis. */}
               <View style={styles.tagRow}>
-                {shared.map(interest => (
-                  <View key={interest} style={[styles.tag, styles.tagShared]}>
-                    <DenseText
-                      style={[styles.tagText, styles.tagTextShared]}
-                      maxFontSizeMultiplier={1}>
-                      {interest}
-                    </DenseText>
-                  </View>
-                ))}
-                {other.map(interest => (
+                {(shared.length > 0 ? shared : other).map(interest => (
                   <View key={interest} style={styles.tag}>
+                    <Icon name="check" color={theme.textDim} size={11} strokeWidth={2.4} />
                     <DenseText style={styles.tagText} maxFontSizeMultiplier={1}>
                       {interest}
                     </DenseText>
                   </View>
                 ))}
               </View>
-            </View>
-          )}
+              {/* The rest as a sentence rather than more chips: what you have in common
+                  is the reason to talk to them, and everything else is context. */}
+              {shared.length > 0 && other.length > 0 ? (
+                <DenseText style={styles.alsoInto}>Also into {other.join(', ')}</DenseText>
+              ) : null}
+            </>
+          ) : null}
 
           <View style={styles.section}>
             <Touchable
@@ -401,26 +424,6 @@ export function PeerProfileSheet({
             )}
           </View>
 
-          <View style={styles.actions}>
-            {onOpenChat && (
-              <Touchable
-                scale={false}
-                onPress={onOpenChat}
-                style={styles.primaryAction}>
-                <Icon name="link" color={theme.onAccent} size={14} />
-                <DenseText style={styles.primaryActionText}>Open chat</DenseText>
-              </Touchable>
-            )}
-            <Touchable
-              scale={false}
-              onPress={blocked ? onUnblock : onBlock}
-              style={styles.secondaryAction}>
-              <Icon name="block" color={theme.error} size={14} />
-              <DenseText style={styles.secondaryActionText}>
-                {blocked ? 'Unblock' : 'Block'}
-              </DenseText>
-            </Touchable>
-          </View>
         </View>
       </View>
     </Modal>
@@ -473,17 +476,6 @@ const useStyles = makeStyles(t => ({
     lineHeight: 16,
     marginTop: 2,
   },
-
-  statRow: {
-    flexDirection: 'row',
-    marginTop: spacing.lg,
-    backgroundColor: t.surfaceAlt,
-    borderRadius: radius.md,
-    paddingVertical: spacing.md,
-  },
-  stat: {flex: 1, alignItems: 'center', gap: 4},
-  statValue: {...typography.callout, color: t.text, fontWeight: '700'},
-  statLabel: {...typography.caption, color: t.textDim, fontSize: 11},
 
   warningBox: {
     flexDirection: 'row',
@@ -541,6 +533,49 @@ const useStyles = makeStyles(t => ({
   codeValue: {...typography.monoSmall},
   codeFootnote: {...typography.caption, color: t.textDim, marginTop: spacing.sm},
 
+  grip: {
+    width: 36,
+    height: 4,
+    borderRadius: radius.pill,
+    backgroundColor: t.border,
+    alignSelf: 'center',
+    marginBottom: 18,
+  },
+  actions: {flexDirection: 'row', gap: 8, marginTop: 18},
+  primaryAction: {
+    flex: 1,
+    height: 44,
+    borderRadius: radius.pill,
+    backgroundColor: t.accent,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 7,
+  },
+  primaryActionText: {fontSize: 14.5, fontWeight: '500', color: t.onAccent},
+  roundAction: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    borderWidth: 1,
+    borderColor: t.border,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  connRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 9,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: t.divider,
+  },
+  connRowLast: {borderBottomWidth: 0},
+  connLabel: {fontSize: 13.5, color: t.textDim, flex: 1},
+  connValue: {fontSize: 13.5, color: t.text},
+  connMono: {...typography.monoSmall, color: t.text},
+  alsoInto: {fontSize: 13, color: t.textDim, marginTop: 8},
+
   fingerprintNote: {flexDirection: 'row', alignItems: 'flex-start', gap: 9},
   fingerprintHint: {...typography.caption, color: t.textDim, flex: 1},
   fingerprintLabel: {...typography.overline, color: t.textDim, marginTop: spacing.lg},
@@ -582,29 +617,4 @@ const useStyles = makeStyles(t => ({
   verifyButtonActive: {backgroundColor: t.tileGreenFg},
   verifyButtonText: {...typography.callout, color: t.tileGreenFg, fontWeight: '700'},
   verifyButtonTextActive: {color: t.onAccent},
-
-  actions: {flexDirection: 'row', gap: spacing.sm, marginTop: spacing.xl},
-  primaryAction: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 6,
-    backgroundColor: t.accent,
-    borderRadius: radius.pill,
-    paddingVertical: spacing.sm + 2,
-  },
-  primaryActionText: {...typography.callout, color: t.onAccent, fontWeight: '700'},
-  secondaryAction: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 6,
-    borderWidth: 1,
-    borderColor: t.error,
-    borderRadius: radius.pill,
-    paddingHorizontal: spacing.lg,
-    paddingVertical: spacing.sm + 2,
-  },
-  secondaryActionText: {...typography.callout, color: t.error, fontWeight: '700'},
 }));

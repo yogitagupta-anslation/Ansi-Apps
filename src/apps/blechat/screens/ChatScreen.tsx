@@ -24,6 +24,7 @@ import {GroupAvatar, SignalBars} from '../components/ui/Primitives';
 import {MascotAvatar} from '../components/ui/Mascot';
 import {MessageBubble} from '../components/MessageBubble';
 import {MessageInput} from '../components/MessageInput';
+import {MessageActionsSheet} from '../components/MessageActionsSheet';
 import {Screen} from '../components/ui/Screen';
 import {PeerProfileSheet} from '../components/PeerProfileSheet';
 import {AppText, DenseText} from '../components/AppText';
@@ -315,35 +316,22 @@ export function ChatScreen({route, navigation}: RootStackScreenProps<'Chat'>) {
     [conversationId],
   );
 
-  const onMessageActions = useCallback(
-    (message: ChatMessage) => {
-      const options: Array<{
-        text: string;
-        style?: 'default' | 'cancel' | 'destructive';
-        onPress?: () => void;
-      }> = [
-        {text: 'Copy text', onPress: () => Clipboard.setString(message.text)},
-      ];
-      if (message.direction === 'outgoing' && message.status === 'failed') {
-        options.push({text: 'Retry', onPress: () => onRetry(message)});
-      }
-      options.push({
-        text: 'Delete for me',
-        style: 'destructive',
-        onPress: () => {
-          if (conversationId) {
-            bleChat.messages.deleteLocal(conversationId, message.id);
-          }
-        },
-      });
-      options.push({text: 'Cancel', style: 'cancel'});
-      // Deliberately titled "for me": there is no server copy to remove, and the other
-      // side already has the bytes — pretending otherwise is exactly the kind of claim
-      // this app avoids making about its own guarantees.
-      Alert.alert('Message', undefined, options);
-    },
-    [conversationId, onRetry],
-  );
+  /**
+   * Long-press on a message.
+   *
+   * A sheet rather than an Alert: the design lifts the message itself above the menu,
+   * which is what makes it obvious WHICH message is about to be acted on — an alert
+   * titled "Message" over a thread of them is a guess.
+   *
+   * Reactions are deliberately not here. The frame shows a row of five, but nothing in
+   * the protocol carries one — a reaction has to reach the other phone to mean anything,
+   * and a row of buttons that changed only this screen would be a feature that quietly
+   * does not work.
+   */
+  const [actionsFor, setActionsFor] = useState<ChatMessage | null>(null);
+  const onMessageActions = useCallback((message: ChatMessage) => {
+    setActionsFor(message);
+  }, []);
 
   const onBlockPeer = useCallback(() => {
     if (!peer?.peerId) {
@@ -714,6 +702,29 @@ export function ChatScreen({route, navigation}: RootStackScreenProps<'Chat'>) {
           onSend={onSend}
         />
       </View>
+
+      <MessageActionsSheet
+        message={actionsFor}
+        onClose={() => setActionsFor(null)}
+        onCopy={() => {
+          if (actionsFor) {
+            Clipboard.setString(actionsFor.text);
+          }
+          setActionsFor(null);
+        }}
+        onRetry={() => {
+          if (actionsFor) {
+            onRetry(actionsFor);
+          }
+          setActionsFor(null);
+        }}
+        onDelete={() => {
+          if (actionsFor && conversationId) {
+            bleChat.messages.deleteLocal(conversationId, actionsFor.id);
+          }
+          setActionsFor(null);
+        }}
+      />
 
       {isGroup && group && (
         <GroupMembersSheet
