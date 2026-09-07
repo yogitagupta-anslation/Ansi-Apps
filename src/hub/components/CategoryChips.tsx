@@ -1,62 +1,58 @@
 /**
- * The category row.
+ * The category filter.
  *
- * Only the selected chip is filled; the rest sit flat on the background. A row
- * where every chip looks tappable-and-lit has nothing left to say about which one
- * is actually active.
+ * Horizontal and scrollable rather than wrapped: the row has a stable height whatever the
+ * registry grows to, and a category that scrolls off is a category you can still reach.
+ * Selection is hub violet, not an app accent — the chips filter every app, so none of them
+ * owns the control.
  */
 
 import React from 'react';
 import { ScrollView, StyleSheet, Text } from 'react-native';
 
 import { Press } from './Press';
-import { radius, space, type HubPalette } from '../theme';
-
-interface CategoryChipsProps {
-  categories: string[];
-  selected: string;
-  onSelect(category: string): void;
-  theme: HubPalette;
-}
+import { radius, space, typeScale as t } from '../theme';
+import { useHubTheme } from '../useHubTheme';
 
 export function CategoryChips({
   categories,
   selected,
   onSelect,
-  theme,
-}: CategoryChipsProps): React.ReactElement {
+  /** Bleed into the screen's horizontal padding so the row scrolls edge to edge. */
+  inset = space.lg,
+}: {
+  categories: string[];
+  selected: string;
+  onSelect(category: string): void;
+  inset?: number;
+}): React.ReactElement {
+  const theme = useHubTheme();
+
   return (
     <ScrollView
       horizontal
       showsHorizontalScrollIndicator={false}
-      contentContainerStyle={styles.row}
-      // The row is inside a vertical ScrollView; without this the chips clip
-      // against the parent's padding instead of running to the screen edge.
-      style={styles.scroller}
+      style={{ marginHorizontal: -inset }}
+      contentContainerStyle={[styles.row, { paddingHorizontal: inset }]}
     >
       {categories.map((category) => {
-        const active = category === selected;
+        const on = category === selected;
         return (
           <Press
             key={category}
-            scaleTo={0.93}
             onPress={() => onSelect(category)}
+            scaleTo={0.94}
             accessibilityRole="button"
-            accessibilityState={{ selected: active }}
+            accessibilityState={{ selected: on }}
             style={[
               styles.chip,
               {
-                backgroundColor: active ? theme.accent : theme.surface,
-                borderColor: active ? theme.accent : theme.border,
+                backgroundColor: on ? theme.chipOn : theme.surface,
+                borderColor: on ? theme.chipOn : theme.border,
               },
             ]}
           >
-            <Text
-              style={[
-                styles.label,
-                { color: active ? '#FFFFFF' : theme.textDim },
-              ]}
-            >
+            <Text style={[t.metaStrong, { color: on ? theme.chipOnText : theme.textDim }]}>
               {category}
             </Text>
           </Press>
@@ -67,15 +63,11 @@ export function CategoryChips({
 }
 
 const styles = StyleSheet.create({
-  scroller: { flexGrow: 0, marginHorizontal: -space.xl },
-  row: { gap: space.sm, paddingHorizontal: space.xl },
+  row: { flexDirection: 'row', gap: space.sm, paddingVertical: 2 },
   chip: {
-    height: 34,
-    paddingHorizontal: space.lg,
-    borderRadius: radius.sm + 7,
     borderWidth: StyleSheet.hairlineWidth,
-    alignItems: 'center',
-    justifyContent: 'center',
+    borderRadius: radius.pill,
+    paddingVertical: 8,
+    paddingHorizontal: 14,
   },
-  label: { fontSize: 13, fontWeight: '600' },
 });

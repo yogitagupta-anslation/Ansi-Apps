@@ -62,7 +62,8 @@
       "@react-native-vector-icons/lucide",
       "./plugins/withEventPulseBle.js",
       "./plugins/withBleChatNative.js",
-      "./plugins/withAttendanceNative.js"
+      "./plugins/withAttendanceNative.js",
+      "expo-font"
     ]
   }
 }
