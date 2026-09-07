@@ -1,4 +1,5 @@
 import React, {useEffect, useRef, useState} from 'react';
+import Svg, {Path} from 'react-native-svg';
 import {
   AccessibilityInfo,
   Animated,
@@ -488,5 +489,54 @@ export function BreathingDot({
         {opacity: value},
       ]}
     />
+  );
+}
+
+/**
+ * A rotating arc, for something genuinely in flight.
+ *
+ * Reserved for states the app is actively working through — a handshake running, a link
+ * being re-established. It is NOT a general "loading" mark: a spinner beside something
+ * that is merely waiting on the other phone would keep promising progress that is not
+ * being made.
+ *
+ * Under reduce-motion it holds still rather than disappearing. The word beside it carries
+ * the meaning in every place this is used, so a stationary arc loses nothing.
+ */
+export function Spinner({size = 12, color}: {size?: number; color: string}) {
+  const reduced = useReduceMotion();
+  const spin = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    if (reduced) {
+      return;
+    }
+    const loop = Animated.loop(
+      Animated.timing(spin, {
+        toValue: 1,
+        duration: 1000,
+        easing: Easing.linear,
+        useNativeDriver: true,
+      }),
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [reduced, spin]);
+
+  const rotate = spin.interpolate({inputRange: [0, 1], outputRange: ['0deg', '360deg']});
+
+  return (
+    <Animated.View style={{width: size, height: size, transform: [{rotate}]}}>
+      <Svg width={size} height={size} viewBox="0 0 24 24">
+        {/* A quarter arc, not a full ring: the gap is what makes the rotation visible. */}
+        <Path
+          d="M12 4a8 8 0 018 8"
+          stroke={color}
+          strokeWidth={2.6}
+          strokeLinecap="round"
+          fill="none"
+        />
+      </Svg>
+    </Animated.View>
   );
 }

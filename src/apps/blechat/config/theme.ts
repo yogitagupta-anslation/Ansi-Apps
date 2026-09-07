@@ -57,6 +57,14 @@ export interface Theme {
   neutral: string;
   /** The faint mark between two words that are not a list. */
   separator: string;
+  /**
+   * The dashed outline of something written but not yet sent.
+   *
+   * Its own token rather than `border`: a dash needs more contrast than a solid hairline
+   * to read as a deliberate outline instead of a rendering artefact, and it has to hold
+   * against the page rather than against a card.
+   */
+  dash: string;
 
   bubbleOut: string;
   bubbleOutText: string;
@@ -143,6 +151,7 @@ export const darkTheme: Theme = {
   neutral: '#52525B',
   // The faint mark between two words that are not a list — an interest separator.
   separator: '#3F3F46',
+  dash: '#3F3F46',
 
   // The one colour that must mean "mine" identically in both modes, so it does NOT
   // lift with the rest of the dark palette. White ink on it in both modes too.
@@ -208,6 +217,7 @@ export const lightTheme: Theme = {
   amber: '#A8620E',
   neutral: '#8E8D95',
   separator: '#C6C5BE',
+  dash: '#D6D5CE',
 
   // Identical to dark, deliberately: "mine" is the one thing that must not change
   // meaning between the two modes.

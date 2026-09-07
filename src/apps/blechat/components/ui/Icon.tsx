@@ -21,6 +21,7 @@ export type IconName =
   | 'chevronRight'
   | 'arrowUp'
   | 'info'
+  | 'checkDouble'
   | 'plus'
   | 'pencil'
   | 'shield'
@@ -124,6 +125,14 @@ const ICONS: Record<IconName, (p: StrokeProps, color: string) => React.ReactNode
     </>
   ),
   chevronRight: p => <Path {...p} d="M9 5l7 7-7 7" />,
+  // Two ticks, the second trailing the first. "Sent" is one write completing; this is
+  // the peer having acknowledged it, which is a different fact and needs a different mark.
+  checkDouble: p => (
+    <>
+      <Path {...p} d="M2 12.5l3.5 3.5L13 8.5" />
+      <Path {...p} d="M10 15l1 1 7.5-7.5" />
+    </>
+  ),
   info: p => (
     <>
       <Circle cx={12} cy={12} r={9} {...p} />

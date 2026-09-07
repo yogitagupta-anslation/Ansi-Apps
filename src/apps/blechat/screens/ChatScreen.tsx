@@ -20,7 +20,7 @@ import {
   dotColor,
   LABELS as LINK_STATE_LABELS,
 } from '../components/ConnectionIndicator';
-import {GroupAvatar, InitialAvatar, SignalBars} from '../components/ui/Primitives';
+import {GroupAvatar, SignalBars} from '../components/ui/Primitives';
 import {MascotAvatar} from '../components/ui/Mascot';
 import {MessageBubble} from '../components/MessageBubble';
 import {MessageInput} from '../components/MessageInput';
@@ -686,17 +686,30 @@ export function ChatScreen({route, navigation}: RootStackScreenProps<'Chat'>) {
           </View>
         )}
 
+        {/*
+          You can keep typing while they are out of range.
+
+          The composer used to be disabled whenever the link was down, which was gating a
+          capability the transport already has: `MessageService.send` checks `canReach`
+          and puts the message in the outbox as "pending", then delivers it for real when
+          the link returns. Refusing the keystrokes made the app look less capable than it
+          is, and — worse — turned a peer walking into the next room into a dead end.
+
+          It stays disabled for a peer we have never completed a handshake with: there is
+          no peerId to address, so there would be nothing to queue against.
+        */}
         <MessageInput
           placeholder={`Message ${group?.name ?? peer?.displayName ?? displayName}`}
-          enabled={connected}
-          disabledReason={
+          enabled={isGroup || peer?.peerId != null}
+          queueing={!connected}
+          queueingReason={
             isGroup
-              ? 'No group member is reachable. Messages will be queued until one is.'
-              : peer
-              ? LINK_STATE_LABELS[peer.state] +
-                ' - messages can only be sent over a live link.'
-              : 'This peer is not connected.'
+              ? 'No member is in range. Messages wait here and send themselves when one is.'
+              : `You can keep typing. Messages send themselves when ${
+                  peer?.displayName ?? displayName
+                } is back in range.`
           }
+          disabledReason="Say hi on Nearby first — there is nobody to address this to yet."
           tone={!isGroup && peer ? dotColor(peer.state, theme) : undefined}
           onSend={onSend}
         />

@@ -6,20 +6,37 @@ import {DenseText} from './AppText';
 import {Icon} from './ui/Icon';
 
 interface Props {
+  /** False only when there is no addressable peer at all — never merely "offline". */
   enabled: boolean;
   disabledReason: string;
+  /**
+   * The link is down, but the message will still be kept and sent later.
+   *
+   * Separate from `enabled` because they are different facts: this one does not stop you
+   * typing, it changes what the send button is promising.
+   */
+  queueing?: boolean;
+  queueingReason?: string;
   onSend: (text: string) => void;
   /** "Message Jaismeet" beats "Type a message...": it names where this is going. */
   placeholder?: string;
   /**
    * Border tint reflecting the link, not just the input's own enabled/disabled boolean —
    * amber while a reconnect is under way reads differently from the flat grey of "never
-   * tried", even though typing is equally blocked in both.
+   * tried".
    */
   tone?: string;
 }
 
-export function MessageInput({enabled, disabledReason, onSend, tone, placeholder}: Props) {
+export function MessageInput({
+  enabled,
+  disabledReason,
+  queueing = false,
+  queueingReason,
+  onSend,
+  tone,
+  placeholder,
+}: Props) {
   const styles = useStyles();
   const theme = useTheme();
   const [text, setText] = useState('');
@@ -36,6 +53,16 @@ export function MessageInput({enabled, disabledReason, onSend, tone, placeholder
   return (
     <View style={styles.wrapper}>
       {!enabled && <DenseText style={styles.disabled}>{disabledReason}</DenseText>}
+
+      {/* Reassurance, not a warning. The message is going to be delivered — just not
+          this second — so this says what will happen rather than what has failed. */}
+      {enabled && queueing && queueingReason ? (
+        <View style={styles.queueing}>
+          <Icon name="clock" color={theme.warn} size={14} strokeWidth={2.2} />
+          <DenseText style={styles.queueingText}>{queueingReason}</DenseText>
+        </View>
+      ) : null}
+
       <View style={styles.row}>
         <View
           style={[
@@ -46,7 +73,13 @@ export function MessageInput({enabled, disabledReason, onSend, tone, placeholder
             style={styles.input}
             value={text}
             onChangeText={setText}
-            placeholder={enabled ? placeholder ?? 'Type a message...' : 'Not connected'}
+            placeholder={
+              enabled
+                ? queueing
+                  ? 'Message — will send when they are back'
+                  : placeholder ?? 'Type a message...'
+                : 'Not connected'
+            }
             placeholderTextColor={theme.textFaint}
             editable={enabled}
             multiline
@@ -64,8 +97,22 @@ export function MessageInput({enabled, disabledReason, onSend, tone, placeholder
           disabled={!enabled || !text.trim()}
           accessibilityLabel="Send message">
           {enabled && text.trim() ? (
-            <View style={[styles.send, {backgroundColor: theme.accent}]}>
-              <Icon name="arrowUp" color={theme.onAccent} size={16} strokeWidth={2.4} />
+            // Outlined amber rather than filled accent while the link is down: the tap
+            // still works and the message is still kept, but a filled "send" would be
+            // promising something that is not going to happen for a while.
+            <View
+              style={[
+                styles.send,
+                queueing
+                  ? {borderWidth: 1.5, borderColor: theme.warn}
+                  : {backgroundColor: theme.accent},
+              ]}>
+              <Icon
+                name={queueing ? 'clock' : 'arrowUp'}
+                color={queueing ? theme.warn : theme.onAccent}
+                size={16}
+                strokeWidth={2.4}
+              />
             </View>
           ) : (
             <View style={[styles.send, styles.sendOff]}>
@@ -89,6 +136,13 @@ const useStyles = makeStyles(t => ({
     paddingBottom: spacing.lg,
   },
   disabled: {...typography.caption, color: t.warn, marginBottom: spacing.sm},
+  queueing: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 9,
+    paddingBottom: 12,
+  },
+  queueingText: {...typography.caption, color: t.warn, flex: 1},
   row: {
     flexDirection: 'row',
     alignItems: 'flex-end',

@@ -168,7 +168,7 @@ export function NewGroupScreen({navigation}: RootStackScreenProps<'NewGroup'>) {
 
         {candidates.length === 0 && (
           <EmptyState
-            glyph="◎"
+            icon="people"
             title={query ? 'Nobody matches' : 'No known peers yet'}
             detail={
               query

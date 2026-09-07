@@ -6,6 +6,7 @@ import type {Theme} from '../config/theme';
 import type {ChatMessage} from '../types/Message';
 import {AppText} from './AppText';
 import {LandIn} from './Motion';
+import {Icon, type IconName} from './ui/Icon';
 
 interface Props {
   message: ChatMessage;
@@ -30,11 +31,28 @@ interface Props {
  * "Sent" means a BLE write completed. "Delivered" means the peer returned an ACK.
  */
 const STATUS_TEXT: Record<ChatMessage['status'], string> = {
-  pending: 'Queued',
+  pending: 'Waiting to send',
   sending: 'Sending',
   sent: 'Sent',
   received: 'Delivered',
   failed: 'Failed',
+};
+
+/**
+ * An icon per state, so the receipt reads without being read.
+ *
+ * A clock for something not yet on the radio, an upward arrow while it is going, a tick
+ * once the write completed, a double tick once the peer acknowledged it, and a warning
+ * when it did not. The word stays beside it — the difference between "sent" and
+ * "delivered" is exactly the thing a glyph alone cannot express — but the glyph is what
+ * you actually catch at a glance down a thread.
+ */
+const STATUS_ICON: Record<ChatMessage['status'], IconName> = {
+  pending: 'clock',
+  sending: 'arrowUp',
+  sent: 'check',
+  received: 'checkDouble',
+  failed: 'alert',
 };
 
 /**
@@ -54,12 +72,22 @@ const STATUS_TICK: Record<ChatMessage['status'], string> = {
   failed: '!',
 };
 
+/** Written but not yet on the radio — the state the dashed bubble draws. */
+function isWaiting(status: ChatMessage['status']): boolean {
+  return status === 'pending';
+}
+
 function statusColor(status: ChatMessage['status'], t: Theme): string {
   if (status === 'failed') {
     return t.error;
   }
   if (status === 'received') {
     return t.ok;
+  }
+  if (isWaiting(status)) {
+    // On the dashed bubble there is no accent behind the text, so the accent-dim tone
+    // would be near-invisible. Amber, matching every other "waiting on the radio" state.
+    return t.warn;
   }
   // Ticks only ever render on the outgoing, accent-filled bubble.
   return t.onAccentDim;
@@ -90,6 +118,10 @@ export function MessageBubble({
       style={[
         styles.bubble,
         outgoing ? styles.out : styles.in,
+        // Nothing has gone out yet, so the bubble is not filled in yet either. A dashed
+        // outline says "written, not sent" at a glance — where a solid accent bubble
+        // with a small grey word under it says "sent" first and corrects itself second.
+        outgoing && isWaiting(message.status) && styles.queued,
         message.status === 'failed' && styles.failed,
       ]}>
       {/*
@@ -106,7 +138,12 @@ export function MessageBubble({
         </AppText>
       ) : null}
 
-      <AppText style={[styles.text, outgoing ? styles.textOut : styles.textIn]}>
+      <AppText
+        style={[
+          styles.text,
+          outgoing ? styles.textOut : styles.textIn,
+          outgoing && isWaiting(message.status) && {color: theme.textDim},
+        ]}>
         {message.text}
       </AppText>
 
@@ -160,11 +197,19 @@ export function MessageBubble({
           // landing animation on the status means each tick appears at the moment its
           // own event arrived — no timer ever advances it.
           <LandIn token={message.status}>
-            <AppText
-              style={[styles.tick, {color: statusColor(message.status, theme)}]}
-              numberOfLines={1}>
-              {STATUS_TICK[message.status]} {STATUS_TEXT[message.status]}
-            </AppText>
+            <View style={styles.receipt}>
+              <Icon
+                name={STATUS_ICON[message.status]}
+                size={11}
+                strokeWidth={2.4}
+                color={statusColor(message.status, theme)}
+              />
+              <AppText
+                style={[styles.tick, {color: statusColor(message.status, theme)}]}
+                numberOfLines={1}>
+                {STATUS_TEXT[message.status]}
+              </AppText>
+            </View>
           </LandIn>
         ) : null}
         {outgoing && message.status === 'failed' && (
@@ -206,6 +251,7 @@ const useStyles = makeStyles(t => ({
     paddingHorizontal: 14,
   },
   out: {backgroundColor: t.bubbleOut, borderBottomRightRadius: radius.sm},
+  queued: {backgroundColor: 'transparent', borderWidth: 1.5, borderStyle: 'dashed', borderColor: t.dash},
   // A fill, never a border. The incoming bubble used to be white with a hairline and a
   // shadow because it shared a colour with the thread behind it; giving it the sunk grey
   // instead separates it with no outline at all — and on dark, a hairline round a bubble
@@ -231,6 +277,7 @@ const useStyles = makeStyles(t => ({
   metaOut: {color: t.bubbleOutMeta},
   metaIn: {color: t.bubbleMeta},
   tick: {...typography.caption, fontSize: 11, fontWeight: '500'},
+  receipt: {flexDirection: 'row', alignItems: 'center', gap: 4},
   progressRow: {flexDirection: 'row', alignItems: 'center', gap: 6, flex: 1, marginTop: 2},
   progressTrack: {
     flex: 1,

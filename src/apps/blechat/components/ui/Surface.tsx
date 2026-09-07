@@ -3,6 +3,7 @@ import {View, type ViewStyle} from 'react-native';
 import {elevation, radius, spacing, typography} from '../../config/theme';
 import {makeStyles, useTheme} from '../../theme/ThemeProvider';
 import {AppText, DenseText} from '../AppText';
+import {Icon, type IconName} from './Icon';
 import {Touchable} from '../Motion';
 
 /**
@@ -138,22 +139,38 @@ const VARIANT_LABEL: Record<ButtonVariant, (s: Styles) => object> = {
  * than blank space.
  */
 export function EmptyState({
+  icon,
   glyph,
   title,
   detail,
+  action,
 }: {
-  glyph: string;
+  /** Preferred. A drawn icon rather than whatever the platform font makes of a symbol. */
+  icon?: IconName;
+  /** Legacy Unicode fallback, kept so a caller without a matching icon still renders. */
+  glyph?: string;
   title: string;
   detail?: string;
+  /** The one thing to do about the emptiness, when there is one. */
+  action?: React.ReactNode;
 }) {
   const styles = useStyles();
+  const theme = useTheme();
   return (
     <View style={styles.empty}>
       <View style={styles.emptyGlyphWrap}>
-        <AppText style={styles.emptyGlyph}>{glyph}</AppText>
+        {icon ? (
+          // Drawn at the same weight as the rest of the chrome. "✉" and "◎" were
+          // whatever the system font happened to have for those code points, which is a
+          // different design on every device and a missing box on some.
+          <Icon name={icon} size={30} color={theme.textFaint} strokeWidth={1.5} />
+        ) : (
+          <AppText style={styles.emptyGlyph}>{glyph}</AppText>
+        )}
       </View>
       <AppText style={styles.emptyTitle}>{title}</AppText>
       {detail ? <DenseText style={styles.emptyDetail}>{detail}</DenseText> : null}
+      {action ? <View style={styles.emptyAction}>{action}</View> : null}
     </View>
   );
 }
@@ -278,6 +295,7 @@ const useStyles = makeStyles(t => ({
     marginBottom: spacing.sm,
   },
   emptyGlyph: {fontSize: 26, color: t.textFaint},
+  emptyAction: {marginTop: spacing.lg},
   emptyTitle: {...typography.title, color: t.text},
   emptyDetail: {
     ...typography.body,

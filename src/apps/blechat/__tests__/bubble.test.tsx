@@ -14,6 +14,7 @@ import React from 'react';
 import {Text} from 'react-native';
 import TestRenderer, {act} from 'react-test-renderer';
 import {MessageBubble} from '../components/MessageBubble';
+import {Icon} from '../components/ui/Icon';
 import {ThemeProvider} from '../theme/ThemeProvider';
 import type {ChatMessage, MessageStatus} from '../types/Message';
 
@@ -34,6 +35,19 @@ function message(overrides: Partial<ChatMessage> = {}): ChatMessage {
     hopCount: 0,
     ...overrides,
   } as ChatMessage;
+}
+
+/** The delivery icons a bubble renders, by name. */
+async function receiptIcons(msg: ChatMessage): Promise<string[]> {
+  let tree!: TestRenderer.ReactTestRenderer;
+  await act(async () => {
+    tree = TestRenderer.create(
+      <ThemeProvider mode="dark">
+        <MessageBubble message={msg} onRetry={() => undefined} />
+      </ThemeProvider>,
+    );
+  });
+  return tree.root.findAllByType(Icon).map(node => String(node.props.name));
 }
 
 /** Every string the bubble renders, flattened, so assertions read as "does it say X". */
@@ -88,7 +102,7 @@ describe('message bubble', () => {
 
   describe('outgoing delivery states', () => {
     const cases: Array<[MessageStatus, string]> = [
-      ['pending', 'Queued'],
+      ['pending', 'Waiting to send'],
       ['sending', 'Sending'],
       ['sent', 'Sent'],
       ['received', 'Delivered'],
@@ -100,22 +114,26 @@ describe('message bubble', () => {
       expect(rendered).toContain(label);
     });
 
+    /**
+     * The same invariant, now that the mark is an icon rather than a glyph in the text.
+     *
+     * Asserting on the icon NAME rather than on a character keeps the test tied to the
+     * distinction it exists to protect — one tick is a completed write, two is an ACK —
+     * instead of to how that distinction happens to be drawn.
+     */
     it('shows one tick for a completed write and two only for an ACK', async () => {
-      const sent = await renderBubble(message({direction: 'outgoing', status: 'sent'}));
-      expect(sent).toContain('✓');
-      expect(sent).not.toContain('✓✓');
-
-      const acked = await renderBubble(
-        message({direction: 'outgoing', status: 'received'}),
+      expect(await receiptIcons(message({direction: 'outgoing', status: 'sent'}))).toEqual(
+        ['check'],
       );
-      expect(acked).toContain('✓✓');
+      expect(
+        await receiptIcons(message({direction: 'outgoing', status: 'received'})),
+      ).toEqual(['checkDouble']);
     });
 
     it('never shows a tick on a message that has not left yet', async () => {
-      const queued = await renderBubble(
-        message({direction: 'outgoing', status: 'pending'}),
-      );
-      expect(queued).not.toContain('✓');
+      const icons = await receiptIcons(message({direction: 'outgoing', status: 'pending'}));
+      expect(icons).not.toContain('check');
+      expect(icons).not.toContain('checkDouble');
     });
 
     it('offers a retry on a failed message', async () => {

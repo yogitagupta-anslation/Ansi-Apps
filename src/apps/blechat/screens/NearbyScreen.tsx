@@ -14,23 +14,17 @@ import {makeStyles, useTheme} from '../theme/ThemeProvider';
 import {sharedInterests} from '../config/interests';
 import {EmptyState} from '../components/ui/Surface';
 import {Screen} from '../components/ui/Screen';
-import {BreathingDot, FadeIn, Touchable} from '../components/Motion';
+import {BreathingDot, FadeIn, Spinner, Touchable} from '../components/Motion';
 import {Icon, type IconName} from '../components/ui/Icon';
 import {LABELS as LINK_STATE_LABELS} from '../components/ConnectionIndicator';
 import {PeerProfileSheet} from '../components/PeerProfileSheet';
-import {RECONNECT_MAX_ATTEMPTS} from '../config/constants';
+
 import {describeFailure} from '../ble/LinkErrors';
 import {AppText, DenseText} from '../components/AppText';
-import {InitialAvatar} from '../components/ui/Primitives';
+import {InitialAvatar, SignalBars} from '../components/ui/Primitives';
 import {MascotAvatar} from '../components/ui/Mascot';
 import {Radar, isLive} from '../components/ui/Radar';
-import {
-  ConnectRing,
-  ConnectedRing,
-  StageChecklist,
-  isConnecting,
-  stageCaption,
-} from '../components/ui/ConnectProgress';
+import {CONNECT_STAGES, ConnectRing, ConnectedRing, isConnecting, stageIndex} from '../components/ui/ConnectProgress';
 import {ByteSparkline, TrafficRing, trafficLabel} from '../components/ui/Traffic';
 import {useLinkTraffic} from '../peers/useLinkTraffic';
 import {qualityLabel} from '../peers/LinkMetrics';
@@ -526,7 +520,7 @@ export function NearbyScreen({navigation}: RootTabScreenProps<'Nearby'>) {
             <DiscoveryRadar blips={blips} scanning={scanning} />
           ) : (
             <EmptyState
-              glyph={bluetoothState === 'PoweredOn' ? '◎' : '⃠'}
+              icon={bluetoothState === 'PoweredOn' ? 'radar' : 'bluetooth'}
               title={bluetoothState !== 'PoweredOn' ? 'Bluetooth is off' : 'Not scanning'}
               detail={
                 bluetoothState !== 'PoweredOn'
@@ -677,19 +671,19 @@ function PeerCard({
    * still here.
    */
   const word = failed
-    ? describeFailure(peer!.failure!)
+    ? "Couldn't connect"
     : connected
     ? traffic.active
       ? trafficLabel(traffic)
       : 'Connected'
     : connecting
-    ? stageCaption(peer!.state)
+    ? 'Saying hello…'
     : reconnecting
-    ? `Reconnecting ${peer!.reconnectAttempt}/${RECONNECT_MAX_ATTEMPTS}`
+    ? 'Trying to reconnect'
     : busy
     ? LINK_STATE_LABELS[peer!.state]
     : unconnectable
-    ? 'Not connectable'
+    ? "Can't chat — no BLE Chat on their phone"
     : 'Available';
 
   const wordColor = failed
@@ -759,6 +753,11 @@ function PeerCard({
             {peer?.peerId ? <FavoriteStar peerId={peer.peerId} /> : null}
           </View>
           <View style={styles.metaRow}>
+            {/* Spinning only while something is genuinely in flight. A static glyph
+                here would look identical whether a handshake was running or stuck. */}
+            {connecting || reconnecting ? (
+              <Spinner size={12} color={theme.warn} />
+            ) : null}
             <DenseText style={[styles.metaWord, {color: wordColor}]} numberOfLines={1}>
               {word}
             </DenseText>
@@ -770,18 +769,24 @@ function PeerCard({
           </View>
         </View>
 
-        <RowAction
-          styles={styles}
-          unconnectable={unconnectable}
-          cls={cls}
-          connected={connected}
-          busy={busy}
-          reconnecting={reconnecting}
-          failed={failed}
-          onOpenChat={() => onOpenChat(peer!)}
-          onCancel={() => onCancel(device.linkId)}
-          onConnect={() => onConnect(device.linkId)}
-        />
+        <View style={styles.trail}>
+          {/* The bars and the number say the same thing, so only one of them is on the
+              row: bars here, where they sit above the action and read as "how well
+              could this go", and the dBm in the detail sheet for anyone who wants it. */}
+          {!failed && !unconnectable ? <SignalBars rssi={device.rssi} size="sm" /> : null}
+          <RowAction
+            styles={styles}
+            unconnectable={unconnectable}
+            cls={cls}
+            connected={connected}
+            busy={busy}
+            reconnecting={reconnecting}
+            failed={failed}
+            onOpenChat={() => onOpenChat(peer!)}
+            onCancel={() => onCancel(device.linkId)}
+            onConnect={() => onConnect(device.linkId)}
+          />
+        </View>
 
         {/* Profile, block and the failure detail, behind one glyph.
             They were three bordered icon buttons on a row that has just lost its own
@@ -807,10 +812,6 @@ function PeerCard({
         ) : null}
       </View>
 
-      {/* The five stages, named. The ring says how far; this says which — and the name
-          is the only part a bug report can use. */}
-      {connecting ? <StageChecklist state={peer!.state} /> : null}
-
       {/* What is actually on the link, for the last few seconds. Rendered only while
           connected: on any other state there is no link to have traffic on. */}
       {connected && traffic.history.some(v => v > 0) ? (
@@ -818,25 +819,48 @@ function PeerCard({
       ) : null}
 
       {/* ---- why ----
-          Words, not chips, and indented to clear the avatar so they read as belonging to
-          the name above rather than starting a new column. Shared ones take the accent;
-          the rest stay grey. */}
-      {!failed && !connecting && (shared.length > 0 || rest.length > 0) ? (
+          Only what you have in common, and in ink rather than the accent. The full list
+          of someone's interests is on their detail page; what belongs on a row you are
+          scanning is the reason to stop at this one. */}
+      {!failed && !connecting && shared.length > 0 ? (
         <View style={styles.interests}>
-          {shared.length > 0 ? (
-            <DenseText style={styles.interestShared}>{shared.join(', ')}</DenseText>
-          ) : null}
-          {shared.length > 0 && rest.length > 0 ? (
-            <DenseText style={styles.interestSep}>·</DenseText>
-          ) : null}
-          {rest.length > 0 ? (
-            <DenseText style={styles.interestRest}>{rest.join(', ')}</DenseText>
-          ) : null}
+          <DenseText style={styles.interestShared} numberOfLines={1}>
+            {shared.join(' · ')}
+          </DenseText>
+        </View>
+      ) : null}
+
+      {/* The handshake, as it happens. Five named stages are a lot of screen for
+          something that lasts two seconds; the bar says how far without the list. */}
+      {connecting ? (
+        <View style={styles.progressTrack}>
+          <View
+            style={[
+              styles.progressFill,
+              {width: `${Math.round(stageProgress(peer!.state) * 100)}%`},
+            ]}
+          />
         </View>
       ) : null}
 
     </View>
   );
+}
+
+/**
+ * How far through a handshake a link is, as 0..1.
+ *
+ * Derived from the stage list rather than a timer, so the bar can only advance when the
+ * transport actually reaches the next stage. A bar driven by elapsed time would keep
+ * filling through a connection that had already stalled, which is the one thing it must
+ * never do.
+ */
+function stageProgress(state: LinkState): number {
+  const i = stageIndex(state);
+  if (i < 0) {
+    return 0.08;
+  }
+  return (i + 1) / CONNECT_STAGES.length;
 }
 
 /**
@@ -883,23 +907,42 @@ function RowAction({
     );
   }
 
-  const [label, onPress, accent] = connected
-    ? (['Open', onOpenChat, true] as const)
+  // Connected is the only FILLED pill on the screen; an offer to start something is
+  // outlined in the accent, and a recovery is neutral. "Say hi" rather than "Connect"
+  // because that is what it does — the Bluetooth part is our problem, not yours.
+  const [label, onPress, kind] = connected
+    ? (['Open', onOpenChat, 'filled'] as const)
     : busy || reconnecting
-    ? // Every attempt keeps a way out: tapping Connect by accident should not commit the
+    ? // Every attempt keeps a way out: tapping this by accident should not commit the
       // phone to a full timeout plus the whole retry budget.
-      (['Cancel', onCancel, false] as const)
+      (['Cancel', onCancel, 'plain'] as const)
     : failed
-    ? (['Retry', onConnect, false] as const)
-    : (['Connect', onConnect, false] as const);
+    ? (['Try again', onConnect, 'neutral'] as const)
+    : (['Say hi', onConnect, 'accent'] as const);
 
   return (
     <Touchable
       scale={false}
       onPress={onPress}
-      style={[styles.pill, accent ? styles.pillAccent : styles.pillNeutral]}>
+      style={[
+        styles.pill,
+        kind === 'filled'
+          ? styles.pillFilled
+          : kind === 'accent'
+          ? styles.pillAccent
+          : kind === 'neutral'
+          ? styles.pillNeutral
+          : styles.pillPlain,
+      ]}>
       <DenseText
-        style={[styles.pillText, accent ? styles.pillAccentText : styles.pillNeutralText]}
+        style={[
+          styles.pillText,
+          kind === 'filled'
+            ? styles.pillFilledText
+            : kind === 'accent'
+            ? styles.pillAccentText
+            : styles.pillNeutralText,
+        ]}
         numberOfLines={1}>
         {label}
       </DenseText>
@@ -1130,9 +1173,20 @@ const useStyles = makeStyles(t => ({
     // Clears the 38pt avatar and its 13pt gap, so the line hangs under the name.
     paddingLeft: 51,
   },
-  interestShared: {...typography.caption, color: t.accentQuiet},
+  interestShared: {...typography.caption, color: t.text},
   interestRest: {...typography.caption, color: t.textDim},
   interestSep: {...typography.caption, color: t.separator},
+
+  // The handshake's progress, as a filling track.
+  progressTrack: {
+    height: 3,
+    borderRadius: 999,
+    backgroundColor: t.divider,
+    marginTop: 10,
+    marginLeft: 51,
+    overflow: 'hidden',
+  },
+  progressFill: {height: 3, borderRadius: 999, backgroundColor: t.warn},
 
   // One pill, on the right of the head row, sized to its label.
   pill: {
@@ -1143,6 +1197,10 @@ const useStyles = makeStyles(t => ({
     flexShrink: 0,
   },
   pillText: {...typography.callout},
+  trail: {alignItems: 'flex-end', gap: 9, flexShrink: 0},
+  pillFilled: {backgroundColor: t.accent, borderColor: t.accent},
+  pillFilledText: {color: t.onAccent},
+  pillPlain: {borderColor: 'transparent', paddingHorizontal: 4},
   pillAccent: {borderColor: t.accent},
   pillAccentText: {color: t.accent},
   pillNeutral: {borderColor: t.border},
