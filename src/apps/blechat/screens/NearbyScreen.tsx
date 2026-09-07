@@ -7,6 +7,7 @@ import {sharedInterests} from '../config/interests';
 import {RECONNECT_MAX_ATTEMPTS} from '../config/constants';
 import {EmptyState} from '../components/ui/Surface';
 import {ConnectFailedSheet} from '../components/ConnectFailedSheet';
+import {NearbyEmpty} from '../components/NearbyEmpty';
 import {Screen} from '../components/ui/Screen';
 import {BreathingDot, FadeIn, Spinner, Touchable} from '../components/Motion';
 import {Icon, type IconName} from '../components/ui/Icon';
@@ -82,6 +83,7 @@ export function NearbyScreen({navigation}: RootTabScreenProps<'Nearby'>) {
   const myInterests = useAppStore(s => s.settings.interests);
   const links = useAppStore(s => s.links);
   const permission = useAppStore(s => s.permission);
+  const queuedTotal = useAppStore(s => s.queuedTotal);
   /** Refused permanently — Android will not show the dialog again. */
   const permissionBlocked = permission.blocked.length > 0;
   const connectedPeers = useMemo(
@@ -363,7 +365,11 @@ export function NearbyScreen({navigation}: RootTabScreenProps<'Nearby'>) {
       <FlatList
         data={chatRows}
         keyExtractor={item => item.device.linkId}
-        contentContainerStyle={styles.content}
+        contentContainerStyle={[
+          styles.content,
+          // So an empty state can centre itself in the space a list would have used.
+          rowCount === 0 ? styles.contentEmpty : null,
+        ]}
         refreshControl={
           <RefreshControl
             refreshing={rescanning}
@@ -386,11 +392,32 @@ export function NearbyScreen({navigation}: RootTabScreenProps<'Nearby'>) {
                       dot still and a still dot must not be the only thing reporting. */}
                   <BreathingDot
                     size={6}
-                    active={scanning}
-                    color={scanning ? theme.ok : theme.textFaint}
+                    active={scanning && !permissionBlocked && bluetoothState === 'PoweredOn'}
+                    color={
+                      permissionBlocked
+                        ? theme.error
+                        : bluetoothState !== 'PoweredOn'
+                        ? theme.warn
+                        : scanning
+                        ? theme.ok
+                        : theme.textFaint
+                    }
                   />
-                  <DenseText style={styles.subtitle} numberOfLines={1}>
-                    {rowCount === 0
+                  <DenseText
+                    style={[
+                      styles.subtitle,
+                      permissionBlocked
+                        ? {color: theme.error}
+                        : bluetoothState !== 'PoweredOn'
+                        ? {color: theme.warn}
+                        : null,
+                    ]}
+                    numberOfLines={1}>
+                    {permissionBlocked
+                      ? 'Permission needed'
+                      : bluetoothState !== 'PoweredOn'
+                      ? 'Bluetooth is off'
+                      : rowCount === 0
                       ? scanning
                         ? 'Looking around'
                         : 'Not looking'
@@ -587,85 +614,30 @@ export function NearbyScreen({navigation}: RootTabScreenProps<'Nearby'>) {
           ) : null
         }
         ListEmptyComponent={
-          // The radar AND the words, not one or the other. A sweeping dial with no blips
-          // proves the radio is working but says nothing about what to do; the sentence
-          // under it is the part that answers "so is it broken, or is nobody here?".
-          bluetoothState === 'PoweredOn' && scanning && !permissionBlocked ? (
-            <>
-              <DiscoveryRadar blips={blips} scanning={scanning} caption={false} />
-              <EmptyState
-                title="Nobody here yet"
-                detail="Anyone who opens BLE Chat within about a room's distance turns up on their own."
-                footnote={
-                  otherDevicesCount > 0
-                    ? `${otherDevicesCount} other Bluetooth device${
-                        otherDevicesCount === 1 ? '' : 's'
-                      } in range — headphones, watches, that sort of thing. Nothing to chat with.`
-                    : undefined
-                }
-              />
-            </>
-          ) : (
-            <EmptyState
-              icon={
-                permissionBlocked
-                  ? 'block'
-                  : bluetoothState === 'PoweredOn'
-                  ? 'radar'
-                  : 'bluetooth'
+          <NearbyEmpty
+            kind={
+              permissionBlocked
+                ? 'blocked'
+                : bluetoothState !== 'PoweredOn'
+                ? 'off'
+                : 'searching'
+            }
+            queuedCount={queuedTotal}
+            otherDevices={otherDevicesCount}
+            onPrimary={() => {
+              if (permissionBlocked) {
+                void Linking.openSettings();
+              } else if (bluetoothState !== 'PoweredOn') {
+                // Android cannot switch the radio on for us; the settings panel is the
+                // closest an app is allowed to get.
+                void Linking.sendIntent('android.settings.BLUETOOTH_SETTINGS').catch(() =>
+                  Linking.openSettings(),
+                );
+              } else {
+                onRescan();
               }
-              title={
-                // Three different situations that all used to read "Not scanning".
-                // A permission Android will not ask for again is not the same problem
-                // as a radio that is switched off, and neither is the same as an empty
-                // room — they need three different next steps.
-                permissionBlocked
-                  ? "BLE Chat can't look for people"
-                  : bluetoothState !== 'PoweredOn'
-                  ? 'Bluetooth is off'
-                  : 'Nobody here yet'
-              }
-              detail={
-                permissionBlocked
-                  ? "The nearby-devices permission was turned off, and Android won't ask again — it has to be changed in Settings."
-                  : bluetoothState !== 'PoweredOn'
-                  ? 'It is the only way BLE Chat reaches other phones — there is no internet fallback.'
-                  : "Anyone who opens BLE Chat within about a room's distance turns up on their own."
-              }
-              action={
-                permissionBlocked ? (
-                  <Touchable
-                    scale={false}
-                    onPress={() => Linking.openSettings()}
-                    style={styles.lookAgain}>
-                    <Icon name="gear" size={14} color={theme.text} />
-                    <DenseText style={styles.lookAgainText}>Open Settings</DenseText>
-                  </Touchable>
-                ) : bluetoothState === 'PoweredOn' ? (
-                  <Touchable scale={false} onPress={onRescan} style={styles.lookAgain}>
-                    <Icon name="radar" size={14} color={theme.text} />
-                    <DenseText style={styles.lookAgainText}>Look again</DenseText>
-                  </Touchable>
-                ) : undefined
-              }
-              footnote={
-                // The one thing people actually worry about when Android says "nearby
-                // devices", answered on the screen that asks for it.
-                permissionBlocked
-                  ? 'This does not include location. BLE Chat reads signal strength and a service ID, nothing about where you are.'
-                  :
-                // Only when there genuinely are some. "0 other devices" is noise, and
-                // the count is the answer to the question this screen actually raises:
-                // is the radio working, or is nobody here? Hearing headphones and
-                // watches proves it is scanning.
-                bluetoothState === 'PoweredOn' && otherDevicesCount > 0
-                  ? `${otherDevicesCount} other Bluetooth device${
-                      otherDevicesCount === 1 ? '' : 's'
-                    } in range — headphones, watches, that sort of thing. Nothing to chat with.`
-                  : undefined
-              }
-            />
-          )
+            }}
+          />
         }
       />
       <ConnectFailedSheet
@@ -929,11 +901,6 @@ function PeerCard({
             <DenseText style={[styles.metaWord, {color: wordColor}]} numberOfLines={1}>
               {word}
             </DenseText>
-            {measurement.length > 0 ? (
-              <DenseText style={styles.metaValue} numberOfLines={1}>
-                {measurement}
-              </DenseText>
-            ) : null}
           </View>
         </View>
 
@@ -1280,6 +1247,7 @@ function RecentRow({
 
 const useStyles = makeStyles(t => ({
   content: {padding: spacing.lg + 4, paddingBottom: spacing.xl},
+  contentEmpty: {flexGrow: 1},
   grow: {flex: 1},
 
   // ---- header ------------------------------------------------------------

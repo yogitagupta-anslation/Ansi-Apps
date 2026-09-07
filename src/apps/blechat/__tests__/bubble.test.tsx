@@ -37,6 +37,32 @@ function message(overrides: Partial<ChatMessage> = {}): ChatMessage {
   } as ChatMessage;
 }
 
+/** The width the sending bar was filled to. */
+async function progressWidth(msg: ChatMessage): Promise<string | undefined> {
+  let tree!: TestRenderer.ReactTestRenderer;
+  await act(async () => {
+    tree = TestRenderer.create(
+      <ThemeProvider mode="dark">
+        <MessageBubble message={msg} onRetry={() => undefined} />
+      </ThemeProvider>,
+    );
+  });
+  const fills = tree.root.findAll(
+    node =>
+      typeof node.type === 'string' &&
+      Array.isArray(node.props?.style) &&
+      node.props.style.some((v: unknown) => typeof v === 'object' && v !== null && 'width' in (v as object)),
+  );
+  for (const node of fills) {
+    for (const entry of node.props.style as Array<Record<string, unknown>>) {
+      if (entry && typeof entry === 'object' && typeof entry.width === 'string') {
+        return entry.width;
+      }
+    }
+  }
+  return undefined;
+}
+
 /** The delivery icons a bubble renders, by name. */
 async function receiptIcons(msg: ChatMessage): Promise<string[]> {
   let tree!: TestRenderer.ReactTestRenderer;
@@ -144,18 +170,27 @@ describe('message bubble', () => {
     });
   });
 
-  it('reports fragment progress from real frame counts while sending', async () => {
-    const rendered = await renderBubble(
-      message({
-        direction: 'outgoing',
-        status: 'sending',
-        fragmentProgress: {sent: 3, total: 7},
-      } as Partial<ChatMessage>),
-    );
-    expect(rendered).toContain('Sending 3/7');
+  /**
+   * The bar still tracks real frames; the FRAME COUNT is no longer written out.
+   *
+   * "3/7" was the transport's vocabulary in the middle of a conversation — how a message
+   * is chopped up is not a fact about the message. What has to stay true is that the bar
+   * reflects real progress rather than a timer, so this asserts the fill width, which is
+   * the thing a fake would get wrong.
+   */
+  it('fills the sending bar from real frame counts, without naming them', async () => {
+    const msg = message({
+      direction: 'outgoing',
+      status: 'sending',
+      fragmentProgress: {sent: 3, total: 7},
+    } as Partial<ChatMessage>);
+
+    expect(await renderBubble(msg)).not.toContain('3/7');
+    expect(await renderBubble(msg)).toContain('Sending');
+    expect(await progressWidth(msg)).toBe('43%');
   });
 
-  it('counts acknowledgements per member in a group, not a single tick', async () => {
+  it('names how many of a group actually have it, never a single tick', async () => {
     const rendered = await renderBubble(
       message({
         direction: 'outgoing',
@@ -165,7 +200,8 @@ describe('message bubble', () => {
         recipientCount: 3,
       } as Partial<ChatMessage>),
     );
-    // A lone tick would claim the whole group has it; the fraction is the honest form.
-    expect(rendered).toContain('1/3');
+    // A lone tick would claim the whole group has it; naming both numbers is the honest
+    // form, and it is now said in words rather than as a bare fraction and a glyph.
+    expect(rendered).toContain('1 of 3 delivered');
   });
 });

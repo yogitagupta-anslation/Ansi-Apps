@@ -141,33 +141,6 @@ function dayLabel(timestamp: number): string {
   });
 }
 
-/**
- * Everything the app actually knows about one message.
- *
- * Only fields that are really carried: the id an ACK names, the protocol version the two
- * phones settled on, how many fragments it took, and how many recipients have confirmed
- * it in a group. There is no per-message ACK latency here because none is recorded — the
- * link keeps a rolling average and attributing that to a single message would be a
- * precise-looking number about the wrong thing.
- */
-function describeMessage(message: ChatMessage): string {
-  const when = new Date(message.timestamp);
-  const lines = [
-    `Status: ${message.status}`,
-    `Sent: ${when.toLocaleString()}`,
-    message.fragmentProgress
-      ? `Fragments: ${message.fragmentProgress.sent} of ${message.fragmentProgress.total}`
-      : null,
-    message.recipientCount
-      ? `Delivered to: ${message.deliveredTo?.length ?? 0} of ${message.recipientCount}`
-      : null,
-    `Protocol: v${message.protocolVersion}`,
-    message.hopCount > 0 ? `Hops: ${message.hopCount}` : null,
-    `Id: ${message.id}`,
-  ];
-  return lines.filter(Boolean).join('\n');
-}
-
 export function ChatScreen({route, navigation}: RootStackScreenProps<'Chat'>) {
   const styles = useStyles();
   const theme = useTheme();
@@ -350,10 +323,6 @@ export function ChatScreen({route, navigation}: RootStackScreenProps<'Chat'>) {
         onPress?: () => void;
       }> = [
         {text: 'Copy text', onPress: () => Clipboard.setString(message.text)},
-        {
-          text: 'Message details',
-          onPress: () => Alert.alert('Message details', describeMessage(message)),
-        },
       ];
       if (message.direction === 'outgoing' && message.status === 'failed') {
         options.push({text: 'Retry', onPress: () => onRetry(message)});

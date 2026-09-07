@@ -73,7 +73,7 @@ export function PeerCard({
             <View style={[styles.dot, {backgroundColor: signalColor(strength, theme)}]} />
             <DenseText style={styles.meta}>
               {SIGNAL_LABEL[strength]}
-              {peer.rssi !== null ? '  ' + peer.rssi + ' dBm' : ''}
+
               {'   Last seen ' + relativeTime(peer.lastSeen)}
             </DenseText>
           </View>

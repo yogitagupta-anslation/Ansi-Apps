@@ -41,11 +41,10 @@ const STATUS_TEXT: Record<ChatMessage['status'], string> = {
 /**
  * An icon per state, so the receipt reads without being read.
  *
- * A clock for something not yet on the radio, an upward arrow while it is going, a tick
- * once the write completed, a double tick once the peer acknowledged it, and a warning
- * when it did not. The word stays beside it — the difference between "sent" and
- * "delivered" is exactly the thing a glyph alone cannot express — but the glyph is what
- * you actually catch at a glance down a thread.
+ * A clock for something not yet on its way, an upward arrow while it is going, a tick
+ * once it has left, a double tick once the other phone confirmed it, and a warning when
+ * it did not arrive. The word stays beside it — the difference between "sent" and
+ * "delivered" is exactly the thing a glyph alone cannot express.
  */
 const STATUS_ICON: Record<ChatMessage['status'], IconName> = {
   pending: 'clock',
@@ -56,13 +55,12 @@ const STATUS_ICON: Record<ChatMessage['status'], IconName> = {
 };
 
 /**
- * Delivery ticks, with the same meaning the rest of the stack uses:
- *   ...  queued, nothing on the radio yet
- *   ✓    the BLE write completed
- *   ✓✓   the peer returned an application-level ACK
- *   !    the write threw, or no ACK arrived
- * A single tick is never shown for an unacknowledged message, so the second tick always
- * means the other phone really has it.
+ * The mark beside a delivery state.
+ *
+ * One tick means it left this phone; two mean the other phone confirmed it. That is the
+ * distinction the whole receipt exists for, and it is expressed as one tick versus two
+ * rather than in the words — "sent" and "delivered" are what a reader needs, and the
+ * protocol's own vocabulary for the confirmation is not.
  */
 const STATUS_TICK: Record<ChatMessage['status'], string> = {
   pending: '···',
@@ -160,9 +158,8 @@ export function MessageBubble({
             <AppText
               style={[styles.tick, {color: statusColor(message.status, theme)}]}
               numberOfLines={1}>
-              {(message.deliveredTo?.length ?? 0)}/{message.recipientCount ?? 0}
-              {' '}
-              {STATUS_TICK[message.status]}
+              {message.deliveredTo?.length ?? 0} of {message.recipientCount ?? 0}{' '}
+              delivered
             </AppText>
           </LandIn>
         ) : outgoing && message.status === 'sending' && message.fragmentProgress ? (
@@ -185,17 +182,18 @@ export function MessageBubble({
                 ]}
               />
             </View>
+            {/* The bar says how far; the count of frames underneath it is a fact about
+                the transport, not about the message, and belongs in Diagnostics. */}
             <AppText style={styles.progressLabel} numberOfLines={1}>
-              Sending {message.fragmentProgress.sent}/{message.fragmentProgress.total}
+              Sending
             </AppText>
           </View>
         ) : outgoing ? (
           // The tick AND the word. A tick alone is a guess on the reader's part, and the
-          // difference between "sent" (a BLE write completed) and "delivered" (the peer
-          // acknowledged it) is exactly the thing a tick cannot express.
-          // One tick is a completed BLE write; two is an application ACK. Keying the
-          // landing animation on the status means each tick appears at the moment its
-          // own event arrived — no timer ever advances it.
+          // difference between "sent" (it left this phone) and "delivered" (the other
+          // phone has it) is exactly the thing a tick cannot express. Keying the landing
+          // animation on the status means each mark appears at the moment its own event
+          // arrived — no timer ever advances it.
           <LandIn token={message.status}>
             <View style={styles.receipt}>
               <Icon

@@ -20,6 +20,17 @@ import {
 import {describeAssessment, isSuspicious} from '../security/IdentityWatch';
 import type {Peer} from '../types/Peer';
 
+/** Signal strength as a word. The bars carry it visually; this names it. */
+function qualityWord(rssi: number): string {
+  if (rssi >= -60) {
+    return 'Strong signal';
+  }
+  if (rssi >= -75) {
+    return 'Good signal';
+  }
+  return 'Weak signal';
+}
+
 /**
  * The first two groups only.
  *
@@ -124,7 +135,7 @@ export function PeerProfileSheet({
                   <View style={styles.miniBadge}>
                     <Icon name="shield" color={theme.tileGreenFg} size={11} strokeWidth={2.4} />
                     <DenseText style={[styles.miniBadgeText, {color: theme.tileGreenFg}]}>
-                      Authenticated
+                      Verified
                     </DenseText>
                   </View>
                 )}
@@ -227,7 +238,10 @@ export function PeerProfileSheet({
             <View style={styles.stat}>
               <SignalBars rssi={peer.rssi} size="sm" />
               <DenseText style={styles.statLabel}>
-                {peer.rssi !== null ? peer.rssi + ' dBm' : 'No signal read'}
+                {/* Bars, not a number. dBm is a measurement, and the sheet's job is to
+                    say how well this is likely to go — the exact figure lives in
+                    Diagnostics for anyone who needs it. */}
+                {peer.rssi !== null ? qualityWord(peer.rssi) : 'No signal yet'}
               </DenseText>
             </View>
             <View style={styles.stat}>

@@ -22,6 +22,7 @@ export type IconName =
   | 'arrowUp'
   | 'info'
   | 'checkDouble'
+  | 'bluetoothOff'
   | 'link2'
   | 'chatPlus'
   | 'tabYou'
@@ -92,6 +93,12 @@ type StrokeProps = {
 
 const ICONS: Record<IconName, (p: StrokeProps, color: string) => React.ReactNode> = {
   bluetooth: p => <Path {...p} d="M6.5 6.5L17.5 17.5L12 23L12 1L17.5 6.5L6.5 17.5" />,
+  bluetoothOff: p => (
+    <>
+      <Path {...p} d="M6.5 6.5L17.5 17.5L12 23L12 1L17.5 6.5L6.5 17.5" />
+      <Path {...p} d="M3 3l18 18" />
+    </>
+  ),
   radar: (p, color) => (
     <>
       <Circle cx={12} cy={12} r={8} {...p} />

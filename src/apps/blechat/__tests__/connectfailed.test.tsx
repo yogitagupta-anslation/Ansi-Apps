@@ -90,11 +90,17 @@ describe('connect failed', () => {
     expect(text).not.toContain('Move a little closer');
   });
 
-  it('keeps the technical detail for a bug report', async () => {
+  /**
+   * The typed reason and the stage are still recorded and still exported — they moved to
+   * Diagnostics. What must not happen is a reader working out their next step being
+   * handed "AndroidGattError during connecting" underneath the sentence telling them what
+   * to do.
+   */
+  it('says how many tries without naming the internals', async () => {
     const text = await render('AndroidGattError');
-    expect(text).toContain('AndroidGattError');
-    expect(text).toContain('during connecting');
-    expect(text).toContain('attempt 2 of 5');
+    expect(text).toContain('Tried 2 times');
+    expect(text).not.toContain('AndroidGattError');
+    expect(text).not.toContain('connecting');
   });
 
   it('explains every reason it can be given, rather than falling through to nothing', async () => {

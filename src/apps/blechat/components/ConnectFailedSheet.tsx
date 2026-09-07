@@ -65,7 +65,7 @@ const CAUSE: Partial<Record<LinkFailureReason, string>> = {
     'Their phone connected but is not running the chat service, so there was nothing to talk to.',
   CharacteristicNotFound:
     'Their phone is running a version of the chat service this one does not recognise.',
-  MtuFailed: 'The two phones could not agree on a packet size.',
+  MtuFailed: 'The two phones could not agree on how to talk to each other.',
   NotificationsFailed:
     'The link opened but their phone would not let this one subscribe to replies, so nothing could come back.',
   HandshakeTimeout:
@@ -178,13 +178,15 @@ export function ConnectFailedSheet({
             </Touchable>
           </View>
 
-          {/* Last and quietest: the part a bug report needs and a reader can ignore. */}
-          <DenseText style={styles.technical} numberOfLines={2}>
-            {failure.reason} during {failure.phase}
-            {attempts !== undefined && maxAttempts !== undefined
-              ? ` · attempt ${attempts} of ${maxAttempts}`
-              : ''}
-          </DenseText>
+          {/* How many tries, in plain words. The typed reason and the stage it failed in
+              are real and still recorded — they are in Diagnostics, where a bug report
+              can find them, rather than under a sentence somebody is reading to work out
+              what to do next. */}
+          {attempts !== undefined && maxAttempts !== undefined && attempts > 1 ? (
+            <DenseText style={styles.technical}>
+              Tried {attempts} times
+            </DenseText>
+          ) : null}
         </View>
       </View>
     </Modal>
