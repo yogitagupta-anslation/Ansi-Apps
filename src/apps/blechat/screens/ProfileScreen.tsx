@@ -1,5 +1,5 @@
 import React, {useCallback, useEffect, useState} from 'react';
-import {Alert, AppState, ScrollView, Switch, View} from 'react-native';
+import {Alert, AppState, ScrollView, TextInput, View} from 'react-native';
 
 import {AppText, DenseText} from '../components/AppText';
 import {Touchable} from '../components/Motion';
@@ -9,6 +9,7 @@ import {Screen} from '../components/ui/Screen';
 import {LogOutSheet} from '../components/LogOutSheet';
 import {makeStyles, useTheme} from '../theme/ThemeProvider';
 import {fonts, radius, spacing, typography} from '../config/theme';
+import {MAX_DISPLAY_NAME_LENGTH} from '../config/interests';
 import {useAppStore} from '../state/appStore';
 import {bleChat} from '../services/BleChatService';
 import {storage} from '../storage/LocalStorage';
@@ -34,6 +35,8 @@ export function ProfileScreen({navigation}: RootTabScreenProps<'You'>) {
   const scanning = useAppStore(s => s.scanning);
 
   const [expanded, setExpanded] = useState<'appearance' | null>(null);
+  const [editingName, setEditingName] = useState(false);
+  const [draftName, setDraftName] = useState('');
   const [logOutVisible, setLogOutVisible] = useState(false);
   const [lockEnabled, setLockEnabled] = useState(false);
 
@@ -60,6 +63,21 @@ export function ProfileScreen({navigation}: RootTabScreenProps<'You'>) {
   const languages = settings.languages ?? [];
   const name = identity?.displayName?.trim() || 'No name set';
 
+  /**
+   * Renaming, in place.
+   *
+   * The name at the top of this screen is the one other people see, so the shortest
+   * possible path between reading it and changing it is tapping it. An empty or unchanged
+   * draft is dropped rather than saved — there is no such thing as a nameless peer.
+   */
+  const commitName = () => {
+    const trimmed = draftName.trim();
+    setEditingName(false);
+    if (trimmed && trimmed !== settings.displayName) {
+      save({displayName: trimmed});
+    }
+  };
+
   /** "f858 18bd 95dd 0feb" — the identity, in the form you would read aloud. */
   const code = identity
     ? (identity.peerId.match(/.{1,4}/g) ?? []).slice(0, 4).join(' ')
@@ -74,9 +92,37 @@ export function ProfileScreen({navigation}: RootTabScreenProps<'You'>) {
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         <View style={styles.identity}>
           <MascotAvatar size={64} tint={theme.accent} />
-          <AppText style={styles.name} numberOfLines={1}>
-            {name}
-          </AppText>
+          {editingName ? (
+            <TextInput
+              style={[styles.name, styles.nameInput]}
+              value={draftName}
+              onChangeText={setDraftName}
+              onBlur={commitName}
+              onSubmitEditing={commitName}
+              placeholder="Your name"
+              placeholderTextColor={theme.textFaint}
+              maxLength={MAX_DISPLAY_NAME_LENGTH}
+              returnKeyType="done"
+              autoFocus
+              selectTextOnFocus
+            />
+          ) : (
+            <Touchable
+              scale={false}
+              onPress={() => {
+                setDraftName(settings.displayName ?? '');
+                setEditingName(true);
+              }}
+              hitSlop={8}
+              style={styles.nameRow}
+              accessibilityRole="button"
+              accessibilityLabel={`${name}, tap to rename`}>
+              <AppText style={styles.name} numberOfLines={1}>
+                {name}
+              </AppText>
+              <Icon name="pencil" size={13} color={theme.textFaint} strokeWidth={1.9} />
+            </Touchable>
+          )}
           {code ? <DenseText style={styles.code}>{code}</DenseText> : null}
         </View>
 
@@ -98,7 +144,7 @@ export function ProfileScreen({navigation}: RootTabScreenProps<'You'>) {
           value={`${settings.autoAdvertise ? 'Discoverable' : 'Hidden'} · scanning ${
             scanning ? 'on' : 'off'
           }`}
-          onPress={() => navigation.navigate('Settings', {section: 'app'})}
+          onPress={() => navigation.navigate('BeingFound')}
         />
 
         <Row
@@ -170,7 +216,7 @@ export function ProfileScreen({navigation}: RootTabScreenProps<'You'>) {
           icon="key"
           label="Privacy &amp; security"
           value={`App lock ${lockEnabled ? 'on' : 'off'} · ${blockedPeerIds.length} blocked`}
-          onPress={() => navigation.navigate('Settings', {section: 'system'})}
+          onPress={() => navigation.navigate('Privacy')}
         />
         <Row
           icon="code"
@@ -247,7 +293,18 @@ const useStyles = makeStyles(t => ({
   content: {paddingBottom: spacing.xl},
 
   identity: {alignItems: 'center', paddingTop: 24, paddingBottom: 26},
-  name: {fontSize: 20, fontWeight: '500', letterSpacing: -0.3, color: t.text, marginTop: 12},
+  nameRow: {flexDirection: 'row', alignItems: 'center', gap: 7, marginTop: 12},
+  name: {fontSize: 20, fontWeight: '500', letterSpacing: -0.3, color: t.text},
+  nameInput: {
+    marginTop: 12,
+    minWidth: 180,
+    textAlign: 'center',
+    paddingVertical: 2,
+    borderBottomWidth: 1,
+    borderBottomColor: t.accent,
+    padding: 0,
+    includeFontPadding: false,
+  },
   // The identity, in the form you would read aloud to check it.
   code: {fontFamily: fonts.mono, fontSize: 11.5, color: t.textDim, marginTop: 4},
 

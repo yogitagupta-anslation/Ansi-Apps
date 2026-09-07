@@ -354,6 +354,31 @@ export function DebugScreen({navigation}: RootStackScreenProps<'Debug'>) {
               {permission.denied.length > 0 && (
                 <LeaderRow label="Denied" value={permission.denied.join(', ')} />
               )}
+              {/* What the radio can actually do, as reported by the capability probe.
+                  Advertising failures on Android are usually one of these three rather
+                  than anything the app did, so they are worth stating outright. */}
+              {peripheral.capabilities ? (
+                <>
+                  <LeaderRow
+                    label="Hardware advertiser"
+                    value={peripheral.capabilities.hasAdvertiser ? 'Yes' : 'No'}
+                  />
+                  <LeaderRow
+                    label="Multi-advertisement"
+                    value={
+                      peripheral.capabilities.supportsMultipleAdvertisement ? 'Yes' : 'No'
+                    }
+                  />
+                  {peripheral.capabilities.missingPermissions.length > 0 && (
+                    <LeaderRow
+                      label="Missing permissions"
+                      value={peripheral.capabilities.missingPermissions.join(', ')}
+                    />
+                  )}
+                </>
+              ) : (
+                <LeaderRow label="Capability probe" value="Not run yet" />
+              )}
               {peripheral.error && (
                 <LeaderRow label="Peripheral error" value={peripheral.error} />
               )}

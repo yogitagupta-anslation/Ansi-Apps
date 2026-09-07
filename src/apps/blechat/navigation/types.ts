@@ -10,16 +10,14 @@ export type RootStackParamList = {
    */
   Chat: {peerId?: string; groupId?: string; displayName: string};
   NewGroup: undefined;
-  /**
-   * Also the "You" tab. Kept as a stack route as well, so a deep link can open it at a
-   * particular category; omitted just opens at the top.
-   */
-  Settings: {section?: 'profile' | 'app' | 'system'} | undefined;
   /** Diagnostics, reached from You. A drill-in rather than a tab of its own. */
   Debug: undefined;
   /** The two profile pickers. Same screen, different catalogue. */
   InterestPicker: undefined;
   LanguagePicker: undefined;
+  /** Everything that used to be Settings, split by what it is actually about. */
+  BeingFound: undefined;
+  Privacy: undefined;
 };
 
 /**

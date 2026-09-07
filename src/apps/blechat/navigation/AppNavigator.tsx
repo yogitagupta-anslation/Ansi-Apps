@@ -20,9 +20,10 @@ import {DebugScreen} from '../screens/DebugScreen';
 import {NearbyScreen} from '../screens/NearbyScreen';
 import {NewGroupScreen} from '../screens/NewGroupScreen';
 import {RegisterScreen} from '../screens/RegisterScreen';
-import {SettingsScreen} from '../screens/SettingsScreen';
 import {ProfileScreen} from '../screens/ProfileScreen';
 import {ChipPickerScreen} from '../screens/ChipPickerScreen';
+import {BeingFoundScreen} from '../screens/BeingFoundScreen';
+import {PrivacyScreen} from '../screens/PrivacyScreen';
 import type {RootStackParamList, TabParamList} from './types';
 import {useAppStore} from '../state/appStore';
 
@@ -221,6 +222,16 @@ export function AppNavigator() {
           options={{headerShown: false}}
         />
         <Stack.Screen
+          name="BeingFound"
+          component={BeingFoundScreen}
+          options={{headerShown: false, animation: 'slide_from_right'}}
+        />
+        <Stack.Screen
+          name="Privacy"
+          component={PrivacyScreen}
+          options={{headerShown: false, animation: 'slide_from_right'}}
+        />
+        <Stack.Screen
           name="InterestPicker"
           component={ChipPickerScreen}
           options={{headerShown: false, animation: 'slide_from_right'}}
@@ -247,13 +258,6 @@ export function AppNavigator() {
           component={ChatScreen}
           // ChatScreen renders its own header (avatar, name, MTU/role), so the stack
           // header would just duplicate it.
-          options={{headerShown: false}}
-        />
-        <Stack.Screen
-          name="Settings"
-          component={SettingsScreen}
-          // Same reason as Chat: SettingsScreen builds its own back button and title,
-          // matching the rest of this stack rather than the native default header.
           options={{headerShown: false}}
         />
       </Stack.Navigator>
