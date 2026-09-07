@@ -1439,6 +1439,24 @@ export class PeerManager implements PeerRouteResolver {
   }
 
   async connect(linkId: LinkId): Promise<void> {
+    /**
+     * A peripheral link cannot be dialled, and saying so is not a link failure.
+     *
+     * Only the remote side can open one — we are the peripheral on it. The transport
+     * rejects the attempt correctly, but routing that rejection through `recordFailure`
+     * marked the peer `failed`, and on the receiving phone that link is the live one:
+     * messages were arriving over it while the composer sat disabled behind
+     * "Connection failed". Refusing here, before any state is touched, keeps a category
+     * error from being recorded as evidence about a healthy link.
+     */
+    if (!isCentralLink(linkId)) {
+      logger.info(
+        TAG,
+        `ignoring dial of peripheral link ${linkId}; the remote peer owns that direction`,
+      );
+      return;
+    }
+
     // A peer we have identified before and blocked since is refused before dialling at
     // all — no reason to spend a whole handshake round-trip finding out again what we
     // already know. A peer we have never identified still gets a chance to prove itself

@@ -1,64 +1,114 @@
 /**
- * Search across the registry.
+ * The search field, in two forms.
  *
- * Filters as you type — with three apps a submit button would be pure ceremony —
- * and shows a clear button only once there is something to clear, so the row does
- * not carry a permanently dead control.
+ * `SearchButton` is what Home shows — it looks like a field but is a button that opens the
+ * search screen. That is deliberate rather than lazy: a real input on Home would raise the
+ * keyboard over the content someone came to browse, and every store worth copying does it
+ * this way.
+ *
+ * `SearchInput` is the real one, on the screen built for it.
  */
 
 import React from 'react';
-import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { StyleSheet, Text, TextInput, View } from 'react-native';
 
-import { radius, space, type HubPalette } from '../theme';
+import { Icon } from './Icon';
+import { Press } from './Press';
+import { radius, space, typeScale as t, font } from '../theme';
+import { useHubTheme } from '../useHubTheme';
 
-interface SearchFieldProps {
-  value: string;
-  onChange(next: string): void;
-  theme: HubPalette;
+export function SearchButton({ onPress }: { onPress(): void }): React.ReactElement {
+  const theme = useHubTheme();
+  return (
+    <Press
+      onPress={onPress}
+      scaleTo={0.985}
+      accessibilityRole="search"
+      accessibilityLabel="Search apps"
+      style={[styles.field, { backgroundColor: theme.surface, borderColor: theme.border }]}
+    >
+      <Icon name="search" size={18} color={theme.textFaint} />
+      <Text style={[t.body, { color: theme.textFaint }]}>Search apps</Text>
+    </Press>
+  );
 }
 
-export function SearchField({ value, onChange, theme }: SearchFieldProps): React.ReactElement {
+export function SearchInput({
+  value,
+  onChange,
+  onCancel,
+  autoFocus = true,
+}: {
+  value: string;
+  onChange(next: string): void;
+  onCancel(): void;
+  autoFocus?: boolean;
+}): React.ReactElement {
+  const theme = useHubTheme();
+
   return (
-    <View style={[styles.field, { backgroundColor: theme.surface, borderColor: theme.border }]}>
-      <Text style={[styles.glyph, { color: theme.textFaint }]}>⌕</Text>
-      <TextInput
-        value={value}
-        onChangeText={onChange}
-        placeholder="Search apps..."
-        placeholderTextColor={theme.textFaint}
-        style={[styles.input, { color: theme.text }]}
-        autoCorrect={false}
-        autoCapitalize="none"
-        returnKeyType="search"
-        accessibilityLabel="Search apps"
-      />
-      {value.length > 0 ? (
-        <Pressable
-          onPress={() => onChange('')}
-          hitSlop={10}
-          accessibilityRole="button"
-          accessibilityLabel="Clear search"
-        >
-          <Text style={[styles.clear, { color: theme.textDim }]}>✕</Text>
-        </Pressable>
-      ) : null}
+    <View style={styles.inputRow}>
+      <View style={[styles.field, { backgroundColor: theme.surface, borderColor: theme.border }]}>
+        <Icon name="search" size={18} color={theme.textFaint} />
+        <TextInput
+          value={value}
+          onChangeText={onChange}
+          autoFocus={autoFocus}
+          placeholder="Search apps"
+          placeholderTextColor={theme.textFaint}
+          returnKeyType="search"
+          autoCorrect={false}
+          autoCapitalize="none"
+          style={[styles.input, { color: theme.text }]}
+          // The one control that must never disappear behind a large font setting: it is
+          // how you get back out of search.
+          maxFontSizeMultiplier={1.6}
+        />
+        {value.length > 0 && (
+          <Press
+            onPress={() => onChange('')}
+            scaleTo={0.85}
+            hitSlop={10}
+            accessibilityRole="button"
+            accessibilityLabel="Clear search"
+          >
+            <Icon name="x" size={16} color={theme.textFaint} />
+          </Press>
+        )}
+      </View>
+
+      <Press
+        onPress={onCancel}
+        scaleTo={0.94}
+        hitSlop={8}
+        accessibilityRole="button"
+        accessibilityLabel="Cancel search"
+      >
+        <Text style={[t.bodyStrong, { color: theme.accent }]}>Cancel</Text>
+      </Press>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   field: {
+    flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     gap: space.sm,
-    borderRadius: radius.md,
+    height: 46,
     borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: radius.lg,
     paddingHorizontal: space.md,
-    height: 44,
   },
-  glyph: { fontSize: 18, marginTop: -2 },
-  // `padding: 0` because Android gives TextInput its own vertical padding, which
-  // pushes the text off-centre inside a fixed-height row.
-  input: { flex: 1, fontSize: 15, padding: 0 },
-  clear: { fontSize: 14, fontWeight: '600' },
+  inputRow: { flexDirection: 'row', alignItems: 'center', gap: space.md },
+  input: {
+    flex: 1,
+    fontFamily: font.body,
+    fontSize: 14,
+    // Android gives a TextInput generous default padding that makes it taller than the
+    // 46pt row it sits in and pushes the text off-centre.
+    padding: 0,
+    includeFontPadding: false,
+  },
 });

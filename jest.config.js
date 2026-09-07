@@ -1,17 +1,45 @@
 /**
- * BLE Chat's test suite, running inside the hub.
+ * Two suites, kept apart on purpose.
  *
- * Scoped to that app's folder: the other two apps brought their own suites and their own
- * runners, and merging three sets of assumptions into one config is how a green run
- * stops meaning anything.
+ * BLE Chat brought its own suite and its own set of stubs, built around a rule worth
+ * preserving: nothing in that app ever substitutes a fake for a real radio operation. The
+ * hub's tests need mocks of a completely different kind — an icon font, a font loader —
+ * and folding those into BLE Chat's setup would quietly weaken the file that says it has
+ * only the mocks it does.
+ *
+ * The other two apps' suites are still not wired in here. Merging three more sets of
+ * assumptions into one config is how a green run stops meaning anything.
  */
-module.exports = {
+
+const shared = {
   preset: 'react-native',
-  roots: ['<rootDir>/src/apps/blechat'],
-  setupFiles: ['<rootDir>/jest.setup.js'],
-  // Shared harness code, not test suites.
-  testPathIgnorePatterns: ['/node_modules/', '/__tests__/support/'],
+  rootDir: __dirname,
+  // `expo(nent)?` alone matches the `expo` package and nothing else, since the trailing
+  // slash ends the alternative — so no `expo-*` module was ever on this allowlist. Widened
+  // to cover them. Note that it is not sufficient on its own: ESM packages under
+  // node_modules are still reaching Jest untransformed in this checkout, which is why the
+  // hub's setup stubs the native ones outright.
   transformIgnorePatterns: [
-    'node_modules/(?!((jest-)?react-native|@react-native(-community)?|expo(nent)?|@expo(nent)?/.*|@react-navigation/.*|@noble)/)',
+    'node_modules/(?!((jest-)?react-native|@react-native(-community)?|expo(nent)?(-[\\w-]+)?|@expo(nent)?/.*|@expo-google-fonts/.*|@react-navigation/.*|@react-native-vector-icons/.*|@noble)/)',
+  ],
+};
+
+module.exports = {
+  projects: [
+    {
+      ...shared,
+      displayName: 'blechat',
+      roots: ['<rootDir>/src/apps/blechat'],
+      setupFiles: ['<rootDir>/jest.setup.js'],
+      // Shared harness code, not test suites.
+      testPathIgnorePatterns: ['/node_modules/', '/__tests__/support/'],
+    },
+    {
+      ...shared,
+      displayName: 'hub',
+      roots: ['<rootDir>/src/hub'],
+      setupFiles: ['<rootDir>/jest.hub.setup.js'],
+      testPathIgnorePatterns: ['/node_modules/'],
+    },
   ],
 };

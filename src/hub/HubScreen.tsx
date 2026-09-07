@@ -1,178 +1,155 @@
 /**
- * The launcher.
+ * Home: the shelf.
  *
- * Search and category are two filters over one list, applied in that order and
- * held in this component rather than in the registry — the registry describes the
- * apps, this screen describes what is currently on screen.
+ * The flow this screen starts is browse → detail → "Use it!" → the app runs, so tapping a
+ * card here does *not* launch anything. It opens the app's page. That is a real decision
+ * and worth stating: a launcher that opens apps on the first tap is faster, but it leaves
+ * nowhere to say what an app needs before it needs it, which is the whole reason the
+ * detail page exists in a hub full of apps that want your radio.
  *
- * Featured and Recents only appear on the unfiltered view. Once someone is
- * searching or has picked a category they have told you what they want, and
- * leaving a promotional slot above the results is the launcher arguing with them.
+ * The one exception is "Jump back in", where you have already made that decision.
  */
 
 import React, { useEffect, useMemo, useState } from 'react';
-import {
-  ScrollView,
-  StyleSheet,
-  Text,
-  View,
-  useWindowDimensions,
-} from 'react-native';
-import { useIsFocused } from '@react-navigation/native';
+import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { AppCard } from './components/AppCard';
+import { AppRow } from './components/AppRow';
 import { CategoryChips } from './components/CategoryChips';
 import { FeaturedCard } from './components/FeaturedCard';
-import { RecentRow } from './components/RecentRow';
-import { SearchField } from './components/SearchField';
+import { Press } from './components/Press';
+import { SearchButton } from './components/SearchField';
+import { Section } from './components/Section';
 import { loadRecents } from './recents';
-import { ALL_CATEGORY, APPS, CATEGORIES, appById, searchApps, type HubApp } from './registry';
-import { radius, space, useHubTheme } from './theme';
-
-const GUTTER = space.xl;
-const GAP = space.md;
+import { ALL_CATEGORY, APPS, CATEGORIES, appById, type HubApp } from './registry';
+import { initialsOf, useHubSettings } from './settings';
+import { radius, space, typeScale as t } from './theme';
+import { useHubTheme } from './useHubTheme';
 
 interface HubScreenProps {
+  /** Opens an app's detail page. */
+  onSelect(app: HubApp): void;
+  /** Launches straight into an app — used only where the choice was already made. */
   onOpen(app: HubApp): void;
+  onSearch(): void;
+  onSettings(): void;
+  /** Bumped by the navigator on focus, so recents re-read after a session ends. */
+  refreshKey?: number;
 }
 
-export function HubScreen({ onOpen }: HubScreenProps): React.ReactElement {
+export function HubScreen({
+  onSelect,
+  onOpen,
+  onSearch,
+  onSettings,
+  refreshKey = 0,
+}: HubScreenProps): React.ReactElement {
   const theme = useHubTheme();
   const insets = useSafeAreaInsets();
-  const { width } = useWindowDimensions();
-  // Recents change while this screen is mounted but not visible — the launch that
-  // changed them happened on the way out. Re-reading on focus is what makes the
-  // row correct when you come back, without the hub having to own the list.
-  const focused = useIsFocused();
+  const { displayName } = useHubSettings();
 
-  const [query, setQuery] = useState('');
   const [category, setCategory] = useState(ALL_CATEGORY);
-  const [recentIds, setRecentIds] = useState<string[]>([]);
+  const [recents, setRecents] = useState<HubApp[]>([]);
 
   useEffect(() => {
-    let live = true;
+    let alive = true;
     void loadRecents().then((ids) => {
-      if (live) setRecentIds(ids);
+      if (!alive) return;
+      setRecents(ids.map(appById).filter((app): app is HubApp => app !== undefined));
     });
     return () => {
-      live = false;
+      alive = false;
     };
-  }, [focused]);
+  }, [refreshKey]);
 
-  const results = useMemo(() => {
-    const byCategory =
-      category === ALL_CATEGORY ? APPS : APPS.filter((app) => app.tags.includes(category));
-    return searchApps(byCategory, query);
-  }, [category, query]);
-
-  const unfiltered = query.trim().length === 0 && category === ALL_CATEGORY;
-  const featured = useMemo(() => APPS.find((app) => app.featured), []);
-  const recents = useMemo(
-    () => recentIds.map(appById).filter((app): app is HubApp => app !== undefined),
-    [recentIds],
+  const featured = useMemo(() => APPS.find((app) => app.featured) ?? APPS[0], []);
+  const listed = useMemo(
+    () => (category === ALL_CATEGORY ? APPS : APPS.filter((app) => app.tags.includes(category))),
+    [category],
   );
 
-  // Two columns, sized from the real viewport rather than a percentage, so the
-  // gap between the tiles is exactly the gap to the screen edge.
-  const cardWidth = (width - GUTTER * 2 - GAP) / 2;
+  const greeting = displayName.trim() ? `Hey, ${displayName.trim().split(/\s+/)[0]}` : 'Your apps';
 
   return (
     <ScrollView
-      style={[styles.root, { backgroundColor: theme.bg }]}
+      style={{ backgroundColor: theme.bg }}
       contentContainerStyle={[
         styles.content,
-        { paddingTop: insets.top + space.lg, paddingBottom: insets.bottom + space.xxl },
+        { paddingTop: insets.top + space.md, paddingBottom: space.xxl * 2 },
       ]}
-      keyboardShouldPersistTaps="handled"
       showsVerticalScrollIndicator={false}
     >
       <View style={styles.header}>
-        <View style={[styles.mark, { backgroundColor: theme.accentSoft }]}>
-          <Text style={[styles.markGlyph, { color: theme.accent }]}>✦</Text>
-        </View>
         <View style={styles.headerText}>
-          <Text style={[styles.title, { color: theme.text }]}>My App Hub</Text>
-          <Text style={[styles.subtitle, { color: theme.textDim }]}>Everything in one place</Text>
+          <Text style={[t.eyebrow, { color: theme.accent }]}>App Hub</Text>
+          <Text style={[t.title, { color: theme.text }]} numberOfLines={1}>
+            {greeting}
+          </Text>
         </View>
+
+        <Press
+          onPress={onSettings}
+          scaleTo={0.9}
+          accessibilityRole="button"
+          accessibilityLabel="Open settings"
+          style={[styles.avatar, { backgroundColor: theme.accentSoft, borderColor: theme.border }]}
+        >
+          <Text style={[t.metaStrong, { color: theme.accent }]}>
+            {displayName.trim() ? initialsOf(displayName) : '·'}
+          </Text>
+        </Press>
       </View>
 
-      <SearchField value={query} onChange={setQuery} theme={theme} />
+      <SearchButton onPress={onSearch} />
 
-      <CategoryChips
-        categories={CATEGORIES}
-        selected={category}
-        onSelect={setCategory}
-        theme={theme}
-      />
+      <View>
+        <Section title="Featured this week" />
+        <FeaturedCard app={featured} onPress={() => onSelect(featured)} />
+      </View>
 
-      {unfiltered && recents.length > 0 ? (
-        <View style={styles.section}>
-          <Text style={[styles.sectionTitle, { color: theme.textFaint }]}>RECENTLY OPENED</Text>
-          <RecentRow apps={recents} theme={theme} onOpen={onOpen} />
-        </View>
-      ) : null}
-
-      {unfiltered && featured ? (
-        <View style={styles.section}>
-          <FeaturedCard app={featured} theme={theme} onPress={() => onOpen(featured)} />
-        </View>
-      ) : null}
-
-      <View style={styles.section}>
-        <Text style={[styles.sectionTitle, { color: theme.textFaint }]}>
-          {unfiltered ? 'ALL APPS' : `${results.length} ${results.length === 1 ? 'APP' : 'APPS'}`}
-        </Text>
-
-        {results.length === 0 ? (
-          <View style={[styles.empty, { backgroundColor: theme.surface, borderColor: theme.border }]}>
-            <Text style={[styles.emptyTitle, { color: theme.text }]}>Nothing here</Text>
-            <Text style={[styles.emptyBody, { color: theme.textDim }]}>
-              No app matches “{query.trim() || category}”.
-            </Text>
-          </View>
-        ) : (
-          <View style={styles.grid}>
-            {results.map((app) => (
-              <AppCard
-                key={app.id}
-                app={app}
-                theme={theme}
-                width={cardWidth}
-                onPress={() => onOpen(app)}
-              />
+      {recents.length > 0 && (
+        <View>
+          <Section title="Jump back in" />
+          <View style={styles.list}>
+            {recents.map((app) => (
+              // Straight in, no detail page: this row exists because you have already
+              // been here, and making you approve the same app twice is friction with
+              // nothing on the other side of it.
+              <AppRow key={app.id} app={app} onPress={() => onOpen(app)} note="Open again" />
             ))}
           </View>
-        )}
+        </View>
+      )}
+
+      <View>
+        <Section title="All apps" />
+        <CategoryChips categories={CATEGORIES} selected={category} onSelect={setCategory} />
+        <View style={[styles.list, { marginTop: space.md }]}>
+          {listed.map((app) => (
+            <AppRow key={app.id} app={app} onPress={() => onSelect(app)} />
+          ))}
+        </View>
       </View>
+
+      <Text style={[t.meta, styles.footer, { color: theme.textFaint }]}>
+        {APPS.length} apps · nothing to install
+      </Text>
     </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1 },
-  content: { paddingHorizontal: GUTTER, gap: space.lg },
-  header: { flexDirection: 'row', alignItems: 'center', gap: space.md, marginBottom: space.xs },
-  mark: {
-    width: 44,
-    height: 44,
-    borderRadius: radius.md,
+  content: { paddingHorizontal: space.lg, gap: space.lg },
+  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  headerText: { flex: 1, gap: 2 },
+  avatar: {
+    width: 42,
+    height: 42,
+    borderRadius: radius.pill,
+    borderWidth: StyleSheet.hairlineWidth,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  markGlyph: { fontSize: 22, fontWeight: '700' },
-  headerText: { flex: 1 },
-  title: { fontSize: 24, fontWeight: '800', letterSpacing: -0.4 },
-  subtitle: { fontSize: 13, marginTop: 1 },
-  section: { gap: space.md },
-  sectionTitle: { fontSize: 11, fontWeight: '800', letterSpacing: 1.3 },
-  grid: { flexDirection: 'row', flexWrap: 'wrap', gap: GAP },
-  empty: {
-    borderRadius: radius.lg,
-    borderWidth: StyleSheet.hairlineWidth,
-    padding: space.xl,
-    gap: space.xs,
-  },
-  emptyTitle: { fontSize: 15, fontWeight: '700' },
-  emptyBody: { fontSize: 13, lineHeight: 18 },
+  list: { gap: space.sm },
+  footer: { textAlign: 'center', marginTop: space.sm },
 });

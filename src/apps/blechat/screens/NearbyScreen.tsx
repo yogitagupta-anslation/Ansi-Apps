@@ -40,6 +40,7 @@ import type {Peer} from '../types/Peer';
 import type {LinkState} from '../types/BLE';
 import type {RootTabScreenProps} from '../navigation/types';
 import {relativeTime} from '../utils/time';
+import {isCentralLink} from '../utils/linkId';
 
 // Opt-in flag Android needs for LayoutAnimation outside a native-driver context. A no-op
 // everywhere else, so this is safe to call unconditionally at module load.
@@ -215,9 +216,23 @@ export function NearbyScreen({navigation}: RootTabScreenProps<'Nearby'>) {
    * look like it is flickering as peers come and go.
    */
   const recent = useMemo(() => {
-    const inRange = new Set(chatRows.map(r => r.peer?.peerId).filter(Boolean));
+    // Keyed on both identity and link: an advertisement that has not finished its
+    // handshake has no peerId yet, so matching on peerId alone let the same person
+    // appear live above and "Not in range · seen just now" below at the same time.
+    const inRange = new Set<string>();
+    for (const row of chatRows) {
+      if (row.peer?.peerId) inRange.add(row.peer.peerId);
+      if (row.peer?.peerIdPrefix) inRange.add(`p:${row.peer.peerIdPrefix}`);
+      if (row.device.linkId) inRange.add(`l:${row.device.linkId}`);
+    }
     return peers
-      .filter(p => p.peerId !== null && !inRange.has(p.peerId))
+      .filter(
+        p =>
+          p.peerId !== null &&
+          !inRange.has(p.peerId) &&
+          !(p.peerIdPrefix && inRange.has(`p:${p.peerIdPrefix}`)) &&
+          !(p.linkId && inRange.has(`l:${p.linkId}`)),
+      )
       .sort((a, b) => {
         const aFav = a.peerId ? favoritePeerIds.includes(a.peerId) : false;
         const bFav = b.peerId ? favoritePeerIds.includes(b.peerId) : false;
@@ -915,10 +930,17 @@ function RecentRow({
 }) {
   const styles = useStyles();
   const theme = useTheme();
+  /**
+   * Only a central link can be dialled — a peripheral one belongs to the remote peer,
+   * who is the only side that can open it. Offering "Connect" on one produced an error
+   * dialog every time, and worse, the refusal used to be recorded as a failure against
+   * a link that was alive and carrying messages.
+   */
+  const dialable = peer.linkId !== null && isCentralLink(peer.linkId);
   return (
     <Touchable
       scale={false}
-      onPress={() => (peer.linkId ? onConnect(peer.linkId) : onOpenChat(peer))}
+      onPress={() => (dialable ? onConnect(peer.linkId!) : onOpenChat(peer))}
       style={styles.recentRow}>
       <Touchable
         scale={false}
@@ -940,9 +962,7 @@ function RecentRow({
           Not in range · seen {relativeTime(peer.lastSeen)} · redialled automatically
         </DenseText>
       </View>
-      <DenseText style={styles.recentAction}>
-        {peer.linkId ? 'Connect' : 'Chat'}
-      </DenseText>
+      <DenseText style={styles.recentAction}>{dialable ? 'Connect' : 'Chat'}</DenseText>
     </Touchable>
   );
 }

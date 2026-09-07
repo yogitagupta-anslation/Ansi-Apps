@@ -64,12 +64,31 @@ function resolveApiBaseUrl(): string {
 }
 
 export const config: AppConfig = {
-  api: (process.env.EXPO_PUBLIC_EVENTPULSE_API as ApiMode) ?? (isDev ? 'mock' : 'http'),
+  /**
+   * `http` only when there is somewhere to send the request.
+   *
+   * This used to key on `__DEV__`, which meant a release build asked for `http` and
+   * then talked to `http://localhost:4000` — a port on the phone itself, where nothing
+   * is listening. The app was not broken so much as pointed at nothing: no events, no
+   * attendees, an empty screen with no explanation.
+   *
+   * An unset backend URL is not a configuration mistake, it is the ordinary case for a
+   * build handed to someone to try. Falling back to the in-memory backend makes the
+   * product reviewable; `isMockBackend()` is what the UI uses to say so out loud, so
+   * nobody mistakes the sample crowd for real attendees.
+   */
+  api:
+    (process.env.EXPO_PUBLIC_EVENTPULSE_API as ApiMode) ??
+    (process.env.EXPO_PUBLIC_EVENTPULSE_API_URL ? 'http' : 'mock'),
   ble: (process.env.EXPO_PUBLIC_EVENTPULSE_BLE as BleMode) ?? 'native',
   apiBaseUrl: resolveApiBaseUrl(),
   // The backend fails closed on an unknown token, so an unauthenticated client
   // would 401 on every call. `demo` is the seeded development identity.
-  authToken: process.env.EXPO_PUBLIC_EVENTPULSE_TOKEN ?? (isDev ? 'demo' : null),
+  // The seeded development identity. Only ever sent to a backend that was explicitly
+  // configured; the mock one does not authenticate at all.
+  authToken:
+    process.env.EXPO_PUBLIC_EVENTPULSE_TOKEN ??
+    (process.env.EXPO_PUBLIC_EVENTPULSE_API_URL ? null : 'demo'),
   simulatedCrowdSize: Number(process.env.EXPO_PUBLIC_EVENTPULSE_CROWD ?? 42),
   showDevPanel: isDev,
 };
