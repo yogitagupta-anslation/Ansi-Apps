@@ -12,7 +12,8 @@ import {radius, spacing, typography} from '../config/theme';
 import {makeStyles, useTheme} from '../theme/ThemeProvider';
 import {AppText, DenseText} from '../components/AppText';
 import {Screen} from '../components/ui/Screen';
-import {Icon} from '../components/ui/Icon';
+import {Icon, type IconName} from '../components/ui/Icon';
+import {RippleStage} from '../components/ui/RippleStage';
 import {MascotAvatar} from '../components/ui/Mascot';
 import {FadeIn, Touchable} from '../components/Motion';
 import {bleChat} from '../services/BleChatService';
@@ -29,7 +30,54 @@ import {
   sanitiseInterests,
 } from '../config/interests';
 
-type Step = 0 | 1 | 2;
+/**
+ * Three tour steps, then identity.
+ *
+ * The old flow asked for a name before saying what the app was. The design's order is
+ * the other way round — tell somebody what this does and what Android is about to ask,
+ * and only then ask them to type — which is also why the tour steps carry a Skip and the
+ * identity screen does not.
+ */
+type Step = 0 | 1 | 2 | 3;
+
+const TOUR_STEPS = 3;
+
+/** The colours a face can take, from the design's own swatch row. */
+const FACE_TINTS = ['#4C3FE0', '#8B7CF6', '#2563EB', '#0E9F9F', '#0F7B54', '#A8620E', '#B42318', '#BE3F8F'];
+
+interface TourCopy {
+  title: string;
+  body: string;
+}
+
+const TOUR: TourCopy[] = [
+  {
+    title: 'Talk to the people around you',
+    body: 'Your phone finds theirs directly. No account, no phone number, and it works with the network down.',
+  },
+  {
+    title: 'About ten metres, and no further',
+    body: 'Roughly a room, a carriage, a queue. Walk closer and someone appears on their own. Walk away and they drop off.',
+  },
+  {
+    title: 'Two things Android will ask',
+    body: "Here's what each one is for, before the system dialog shows up.",
+  },
+];
+
+/** The two permissions, named the way Android names them. */
+const PERMISSION_REASONS: Array<{icon: IconName; title: string; body: string}> = [
+  {
+    icon: 'radar',
+    title: 'Find nearby devices',
+    body: "So you can see who's around, and they can see you.",
+  },
+  {
+    icon: 'link',
+    title: 'Connect to devices',
+    body: 'So a message has something to travel over once you have found someone.',
+  },
+];
 
 const STEP_LABEL = ['NAME', 'INTERESTS', 'BLUETOOTH'] as const;
 
@@ -59,6 +107,13 @@ export function RegisterScreen() {
   const theme = useTheme();
 
   const [step, setStep] = useState<Step>(0);
+  /**
+   * The face is drawn from the identity key, so it cannot truly be re-rolled without a
+   * new identity. Shuffle nudges the tint instead, which is the part the design lets you
+   * pick — the geometry stays derived, so both phones still draw the same face.
+   */
+  const [faceSeed, setFaceSeed] = useState(0);
+  const shuffleFace = useCallback(() => setFaceSeed(n => n + 1), []);
   const [name, setName] = useState('');
   const [interests, setInterests] = useState<string[]>([]);
   const [custom, setCustom] = useState('');
@@ -67,7 +122,6 @@ export function RegisterScreen() {
   const permission = useAppStore(s => s.permission);
 
   const nameOk = isValidDisplayName(name);
-  const cleanName = sanitiseDisplayName(name) || 'You';
 
   const toggle = useCallback(
     (interest: string) => {
@@ -119,10 +173,11 @@ export function RegisterScreen() {
       .catch(err => Alert.alert('Permissions', String(err)));
   }, []);
 
-  const canAdvance = step === 0 ? nameOk : true;
+  // Only the identity step can be blocked, and only on an empty name.
+  const canAdvance = step === 3 ? nameOk : true;
 
   const advance = useCallback(() => {
-    if (step < 2) {
+    if (step < 3) {
       setStep((step + 1) as Step);
       return;
     }
@@ -140,44 +195,110 @@ export function RegisterScreen() {
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 24}>
         <View style={styles.head}>
-          {/* A rule, not a "2/3" label. Three filling segments say how much is left
-              without asking anyone to do arithmetic. */}
-          <View style={styles.progress}>
-            {[0, 1, 2].map(i => (
-              <View
-                key={i}
-                style={[
-                  styles.progressSegment,
-                  {backgroundColor: i <= step ? theme.accent : theme.border},
-                ]}
-              />
-            ))}
-          </View>
-          <DenseText style={styles.eyebrow}>
-            STEP {step + 1} OF 3 · {STEP_LABEL[step]}
-          </DenseText>
-          <AppText style={styles.title}>
-            {step === 0
-              ? 'What should people call you?'
-              : step === 1
-              ? 'What should people know you for?'
-              : 'One permission, then you are in'}
-          </AppText>
-          <DenseText style={styles.lede}>
-            {step === 0
-              ? 'BLE Chat finds people in Bluetooth range and lets you talk to them directly — no server, no internet, no accounts.'
-              : step === 1
-              ? 'Shared interests are what turn a list of devices into someone worth talking to. Pick a few — they are visible before anyone connects.'
-              : 'Bluetooth is the whole transport. Without it there is nobody to find and nothing to send.'}
-          </DenseText>
+          {step < TOUR_STEPS ? (
+            <>
+              {/* Mono, because it is a position: "01 / 03" is a measurement of where you
+                  are, not a heading. */}
+              <View style={styles.tourTop}>
+                <DenseText style={styles.tourCounter}>
+                  {String(step + 1).padStart(2, '0')} / {String(TOUR_STEPS).padStart(2, '0')}
+                </DenseText>
+                <View style={styles.grow} />
+                {step < TOUR_STEPS - 1 ? (
+                  <Touchable
+                    scale={false}
+                    onPress={() => setStep(TOUR_STEPS as Step)}
+                    hitSlop={10}
+                    accessibilityRole="button"
+                    accessibilityLabel="Skip the tour">
+                    <DenseText style={styles.skip}>Skip</DenseText>
+                  </Touchable>
+                ) : null}
+              </View>
+
+              {/* A rule, not a "2/3" label. Three filling segments say how much is left
+                  without asking anyone to do arithmetic. */}
+              <View style={styles.progress}>
+                {[0, 1, 2].map(i => (
+                  <View
+                    key={i}
+                    style={[
+                      styles.progressSegment,
+                      {backgroundColor: i <= step ? theme.text : theme.border},
+                    ]}
+                  />
+                ))}
+              </View>
+            </>
+          ) : (
+            <AppText style={styles.identityTitle}>How you&apos;ll show up</AppText>
+          )}
         </View>
 
         <ScrollView
-          contentContainerStyle={styles.content}
+          contentContainerStyle={[
+            styles.content,
+            // The tour is three short blocks and reads as a poster; the identity step is
+            // a form that has to start at the top and grow downwards.
+            step < TOUR_STEPS ? styles.contentCentred : null,
+          ]}
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}>
-          {step === 0 ? (
+          {step < TOUR_STEPS ? (
+            <FadeIn key={step}>
+              {/* The ripple stage, on the two steps that are about being found. Step
+                  three is about permissions and gets the reasons instead. */}
+              {step < 2 ? (
+                <View style={styles.stage}>
+                  <RippleStage size={168} />
+                </View>
+              ) : null}
+
+              <AppText style={styles.tourTitle}>{TOUR[step].title}</AppText>
+              <DenseText style={styles.tourBody}>{TOUR[step].body}</DenseText>
+
+              {step === 2
+                ? PERMISSION_REASONS.map((reason, i) => (
+                    <View
+                      key={reason.title}
+                      style={[styles.reason, i === 0 ? styles.reasonFirst : null]}>
+                      <Icon
+                        name={reason.icon}
+                        size={19}
+                        color={theme.accent}
+                        strokeWidth={1.9}
+                      />
+                      <View style={styles.grow}>
+                        <AppText style={styles.reasonTitle}>{reason.title}</AppText>
+                        <DenseText style={styles.reasonBody}>{reason.body}</DenseText>
+                      </View>
+                    </View>
+                  ))
+                : null}
+            </FadeIn>
+          ) : null}
+
+          {step === 3 ? (
             <FadeIn>
+              {/* The face first, then the name, then what you are into — the order the
+                  design uses, and the order somebody reads a row on Nearby. */}
+              <View style={styles.identityHead}>
+                <MascotAvatar size={64} tint={FACE_TINTS[faceSeed % FACE_TINTS.length]} />
+                <View style={styles.identityHeadSide}>
+                  <Touchable
+                    scale={false}
+                    onPress={shuffleFace}
+                    style={styles.shufflePill}
+                    accessibilityRole="button"
+                    accessibilityLabel="Shuffle your face">
+                    <Icon name="radar" size={12} color={theme.text} strokeWidth={2} />
+                    <DenseText style={styles.shuffleText}>Shuffle</DenseText>
+                  </Touchable>
+                  <DenseText style={styles.customiseLater}>Customise later</DenseText>
+                </View>
+              </View>
+
+              <DenseText style={styles.fieldLabel}>NAME</DenseText>
               <TextInput
                 style={styles.input}
                 value={name}
@@ -186,58 +307,22 @@ export function RegisterScreen() {
                 placeholderTextColor={theme.textFaint}
                 maxLength={MAX_DISPLAY_NAME_LENGTH}
                 autoFocus
-                returnKeyType="next"
-                onSubmitEditing={() => nameOk && setStep(1)}
+                returnKeyType="done"
+                onSubmitEditing={() => nameOk && advance()}
                 maxFontSizeMultiplier={1.3}
               />
               <DenseText style={styles.helper}>
                 {name.trim().length > 0 && !nameOk
                   ? `At least ${MIN_DISPLAY_NAME_LENGTH} characters.`
-                  : 'A nickname is fine. You can change it later in Settings.'}
+                  : 'The only name a stranger sees.'}
               </DenseText>
-            </FadeIn>
-          ) : null}
 
-          {step === 1 ? (
-            <FadeIn>
-              {/* The promise, made literal. "This is what they will see" above a form is
-                  a claim; a card that fills in as you tap is the thing itself. */}
-              {/* On the page, not in a filled violet panel. This shows how you will look
-                  to somebody else, which a coloured slab behind it actively works against
-                  — the row they will actually see has no fill at all. */}
-              <View style={styles.preview}>
-                <MascotAvatar size={54} tint={theme.accent} />
-                <View style={styles.previewBody}>
-                  <DenseText style={styles.previewEyebrow}>
-                    HOW YOU&apos;LL APPEAR NEARBY
-                  </DenseText>
-                  <AppText style={styles.previewName} numberOfLines={1}>
-                    {cleanName}
-                  </AppText>
-                  {interests.length > 0 ? (
-                    <View style={styles.previewChips}>
-                      {interests.slice(0, 3).map(interest => (
-                        <View key={interest} style={styles.previewChip}>
-                          <DenseText
-                            style={styles.previewChipText}
-                            maxFontSizeMultiplier={1}>
-                            {interest}
-                          </DenseText>
-                        </View>
-                      ))}
-                      {interests.length > 3 ? (
-                        <DenseText style={styles.previewMore}>
-                          +{interests.length - 3}
-                        </DenseText>
-                      ) : null}
-                    </View>
-                  ) : (
-                    <DenseText style={styles.previewEmpty}>
-                      No interests yet — you will just be a name
-                    </DenseText>
-                  )}
-                </View>
-              </View>
+              <DenseText style={[styles.fieldLabel, styles.fieldLabelSpaced]}>
+                INTERESTS
+              </DenseText>
+              <DenseText style={styles.fieldHint}>
+                Optional. This is what makes someone nearby worth talking to.
+              </DenseText>
 
               <View style={styles.counterRow}>
                 <DenseText style={styles.counter}>
@@ -318,7 +403,7 @@ export function RegisterScreen() {
             </FadeIn>
           ) : null}
 
-          {step === 2 ? (
+          {false ? (
             <FadeIn>
               <View style={styles.permissionCard}>
                 <View style={[styles.permissionTile, {backgroundColor: theme.accentSoft}]}>
@@ -369,6 +454,7 @@ export function RegisterScreen() {
         </ScrollView>
 
         <View style={styles.footer}>
+          {step === 3 ? (
           <View style={styles.privacyRow}>
             <Icon name="shield" color={theme.textFaint} size={13} />
             <DenseText style={styles.privacy}>
@@ -376,6 +462,7 @@ export function RegisterScreen() {
               encrypted.
             </DenseText>
           </View>
+          ) : null}
 
           <View style={styles.footerButtons}>
             {step > 0 ? (
@@ -410,7 +497,13 @@ export function RegisterScreen() {
                     styles.nextText,
                     {color: canAdvance && !saving ? theme.onAccent : theme.textFaint},
                   ]}>
-                  {saving ? 'Saving…' : step === 2 ? 'Start chatting' : 'Continue'}
+                  {saving
+                    ? 'Saving…'
+                    : step === 3
+                    ? 'Start chatting'
+                    : step === 2
+                    ? 'Got it'
+                    : 'Continue'}
                 </AppText>
               </View>
             </Touchable>
@@ -425,10 +518,22 @@ const useStyles = makeStyles(t => ({
   flex: {flex: 1},
   grow: {flex: 1},
 
-  head: {paddingHorizontal: spacing.lg + 4, paddingTop: spacing.sm},
+  head: {paddingHorizontal: 18, paddingTop: 12},
+  tourTop: {flexDirection: 'row', alignItems: 'center'},
+  tourCounter: {...typography.monoTiny, color: t.textDim, letterSpacing: 0.5},
+  skip: {fontSize: 13, color: t.textDim},
+  identityTitle: {
+    fontSize: 28,
+    fontWeight: '600',
+    letterSpacing: -1,
+    lineHeight: 32,
+    color: t.text,
+    paddingHorizontal: 4,
+    paddingTop: 6,
+  },
   // 2px rails, square. A 4px rounded bar reads as a control you could drag; this is a
   // position indicator and nothing else.
-  progress: {flexDirection: 'row', gap: 4},
+  progress: {flexDirection: 'row', gap: 4, marginTop: 12},
   progressSegment: {flex: 1, height: 2},
   // Mono, because it is a position — "02 / 05" is a measurement of where you are.
   eyebrow: {...typography.monoTiny, color: t.textDim, letterSpacing: 0.5, marginTop: spacing.lg},
@@ -443,10 +548,11 @@ const useStyles = makeStyles(t => ({
   lede: {...typography.body, color: t.textDim, lineHeight: 23, marginTop: 12},
 
   content: {
-    paddingHorizontal: spacing.lg + 4,
+    paddingHorizontal: 22,
     paddingTop: spacing.lg,
     paddingBottom: spacing.lg,
   },
+  contentCentred: {flexGrow: 1, justifyContent: 'center'},
 
   // A rule, not a rounded box. One text field on an otherwise empty screen does not need
   // an outline to be found.
@@ -458,28 +564,43 @@ const useStyles = makeStyles(t => ({
     fontSize: 21,
     fontWeight: '500',
   },
-  helper: {...typography.caption, color: t.textDim, marginTop: 10, lineHeight: 19},
+  helper: {...typography.caption, color: t.textDim, marginTop: 7, lineHeight: 19},
 
-  // ---- live preview ------------------------------------------------------
-  preview: {
+  // ---- identity ------------------------------------------------------------
+  identityHead: {flexDirection: 'row', alignItems: 'center', gap: 15, paddingTop: 24, paddingBottom: 4},
+  identityHeadSide: {gap: 8, alignItems: 'flex-start'},
+  shufflePill: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 13,
-    paddingVertical: 16,
-    borderTopWidth: 1,
-    borderTopColor: t.divider,
+    gap: 6,
+    borderWidth: 1,
+    borderColor: t.border,
+    borderRadius: radius.pill,
+    paddingVertical: 7,
+    paddingHorizontal: 13,
+  },
+  shuffleText: {fontSize: 12.5, fontWeight: '500', color: t.text},
+  customiseLater: {fontSize: 12.5, color: t.textDim},
+  fieldLabel: {fontSize: 10.5, fontWeight: '500', letterSpacing: 1, color: t.textDim, marginTop: 28},
+  fieldLabelSpaced: {marginTop: 24},
+  fieldHint: {fontSize: 12.5, lineHeight: 19, color: t.textDim, marginTop: 6},
+
+  // ---- tour ----------------------------------------------------------------
+  stage: {alignItems: 'center', marginBottom: 44},
+  tourTitle: {fontSize: 29, fontWeight: '600', letterSpacing: -1.05, lineHeight: 33, color: t.text},
+  tourBody: {fontSize: 14.5, lineHeight: 22, color: t.textDim, marginTop: 13},
+  reason: {flexDirection: 'row', alignItems: 'flex-start', gap: 13, paddingVertical: 18},
+  reasonFirst: {
+    marginTop: 22,
+    paddingTop: 22,
     borderBottomWidth: 1,
     borderBottomColor: t.divider,
   },
-  previewBody: {flex: 1, minWidth: 0},
-  previewEyebrow: {...typography.overline, color: t.textDim},
-  previewName: {...typography.headline, color: t.text, marginTop: 4},
-  previewChips: {flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 5, marginTop: 6},
+  reasonTitle: {fontSize: 15.5, fontWeight: '500', color: t.text},
+  reasonBody: {fontSize: 13.5, lineHeight: 20, color: t.textDim, marginTop: 3},
+
+  // ---- live preview ------------------------------------------------------
   // Words, matching the Nearby row they are previewing.
-  previewChip: {},
-  previewChipText: {...typography.caption, color: t.accentQuiet},
-  previewMore: {...typography.caption, color: t.textDim},
-  previewEmpty: {...typography.caption, color: t.textDim, marginTop: 6},
 
   counterRow: {flexDirection: 'row', alignItems: 'center', marginTop: 18},
   counter: {...typography.overline, color: t.textDim},

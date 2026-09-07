@@ -1,9 +1,9 @@
-import React, {useEffect, useRef} from 'react';
-import {Animated, Easing, View} from 'react-native';
+import React from 'react';
+import {View} from 'react-native';
 
 import {AppText, DenseText} from './AppText';
-import {BreathingDot, useReduceMotion} from './Motion';
-import {Mascot} from './ui/Mascot';
+import {BreathingDot} from './Motion';
+import {RippleStage} from './ui/RippleStage';
 import {makeStyles, useTheme} from '../theme/ThemeProvider';
 import {spacing, typography} from '../config/theme';
 
@@ -22,60 +22,10 @@ import {spacing, typography} from '../config/theme';
 export function BootScreen({status}: {status: string}) {
   const styles = useStyles();
   const theme = useTheme();
-  const reduced = useReduceMotion();
-
-  // Two rings, offset, so the second leaves before the first has finished — one ripple
-  // on its own reads as a pulse rather than something travelling outwards.
-  const first = useRef(new Animated.Value(0)).current;
-  const second = useRef(new Animated.Value(0)).current;
-
-  useEffect(() => {
-    if (reduced) {
-      return;
-    }
-    const ring = (value: Animated.Value, delay: number) =>
-      Animated.loop(
-        Animated.sequence([
-          Animated.delay(delay),
-          Animated.timing(value, {
-            toValue: 1,
-            duration: 2800,
-            easing: Easing.out(Easing.quad),
-            useNativeDriver: true,
-          }),
-          Animated.timing(value, {toValue: 0, duration: 0, useNativeDriver: true}),
-        ]),
-      );
-    const a = ring(first, 0);
-    const b = ring(second, 1400);
-    a.start();
-    b.start();
-    return () => {
-      a.stop();
-      b.stop();
-    };
-  }, [first, second, reduced]);
-
-  const ripple = (value: Animated.Value) => ({
-    transform: [
-      {scale: value.interpolate({inputRange: [0, 1], outputRange: [0.72, 1.5]})},
-    ],
-    opacity: value.interpolate({inputRange: [0, 1], outputRange: [0.38, 0]}),
-  });
 
   return (
     <View style={styles.root}>
-      <View style={styles.stage}>
-        <Animated.View
-          pointerEvents="none"
-          style={[styles.ring, {borderColor: theme.accent}, ripple(first)]}
-        />
-        <Animated.View
-          pointerEvents="none"
-          style={[styles.ring, {borderColor: theme.accent}, ripple(second)]}
-        />
-        <Mascot size={86} tint={theme.accent} />
-      </View>
+      <RippleStage size={150} />
 
       <View style={styles.words}>
         <AppText style={styles.name}>BLE Chat</AppText>
@@ -95,8 +45,6 @@ export function BootScreen({status}: {status: string}) {
 
 const useStyles = makeStyles(t => ({
   root: {flex: 1, backgroundColor: t.bg, alignItems: 'center', justifyContent: 'center'},
-  stage: {width: 150, height: 150, alignItems: 'center', justifyContent: 'center'},
-  ring: {position: 'absolute', width: 150, height: 150, borderRadius: 75, borderWidth: 1},
   words: {alignItems: 'center', marginTop: spacing.xl},
   name: {...typography.title, color: t.text},
   status: {...typography.caption, color: t.textDim, marginTop: 6},
