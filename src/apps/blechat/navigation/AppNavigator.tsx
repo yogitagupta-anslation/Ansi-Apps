@@ -21,6 +21,7 @@ import {NearbyScreen} from '../screens/NearbyScreen';
 import {NewGroupScreen} from '../screens/NewGroupScreen';
 import {RegisterScreen} from '../screens/RegisterScreen';
 import {SettingsScreen} from '../screens/SettingsScreen';
+import {YouScreen} from '../screens/YouScreen';
 import type {RootStackParamList, TabParamList} from './types';
 import {useAppStore} from '../state/appStore';
 
@@ -182,7 +183,7 @@ function Tabs() {
       />
       <Tab.Screen
         name="You"
-        component={SettingsScreen}
+        component={YouScreen}
         options={{
           tabBarLabel: ({focused}) => (
             <TabItem icon="tabYou" title="You" focused={focused} />
