@@ -20,6 +20,7 @@ export type IconName =
   | 'clock'
   | 'chevronRight'
   | 'arrowUp'
+  | 'info'
   | 'plus'
   | 'pencil'
   | 'shield'
@@ -123,6 +124,13 @@ const ICONS: Record<IconName, (p: StrokeProps, color: string) => React.ReactNode
     </>
   ),
   chevronRight: p => <Path {...p} d="M9 5l7 7-7 7" />,
+  info: p => (
+    <>
+      <Circle cx={12} cy={12} r={9} {...p} />
+      <Path {...p} d="M12 11v5" />
+      <Path {...p} d="M12 8h.01" />
+    </>
+  ),
   // A stem and a chevron, not a filled triangle: it sits inside a 34px accent circle at
   // 16px, and a solid glyph that small turns into a blob.
   arrowUp: p => (

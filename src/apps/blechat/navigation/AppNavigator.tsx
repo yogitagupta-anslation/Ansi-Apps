@@ -1,5 +1,5 @@
-import React from 'react';
-import {StyleSheet, View} from 'react-native';
+import React, {useEffect, useRef} from 'react';
+import {Animated, StyleSheet, View} from 'react-native';
 import {DenseText} from '../components/AppText';
 import {
   ThemeProvider as NavigationThemeProvider,
@@ -10,6 +10,8 @@ import {createNativeStackNavigator} from '@react-navigation/native-stack';
 import {createBottomTabNavigator} from '@react-navigation/bottom-tabs';
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
 import {typography} from '../config/theme';
+import {Icon, type IconName} from '../components/ui/Icon';
+import {useReduceMotion} from '../components/Motion';
 import {makeStyles, useTheme} from '../theme/ThemeProvider';
 import {useMemo} from 'react';
 import {ChatScreen} from '../screens/ChatScreen';
@@ -70,18 +72,24 @@ function useConnectedCount(): number {
 }
 
 /**
- * The tab itself: a word, and a dot when there is something behind it.
+ * The tab itself: an icon, a word, and a dot when there is something behind it.
  *
- * The icon lozenge is gone. Four glyphs in four tinted circles was the bar carrying more
- * weight than a bar should, and with only four destinations the words are already the
- * fastest thing to read — the design's own answer to "does everything need a box".
+ * The icon is a line glyph on the bar, not a glyph inside a filled lozenge. That keeps
+ * what the lozenge was actually for — saying which tab is current — in the two things
+ * already doing it, weight and colour, without putting four more boxes back on a bar
+ * that just lost them.
+ *
+ * Focus lifts the icon by two points and settles it. It is a small movement on purpose:
+ * a tab bar is tapped constantly, and anything larger becomes something you wait for.
  */
-function TabLabel({
+function TabItem({
+  icon,
   title,
   focused,
   dot,
   dotColor,
 }: {
+  icon: IconName;
   title: string;
   focused: boolean;
   dot: number;
@@ -89,17 +97,45 @@ function TabLabel({
 }) {
   const styles = useStyles();
   const theme = useTheme();
+  const reduced = useReduceMotion();
+  const lift = useRef(new Animated.Value(focused ? 1 : 0)).current;
+
+  useEffect(() => {
+    if (reduced) {
+      lift.setValue(focused ? 1 : 0);
+      return;
+    }
+    Animated.spring(lift, {
+      toValue: focused ? 1 : 0,
+      useNativeDriver: true,
+      speed: 20,
+      bounciness: 8,
+    }).start();
+  }, [focused, reduced, lift]);
+
+  const translateY = lift.interpolate({inputRange: [0, 1], outputRange: [0, -2]});
+
   return (
-    <View style={styles.tabLabelRow}>
-      <DenseText
-        style={[
-          styles.tabLabel,
-          focused ? {color: theme.text, fontWeight: '500'} : {color: theme.textDim},
-        ]}
-        numberOfLines={1}>
-        {title}
-      </DenseText>
-      <TabDot count={dot} color={dotColor} />
+    <View style={styles.tabItem}>
+      <Animated.View style={{transform: [{translateY}]}}>
+        <Icon
+          name={icon}
+          size={20}
+          color={focused ? theme.accent : theme.textDim}
+          strokeWidth={focused ? 2.1 : 1.7}
+        />
+      </Animated.View>
+      <View style={styles.tabLabelRow}>
+        <DenseText
+          style={[
+            styles.tabLabel,
+            focused ? {color: theme.text, fontWeight: '500'} : {color: theme.textDim},
+          ]}
+          numberOfLines={1}>
+          {title}
+        </DenseText>
+        <TabDot count={dot} color={dotColor} />
+      </View>
     </View>
   );
 }
@@ -112,7 +148,7 @@ function TabLabel({
 // mount timing — where an emulator never showed the gap. Setting an explicit height built
 // from real safe-area insets removes the guess entirely instead of hoping the library's
 // own measurement lines up with what actually got laid out.
-const TAB_CONTENT_HEIGHT = 64;
+const TAB_CONTENT_HEIGHT = 68;
 
 function Tabs() {
   const styles = useStyles();
@@ -129,8 +165,8 @@ function Tabs() {
           styles.tabBar,
           {height: TAB_CONTENT_HEIGHT + insets.bottom, paddingBottom: insets.bottom},
         ],
-        // No icon slot at all: leaving it empty would still reserve its height and
-        // leave the words floating below centre.
+        // One slot, not two: the icon and the word are drawn together by TabItem, so
+        // React Navigation's separate icon slot would only add a gap between them.
         tabBarIcon: () => null,
       }}>
       <Tab.Screen
@@ -138,7 +174,13 @@ function Tabs() {
         component={HomeScreen}
         options={{
           tabBarLabel: ({focused}) => (
-            <TabLabel title="Home" focused={focused} dot={0} dotColor={theme.accent} />
+            <TabItem
+              icon="house"
+              title="Home"
+              focused={focused}
+              dot={0}
+              dotColor={theme.accent}
+            />
           ),
         }}
       />
@@ -149,7 +191,8 @@ function Tabs() {
           tabBarAccessibilityLabel:
             unread > 0 ? `Chats, ${unread} unread` : 'Chats',
           tabBarLabel: ({focused}) => (
-            <TabLabel
+            <TabItem
+              icon="chatBubble"
               title="Chats"
               focused={focused}
               dot={unread}
@@ -165,7 +208,8 @@ function Tabs() {
           tabBarAccessibilityLabel:
             connected > 0 ? `Nearby, ${connected} connected` : 'Nearby',
           tabBarLabel: ({focused}) => (
-            <TabLabel
+            <TabItem
+              icon="target"
               title="Nearby"
               focused={focused}
               dot={connected}
@@ -179,7 +223,13 @@ function Tabs() {
         component={DebugScreen}
         options={{
           tabBarLabel: ({focused}) => (
-            <TabLabel title="Debug" focused={focused} dot={0} dotColor={theme.accent} />
+            <TabItem
+              icon="code"
+              title="Debug"
+              focused={focused}
+              dot={0}
+              dotColor={theme.accent}
+            />
           ),
         }}
       />
@@ -243,6 +293,7 @@ const useStyles = makeStyles(t => ({
     borderTopColor: t.divider,
     borderTopWidth: StyleSheet.hairlineWidth,
   },
+  tabItem: {alignItems: 'center', gap: 4},
   tabLabelRow: {flexDirection: 'row', alignItems: 'center', gap: 5},
   tabLabel: {...typography.caption},
   tabDot: {width: 5, height: 5, borderRadius: 2.5},

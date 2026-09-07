@@ -405,33 +405,35 @@ export function NearbyScreen({navigation}: RootTabScreenProps<'Nearby'>) {
               </Touchable>
             </View>
 
-            {/* Four sort modes, all visible. The old control was a single button that
-                cycled through them, so choosing one meant tapping until the right label
-                came up and there was no way to see what the others were. */}
+            {/* One control, not four.
+                Showing all four modes at once meant a row of tabs above a list that is
+                usually two or three rows long — the control was competing with its own
+                results. It names the mode you are in and opens the rest on tap, so the
+                capability is unchanged and the screen is the list again. */}
             <View style={styles.controls}>
-              <View style={styles.segmented}>
-                {SORTS.map(option => {
-                  const active = option.key === sort;
-                  return (
-                    <Touchable
-                      key={option.key}
-                      scale={false}
-                      onPress={() => setSort(option.key)}
-                      accessibilityLabel={`Sort by ${option.label}`}
-                      accessibilityState={{selected: active}}
-                      style={
-                        active ? [styles.segment, styles.segmentActive] : styles.segment
-                      }>
-                      <DenseText
-                        style={active ? styles.segmentTextActive : styles.segmentText}
-                        numberOfLines={1}
-                        maxFontSizeMultiplier={1}>
-                        {option.label}
-                      </DenseText>
-                    </Touchable>
-                  );
-                })}
-              </View>
+              <Touchable
+                scale={false}
+                onPress={() =>
+                  Alert.alert('Sort by', undefined, [
+                    ...SORTS.map(option => ({
+                      text: option.key === sort ? `${option.label}  ✓` : option.label,
+                      onPress: () => setSort(option.key),
+                    })),
+                    {text: 'Cancel', style: 'cancel' as const},
+                  ])
+                }
+                accessibilityLabel={`Sort by ${
+                  SORTS.find(o => o.key === sort)?.label ?? ''
+                }. Change sort order`}
+                style={styles.sortButton}>
+                <DenseText style={styles.sortLabel}>
+                  {SORTS.find(o => o.key === sort)?.label ?? ''}
+                </DenseText>
+                <Icon name="chevronDown" color={theme.textDim} size={13} />
+              </Touchable>
+
+              <View style={styles.grow} />
+
               <Touchable
                 scale={false}
                 onPress={() => setVerifiedOnly(v => !v)}
@@ -447,6 +449,13 @@ export function NearbyScreen({navigation}: RootTabScreenProps<'Nearby'>) {
                   color={verifiedOnly ? theme.ok : theme.textDim}
                   size={15}
                 />
+                <DenseText
+                  style={[
+                    styles.filterLabel,
+                    {color: verifiedOnly ? theme.ok : theme.textDim},
+                  ]}>
+                  Verified
+                </DenseText>
               </Touchable>
             </View>
 
@@ -1061,30 +1070,19 @@ const useStyles = makeStyles(t => ({
   stopText: {...typography.callout, color: t.accent},
 
   // ---- sort --------------------------------------------------------------
-  controls: {
-    flexDirection: 'row',
-    alignItems: 'flex-end',
-    gap: 6,
-    marginTop: 22,
-    borderBottomWidth: 1,
-    borderBottomColor: t.divider,
-  },
-  // Underlined tabs rather than a raised chip on a filled track. The track was a box and
-  // the chip was a box on top of it, for a control whose whole job is to say which one of
-  // four words is current — which an underline says with no fill at all.
-  segmented: {flex: 1, flexDirection: 'row', gap: 18},
-  segment: {alignItems: 'center', paddingBottom: 9, borderBottomWidth: 1.5, borderBottomColor: 'transparent'},
-  segmentActive: {borderBottomColor: t.text},
-  segmentText: {...typography.caption, color: t.textDim},
-  segmentTextActive: {...typography.caption, color: t.text, fontWeight: '500'},
+  controls: {flexDirection: 'row', alignItems: 'center', marginTop: 18},
+  // The current mode, named, with a chevron. No track, no tabs.
+  sortButton: {flexDirection: 'row', alignItems: 'center', gap: 5, paddingVertical: 6},
+  sortLabel: {...typography.caption, color: t.text, fontWeight: '500'},
   filterButton: {
-    width: 32,
-    height: 32,
+    flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 6,
+    gap: 5,
+    paddingVertical: 6,
+    paddingLeft: 10,
   },
   filterButtonActive: {},
+  filterLabel: {...typography.caption},
 
   connectAll: {
     flexDirection: 'row',
