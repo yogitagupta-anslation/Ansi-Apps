@@ -13,7 +13,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { VISIBILITY_OPTIONS } from '../security/PrivacyService';
 import type { EventSummary, Visibility } from '../types';
-import { actions } from '../runtime/services';
+import { actions, isMockBackend } from '../runtime/services';
 import { sessionStore } from '../state/stores';
 import { useStore } from '../state/store';
 import { useTheme } from '../theme/ThemeProvider';
@@ -82,6 +82,16 @@ export function EventSelectionScreen(): React.ReactElement {
           {fromCache ? (
             <AppText variant="caption" tone="tertiary">
               Showing your cached list — you appear to be offline.
+            </AppText>
+          ) : null}
+          {/* Said plainly, and on the screen the events are chosen from. These are a
+              sample crowd from the in-memory backend, shown because no server was
+              configured — the alternative was an empty list that explained nothing.
+              The radio is still real: anyone genuinely nearby is genuinely nearby. */}
+          {isMockBackend() ? (
+            <AppText variant="caption" tone="tertiary">
+              Sample events — no backend is configured, so these are demo data. Bluetooth
+              is still live, so people near you are real.
             </AppText>
           ) : null}
         </View>
