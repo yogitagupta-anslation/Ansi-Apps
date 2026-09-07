@@ -14,6 +14,7 @@ import { registerRootComponent } from 'expo';
 
 import App from './App';
 import { logger } from './src/apps/blechat/utils/logger';
+import { saveCrash } from './src/apps/blechat/utils/crashLog';
 
 /**
  * Catches a fatal JS exception thrown OUTSIDE any component's render — a timer
@@ -41,6 +42,10 @@ if (typeof ErrorUtils !== 'undefined') {
         'App',
         `${isFatal ? 'FATAL' : 'unhandled'}: ${error.message}\n${error.stack ?? ''}`,
       );
+      // The in-memory log dies with the process; this does not. Read it back from
+      // Diagnostics after the restart — the only way a crash on somebody else's phone
+      // ever reaches the person who can fix it.
+      saveCrash(isFatal ? 'fatal' : 'unhandled', error);
     } catch {
       // Logging itself must never be why this handler throws.
     }

@@ -2,6 +2,7 @@ import React from 'react';
 import {Pressable, ScrollView, StyleSheet, Text, View} from 'react-native';
 import {darkTheme} from '../config/theme';
 import {logger} from '../utils/logger';
+import {saveCrash} from '../utils/crashLog';
 
 interface Props {
   children: React.ReactNode;
@@ -43,6 +44,7 @@ export class ErrorBoundary extends React.Component<Props, State> {
   componentDidCatch(error: Error, info: React.ErrorInfo): void {
     try {
       logger.error('App', `render crash: ${error.message}\n${info.componentStack ?? ''}`);
+      saveCrash('render', error, info.componentStack ?? undefined);
     } catch {
       // The logger itself depending on broken state is exactly the case this must survive.
     }

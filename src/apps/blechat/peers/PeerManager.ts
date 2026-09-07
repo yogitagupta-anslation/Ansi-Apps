@@ -240,6 +240,15 @@ export class PeerManager implements PeerRouteResolver {
    */
   private superseded = new Set<LinkId>();
   /**
+   * Dials we cancelled ourselves, waiting for the transport's rejection to catch up.
+   *
+   * Whether an attempt was cancelled is something this class KNOWS — it is the one that
+   * asked — so it is recorded rather than inferred from how the platform happened to word
+   * the rejection. Reading it out of the error text works only for the stacks whose
+   * wording we have seen; this works for all of them.
+   */
+  private cancelling = new Set<LinkId>();
+  /**
    * Identities this device refuses to handshake with.
    *
    * Enforced only at the handshake (see `negotiate`) — the one point an identity is
@@ -1444,6 +1453,7 @@ export class PeerManager implements PeerRouteResolver {
    * unreachable, because it is evidence of nothing at all.
    */
   async cancelConnect(linkId: LinkId): Promise<void> {
+    this.cancelling.add(linkId);
     this.cancelReconnect(linkId);
     this.note(linkId, 'Cancelled by user');
     try {
@@ -1507,6 +1517,8 @@ export class PeerManager implements PeerRouteResolver {
       }
     }
 
+    // A fresh dial is not the one that was cancelled.
+    this.cancelling.delete(linkId);
     this.bumpStats(linkId, 'attempts');
     this.updateUnidentifiedState(linkId, 'connecting');
     this.emitPeers();
@@ -1515,7 +1527,11 @@ export class PeerManager implements PeerRouteResolver {
       // linkUp fires from the transport; the handshake starts there.
     } catch (err) {
       // The transport rejects with a typed failure carrying the exact stage that broke.
-      this.recordFailure(linkId, toLinkFailure(err, 'connecting', 'ConnectionRefused'));
+      const message = err instanceof Error ? err.message : String(err);
+      const failure = this.cancelling.delete(linkId)
+        ? makeFailure('Cancelled', 'connecting', message)
+        : toLinkFailure(err, 'connecting', 'ConnectionRefused');
+      this.recordFailure(linkId, failure);
       throw err;
     }
   }
@@ -1603,13 +1619,33 @@ export class PeerManager implements PeerRouteResolver {
 
   /** Attach a typed failure to whichever peer record represents this link. */
   private recordFailure(linkId: LinkId, failure: LinkFailure): void {
+    /**
+     * A cancellation is not a failure, and recording it as one is not cosmetic.
+     *
+     * `cancelConnect` already clears the peer, but the transport's rejection arrives
+     * afterwards and used to land here — marking the peer `failed`, storing a bogus
+     * reason and counting the attempt against the peer in the reconnect budget. The
+     * user's own Cancel then read back to them as "Connection failed", and the row they
+     * cancelled sat in an error state they never caused.
+     */
+    if (failure.reason === 'Cancelled') {
+      this.note(linkId, 'Cancelled', 'progress', 'cancelled during ' + failure.phase);
+      const cancelledPeerId =
+        this.sessions.get(linkId)?.peerId ?? this.linkToPeer.get(linkId);
+      const cancelled = cancelledPeerId
+        ? this.peers.get(cancelledPeerId)
+        : this.unidentified.get(linkId);
+      if (cancelled) {
+        cancelled.state = 'disconnected';
+        cancelled.failure = null;
+      }
+      logger.info(TAG, `${linkId} cancelled during ${failure.phase}`);
+      this.emitPeers();
+      return;
+    }
+
     this.bumpStats(linkId, 'failures');
-    this.note(
-      linkId,
-      failure.reason === 'Cancelled' ? 'Cancelled' : 'Failed',
-      failure.reason === 'Cancelled' ? 'progress' : 'error',
-      `${failure.reason} during ${failure.phase}`,
-    );
+    this.note(linkId, 'Failed', 'error', `${failure.reason} during ${failure.phase}`);
     const peerId = this.sessions.get(linkId)?.peerId ?? this.linkToPeer.get(linkId);
     const peer = peerId ? this.peers.get(peerId) : this.unidentified.get(linkId);
     if (peer) {

@@ -43,6 +43,18 @@ function reasonFromBleErrorCode(code: BleErrorCode): LinkFailureReason | null {
     case BleErrorCode.OperationTimedOut:
       return 'ConnectionTimeout';
 
+    /**
+     * The user pressed Cancel.
+     *
+     * ble-plx rejects the in-flight connect with this the moment
+     * `cancelDeviceConnection` lands, and without this case it fell through to the
+     * phase fallback and was recorded as ConnectionRefused — so cancelling produced
+     * "Connection failed: Operation was cancelled", marked the peer failed, and counted
+     * against it in the reconnect budget. A cancellation is evidence of nothing.
+     */
+    case BleErrorCode.OperationCancelled:
+      return 'Cancelled';
+
     case BleErrorCode.DeviceNotFound:
     case BleErrorCode.DeviceNotConnected:
     case BleErrorCode.DeviceDisconnected:
@@ -165,6 +177,10 @@ export function classifyBleError(err: unknown, phase: LinkState): BleLinkError {
   }
   if (lower.includes('timeout') || lower.includes('timed out')) {
     return new BleLinkError('ConnectionTimeout', phase, message, err);
+  }
+  // Both spellings, for the stacks that throw a plain Error rather than a coded one.
+  if (lower.includes('cancelled') || lower.includes('canceled')) {
+    return new BleLinkError('Cancelled', phase, message, err);
   }
 
   return new BleLinkError(fallbackReason(phase), phase, message, err);

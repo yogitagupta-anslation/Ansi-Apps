@@ -7,6 +7,7 @@ import {sharedInterests} from '../config/interests';
 import {RECONNECT_MAX_ATTEMPTS} from '../config/constants';
 import {EmptyState} from '../components/ui/Surface';
 import {ConnectFailedSheet} from '../components/ConnectFailedSheet';
+import {classifyBleError} from '../ble/LinkErrors';
 import {NearbyEmpty} from '../components/NearbyEmpty';
 import {Screen} from '../components/ui/Screen';
 import {BreathingDot, FadeIn, Spinner, Touchable} from '../components/Motion';
@@ -231,9 +232,23 @@ export function NearbyScreen({navigation}: RootTabScreenProps<'Nearby'>) {
     // handshake has no peerId yet, so matching on peerId alone let the same person
     // appear live above and "Not in range · seen just now" below at the same time.
     const inRange = new Set<string>();
+    /**
+     * Advertised id prefixes of everything in range.
+     *
+     * Matched against the START of a known peerId, not against that peer's own stored
+     * prefix — an identified peer often has no prefix recorded, because the identity came
+     * from the handshake rather than from an advertisement. Comparing prefix to prefix
+     * therefore missed, and a peer who dropped and is being redialled appeared twice at
+     * once: live above, mid-handshake, and "Not in range" below. The prefix is a piece of
+     * the peerId, so this is the same test PeerManager already uses before dialling.
+     */
+    const inRangePrefixes: string[] = [];
     for (const row of chatRows) {
       if (row.peer?.peerId) inRange.add(row.peer.peerId);
-      if (row.peer?.peerIdPrefix) inRange.add(`p:${row.peer.peerIdPrefix}`);
+      if (row.peer?.peerIdPrefix) {
+        inRange.add(`p:${row.peer.peerIdPrefix}`);
+        inRangePrefixes.push(row.peer.peerIdPrefix);
+      }
       if (row.device.linkId) inRange.add(`l:${row.device.linkId}`);
     }
     return peers
@@ -242,6 +257,7 @@ export function NearbyScreen({navigation}: RootTabScreenProps<'Nearby'>) {
           p.peerId !== null &&
           !inRange.has(p.peerId) &&
           !(p.peerIdPrefix && inRange.has(`p:${p.peerIdPrefix}`)) &&
+          !inRangePrefixes.some(prefix => p.peerId!.startsWith(prefix)) &&
           !(p.linkId && inRange.has(`l:${p.linkId}`)),
       )
       .sort((a, b) => {
@@ -300,13 +316,32 @@ export function NearbyScreen({navigation}: RootTabScreenProps<'Nearby'>) {
     bleChat.peerManager.cancelConnect(linkId).catch(() => undefined);
   }, []);
 
+  /**
+   * Dial a peer, and explain it properly if it does not work.
+   *
+   * Two things this deliberately does NOT do. It does not report a cancellation — the
+   * user pressing Cancel is the one outcome they already know about, and an alert saying
+   * "Connection failed" on top of their own action is how a working app reads as broken.
+   * And it does not fall back to a raw platform string: the recovery sheet exists for
+   * exactly this, so a real failure opens it against the peer that failed.
+   */
   const onConnect = useCallback((linkId: string) => {
-    bleChat.peerManager.connect(linkId).catch(err =>
+    bleChat.peerManager.connect(linkId).catch(err => {
+      if (classifyBleError(err, 'connecting').reason === 'Cancelled') {
+        return;
+      }
+      const peer = bleChat.peerManager
+        .getPeers()
+        .find(p => p.linkId === linkId);
+      if (peer) {
+        setFailureFor({peer, name: peer.displayName ?? 'This person'});
+        return;
+      }
       Alert.alert(
-        'Connection failed',
+        'Could not connect',
         err instanceof Error ? err.message : String(err),
-      ),
-    );
+      );
+    });
   }, []);
 
   const onOpenChat = useCallback(

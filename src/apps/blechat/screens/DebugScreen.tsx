@@ -12,6 +12,7 @@ import {copyDebugReport, shareDebugReport} from '../services/DebugReport';
 import {useAppStore} from '../state/appStore';
 import {formatTime, logger, type LogLevel} from '../utils/logger';
 import {shortId} from '../utils/id';
+import {clearCrash, loadCrash, type CrashRecord} from '../utils/crashLog';
 import {describeFailure} from '../ble/LinkErrors';
 import {AppText, DenseText} from '../components/AppText';
 import {FadeIn, Touchable} from '../components/Motion';
@@ -66,6 +67,16 @@ const DEBUG_TABS: Array<{key: DebugTab; label: string}> = [
 export function DebugScreen({navigation}: RootStackScreenProps<'Debug'>) {
   const styles = useStyles();
   const theme = useTheme();
+  /**
+   * The crash that closed the app last time, if there was one.
+   *
+   * Sits at the top of Logs because it is the one thing on this screen that explains an
+   * event the user has already lived through and could not otherwise report.
+   */
+  const [crash, setCrash] = useState<CrashRecord | null>(null);
+  useEffect(() => {
+    void loadCrash().then(setCrash);
+  }, []);
   const tints = tintsFor(theme);
   const bluetoothState = useAppStore(s => s.bluetoothState);
   const permission = useAppStore(s => s.permission);
@@ -587,6 +598,36 @@ export function DebugScreen({navigation}: RootStackScreenProps<'Debug'>) {
           </FadeIn>
         ) : null}
 
+        {tab === 'logs' && crash ? (
+          <FadeIn key={tab + '-crash'} index={0}>
+            <Section title="Last crash" icon="alert">
+              <LeaderRow
+                label="When"
+                value={`${new Date(crash.at).toLocaleString()} (${
+                  crash.kind === 'render' ? 'while drawing a screen' : 'fatal'
+                })`}
+              />
+              <DenseText style={styles.crashMessage} selectable>
+                {crash.message}
+              </DenseText>
+              {crash.stack ? (
+                <DenseText style={styles.crashStack} selectable>
+                  {crash.stack}
+                </DenseText>
+              ) : null}
+              <View style={styles.filterRow}>
+                <TouchableOpacity
+                  style={styles.filterChip}
+                  onPress={() => {
+                    void clearCrash().then(() => setCrash(null));
+                  }}>
+                  <DenseText style={styles.filterText}>clear</DenseText>
+                </TouchableOpacity>
+              </View>
+            </Section>
+          </FadeIn>
+        ) : null}
+
         {tab === 'logs' ? (
 
           <FadeIn key={tab + '-8'} index={8}>
@@ -1092,6 +1133,21 @@ const useStyles = makeStyles(t => ({
   filterText: {...typography.caption, color: t.textDim},
   filterTextActive: {color: t.onAccent, fontWeight: '600'},
 
+  // Selectable and monospaced: this text exists to be read carefully and copied out.
+  crashMessage: {
+    fontSize: 12.5,
+    fontFamily: 'monospace',
+    color: t.error,
+    marginTop: spacing.sm,
+    lineHeight: 18,
+  },
+  crashStack: {
+    fontSize: 10.5,
+    fontFamily: 'monospace',
+    color: t.textDim,
+    marginTop: spacing.sm,
+    lineHeight: 14,
+  },
   logRow: {flexDirection: 'row', gap: spacing.sm, paddingVertical: 2},
   logTime: {
     ...typography.caption,

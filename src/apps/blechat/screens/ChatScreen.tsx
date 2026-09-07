@@ -30,7 +30,7 @@ import {PeerProfileSheet} from '../components/PeerProfileSheet';
 import {AppText, DenseText} from '../components/AppText';
 import {FadeIn, SendIn, Touchable} from '../components/Motion';
 import {Icon} from '../components/ui/Icon';
-import {describeFailure} from '../ble/LinkErrors';
+import {classifyBleError, describeFailure} from '../ble/LinkErrors';
 import {qualityLabel} from '../peers/LinkMetrics';
 import {avatarHue, elevation, radius, spacing, speakerTint, typography} from '../config/theme';
 import {makeStyles, useTheme} from '../theme/ThemeProvider';
@@ -409,12 +409,14 @@ export function ChatScreen({route, navigation}: RootStackScreenProps<'Chat'>) {
     if (!peer?.linkId) {
       return;
     }
-    bleChat.peerManager.connect(peer.linkId).catch(err =>
-      Alert.alert(
-        'Connection failed',
-        err instanceof Error ? err.message : String(err),
-      ),
-    );
+    bleChat.peerManager.connect(peer.linkId).catch(err => {
+      // Cancelling is not something to report back as a failure; see NearbyScreen.
+      const failure = classifyBleError(err, 'connecting');
+      if (failure.reason === 'Cancelled') {
+        return;
+      }
+      Alert.alert('Could not connect', describeFailure(failure.toFailure()));
+    });
   }, [peer]);
 
   return (
