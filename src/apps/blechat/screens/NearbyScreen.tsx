@@ -128,6 +128,7 @@ export function NearbyScreen({navigation}: RootTabScreenProps<'Nearby'>) {
 
   const [verifiedOnly, setVerifiedOnly] = useState(false);
   const [profilePeerId, setProfilePeerId] = useState<string | null>(null);
+  const [filtersOpen, setFiltersOpen] = useState(false);
   // Held as {peer, name} rather than an id: the row already knows the display name it
   // rendered, and re-deriving it here could disagree with what the tap was next to.
   const [failureFor, setFailureFor] = useState<{peer: Peer; name: string} | null>(null);
@@ -380,35 +381,42 @@ export function NearbyScreen({navigation}: RootTabScreenProps<'Nearby'>) {
                   Nearby
                 </AppText>
                 <View style={styles.subtitleRow}>
-                  {/* The dot only lives while a scan does. A static one would look the
-                      same whether the radio is sweeping or wedged — which is also why
-                      the word beside it says "Scanning" rather than relying on the beat,
-                      since reduce-motion holds the dot still. */}
+                  {/* Green while the radio is sweeping, grey when it is not. The word
+                      beside it carries the same fact, because reduce-motion holds the
+                      dot still and a still dot must not be the only thing reporting. */}
                   <BreathingDot
                     size={6}
                     active={scanning}
-                    color={scanning ? theme.accent : theme.textFaint}
+                    color={scanning ? theme.ok : theme.textFaint}
                   />
                   <DenseText style={styles.subtitle} numberOfLines={1}>
-                    {scanning ? 'Scanning' : 'Not scanning'}
-                    {' · '}
-                    {chatRows.length} peer{chatRows.length === 1 ? '' : 's'}
-                    {subtitleTail ? ` · ${subtitleTail}` : ''}
+                    {rowCount === 0
+                      ? scanning
+                        ? 'Looking around'
+                        : 'Not looking'
+                      : `${rowCount} ${rowCount === 1 ? 'person' : 'people'} around you`}
                   </DenseText>
                 </View>
               </View>
-              {/* A word in the accent, not a filled chip. This is the one action on the
-                  screen, and the screen below it is now a list of rows with no fills at
-                  all — a lavender pill up here would be the loudest thing on it. */}
+
+              {/* One control in the corner, as drawn. Search opens the filters with it:
+                  sorting and the verified-only toggle are things you reach for when the
+                  list is long, and putting them on the screen permanently made a header
+                  out of a list that is usually three rows. */}
               <Touchable
                 scale={false}
-                onPress={toggleScan}
-                style={styles.stopButton}
+                onPress={() => setFiltersOpen(v => !v)}
+                hitSlop={10}
+                style={styles.headerAction}
                 accessibilityRole="button"
-                accessibilityLabel={scanning ? 'Stop scanning' : 'Start scanning'}>
-                <DenseText style={styles.stopText}>
-                  {scanning ? 'Stop' : 'Scan'}
-                </DenseText>
+                accessibilityState={{expanded: filtersOpen}}
+                accessibilityLabel="Search and filter">
+                <Icon
+                  name={filtersOpen ? 'close' : 'search'}
+                  color={filtersOpen ? theme.text : theme.textDim}
+                  size={20}
+                  strokeWidth={1.8}
+                />
               </Touchable>
             </View>
 
@@ -417,6 +425,7 @@ export function NearbyScreen({navigation}: RootTabScreenProps<'Nearby'>) {
                 usually two or three rows long — the control was competing with its own
                 results. It names the mode you are in and opens the rest on tap, so the
                 capability is unchanged and the screen is the list again. */}
+            {filtersOpen ? (
             <View style={styles.controls}>
               <Touchable
                 scale={false}
@@ -465,17 +474,14 @@ export function NearbyScreen({navigation}: RootTabScreenProps<'Nearby'>) {
                 </DenseText>
               </Touchable>
             </View>
-
-            {/* The map, above the list. Not instead of it: the radar answers "who is
-                around and how close", the rows answer "what can I do about them". */}
-            {chatRows.length > 0 ? (
-              <DiscoveryRadar blips={blips} scanning={scanning} />
             ) : null}
 
-            {/* Dashed, and one line. As a full promo card with an icon tile and two
-                lines of copy it read as an advertisement for a feature rather than a
-                thing you could tap. */}
-            {chatRows.length > 0 ? (
+            {/* No radar once there are rows.
+                It answers "who is around and how close", which the rows answer better
+                the moment there are any — and a 260pt dial above a three-row list pushed
+                the thing you came for below the fold. It stays on the empty state, where
+                it is the only thing that can say the radio is working. */}
+            {filtersOpen && chatRows.length > 1 ? (
               <Touchable scale={false} onPress={onConnectAll} style={styles.connectAll}>
                 <Icon name="broadcast" color={theme.textDim} size={15} />
                 <DenseText style={styles.connectAllText} numberOfLines={1}>
@@ -911,8 +917,14 @@ function PeerCard({
           <View style={styles.metaRow}>
             {/* Spinning only while something is genuinely in flight. A static glyph
                 here would look identical whether a handshake was running or stuck. */}
+            {/* A glyph per state: a spinner only while something is genuinely in
+                flight, a link when one is up, a warning when it is not. */}
             {connecting || reconnecting ? (
               <Spinner size={12} color={theme.warn} />
+            ) : connected ? (
+              <Icon name="link2" size={12} color={theme.ok} strokeWidth={2.4} />
+            ) : failed ? (
+              <Icon name="alert" size={12} color={theme.error} strokeWidth={2.2} />
             ) : null}
             <DenseText style={[styles.metaWord, {color: wordColor}]} numberOfLines={1}>
               {word}
@@ -1053,6 +1065,7 @@ function RowAction({
   onCancel: () => void;
   onConnect: () => void;
 }) {
+  const theme = useTheme();
   if (unconnectable) {
     return (
       <View style={[styles.pill, styles.pillDisabled]}>
@@ -1066,15 +1079,15 @@ function RowAction({
   // Connected is the only FILLED pill on the screen; an offer to start something is
   // outlined in the accent, and a recovery is neutral. "Say hi" rather than "Connect"
   // because that is what it does — the Bluetooth part is our problem, not yours.
-  const [label, onPress, kind] = connected
-    ? (['Open', onOpenChat, 'filled'] as const)
+  const [label, onPress, kind, icon] = connected
+    ? (['Open', onOpenChat, 'filled', 'tabChats'] as const)
     : busy || reconnecting
     ? // Every attempt keeps a way out: tapping this by accident should not commit the
       // phone to a full timeout plus the whole retry budget.
-      (['Cancel', onCancel, 'plain'] as const)
+      (['Cancel', onCancel, 'plain', null] as const)
     : failed
-    ? (['Try again', onConnect, 'neutral'] as const)
-    : (['Say hi', onConnect, 'accent'] as const);
+    ? (['Try again', onConnect, 'neutral', 'radar'] as const)
+    : (['Say hi', onConnect, 'accent', 'chatPlus'] as const);
 
   return (
     <Touchable
@@ -1090,6 +1103,20 @@ function RowAction({
           ? styles.pillNeutral
           : styles.pillPlain,
       ]}>
+      {icon ? (
+        <Icon
+          name={icon}
+          size={12}
+          strokeWidth={2}
+          color={
+            kind === 'filled'
+              ? theme.onAccent
+              : kind === 'accent'
+              ? theme.accent
+              : theme.text
+          }
+        />
+      ) : null}
       <DenseText
         style={[
           styles.pillText,
@@ -1258,12 +1285,13 @@ const useStyles = makeStyles(t => ({
   // ---- header ------------------------------------------------------------
   header: {flexDirection: 'row', alignItems: 'flex-start', gap: spacing.md},
   headerText: {flex: 1},
-  title: {...typography.display, color: t.text, lineHeight: 32},
+  // 28/600 at line-height 1, exactly as drawn — the title sits tight above its own
+  // status line rather than floating in a taller box.
+  title: {fontSize: 28, fontWeight: '600', letterSpacing: -1, lineHeight: 28, color: t.text},
+  headerAction: {paddingTop: 6, paddingLeft: spacing.sm},
   subtitleRow: {flexDirection: 'row', alignItems: 'center', gap: 7, marginTop: 9},
   subtitleDot: {width: 6, height: 6, borderRadius: 3},
-  subtitle: {...typography.caption, color: t.textDim, flex: 1},
-  stopButton: {paddingTop: 6, paddingLeft: spacing.sm},
-  stopText: {...typography.callout, color: t.accent},
+  subtitle: {fontSize: 13.5, lineHeight: 18, color: t.textDim, flex: 1},
 
   // ---- sort --------------------------------------------------------------
   controls: {flexDirection: 'row', alignItems: 'center', marginTop: 18},
@@ -1296,62 +1324,62 @@ const useStyles = makeStyles(t => ({
   // bands; it is now a plain row on the page with a hairline beneath it. The negative
   // margin cancels the list's own padding so that hairline runs edge to edge, which is
   // what makes a run of rows read as one list rather than as a stack of separate things.
+  // The hairline sits on TOP of each row, not under it: that puts one under the section
+  // label and none dangling below the last row, which is what the design shows.
   row: {
     marginHorizontal: -(spacing.lg + 4),
-    paddingHorizontal: spacing.lg + 4,
-    paddingVertical: spacing.lg,
-    borderBottomWidth: 1,
-    borderBottomColor: t.divider,
+    paddingHorizontal: 18,
+    paddingVertical: 13,
+    borderTopWidth: 1,
+    borderTopColor: t.divider,
   },
-  rowHead: {flexDirection: 'row', alignItems: 'center', gap: 13},
+  rowHead: {flexDirection: 'row', alignItems: 'flex-start', gap: 12},
   rowBody: {flex: 1, minWidth: 0},
   nameRow: {flexDirection: 'row', alignItems: 'center', gap: 5},
-  name: {...typography.headline, color: t.text, flexShrink: 1},
+  name: {fontSize: 16, fontWeight: '500', color: t.text, flexShrink: 1},
   nameMuted: {...typography.headline, fontWeight: '400', color: t.textDim, flexShrink: 1},
-  metaRow: {flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 3},
+  metaRow: {flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 4},
   // The status word carries the colour; nothing behind it does.
-  metaWord: {...typography.caption, flexShrink: 1},
+  metaWord: {fontSize: 12.5, lineHeight: 17, flexShrink: 1},
   // Measurements are mono so a column of them aligns down the list and stops competing
   // with the name, which is the thing you actually scan for.
-  metaValue: {...typography.monoSmall, color: t.textDim},
+  metaValue: {...typography.monoSmall, fontSize: 11.5, color: t.textDim},
 
   // Shared interests are coloured words rather than filled chips: the accent still marks
   // them, without adding four more boxes to a row that just lost its own.
-  interests: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    flexWrap: 'wrap',
-    gap: 6,
-    marginTop: 10,
-    // Clears the 38pt avatar and its 13pt gap, so the line hangs under the name.
-    paddingLeft: 51,
-  },
-  interestShared: {...typography.caption, color: t.text},
+  // Inside the name column, not indented under it: the design keeps interests in the
+  // same block as the name and status, which is why the row reads as one thing.
+  interests: {flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 6, marginTop: 5},
+  interestShared: {fontSize: 12.5, lineHeight: 17, color: t.text},
   interestRest: {...typography.caption, color: t.textDim},
   interestSep: {...typography.caption, color: t.separator},
 
   // The handshake's progress, as a filling track.
-  progressTrack: {
-    height: 3,
-    borderRadius: 999,
-    backgroundColor: t.divider,
-    marginTop: 10,
-    marginLeft: 51,
-    overflow: 'hidden',
-  },
+  progressTrack: {height: 3, borderRadius: 999, backgroundColor: t.divider, marginTop: 10, overflow: 'hidden'},
   progressFill: {height: 3, borderRadius: 999, backgroundColor: t.warn},
 
   // One pill, on the right of the head row, sized to its label.
+  // Icon and label together, as drawn. A filled pill sits a hair taller than an
+  // outlined one because it has no border to make up the difference.
   pill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
     borderWidth: 1,
     borderRadius: radius.pill,
-    paddingVertical: 7,
-    paddingHorizontal: 14,
+    paddingVertical: 5,
+    paddingHorizontal: 12,
     flexShrink: 0,
   },
-  pillText: {...typography.callout},
-  trail: {alignItems: 'flex-end', gap: 9, flexShrink: 0},
-  pillFilled: {backgroundColor: t.accent, borderColor: t.accent},
+  pillText: {fontSize: 12.5, fontWeight: '500'},
+  trail: {alignItems: 'flex-end', gap: 8, flexShrink: 0},
+  // A hair taller than an outlined pill, which has a border to make up the difference.
+  pillFilled: {
+    backgroundColor: t.accent,
+    borderColor: t.accent,
+    paddingVertical: 6,
+    paddingHorizontal: 13,
+  },
   pillFilledText: {color: t.onAccent},
   pillPlain: {borderColor: 'transparent', paddingHorizontal: 4},
   pillAccent: {borderColor: t.accent},

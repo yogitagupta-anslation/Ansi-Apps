@@ -9,7 +9,7 @@ import {
 import {createNativeStackNavigator} from '@react-navigation/native-stack';
 import {createBottomTabNavigator} from '@react-navigation/bottom-tabs';
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
-import {typography} from '../config/theme';
+import {radius, typography} from '../config/theme';
 import {Icon, type IconName} from '../components/ui/Icon';
 import {useReduceMotion} from '../components/Motion';
 import {makeStyles, useTheme} from '../theme/ThemeProvider';
@@ -17,7 +17,6 @@ import {useMemo} from 'react';
 import {ChatScreen} from '../screens/ChatScreen';
 import {ChatsScreen} from '../screens/ChatsScreen';
 import {DebugScreen} from '../screens/DebugScreen';
-import {HomeScreen} from '../screens/HomeScreen';
 import {NearbyScreen} from '../screens/NearbyScreen';
 import {NewGroupScreen} from '../screens/NewGroupScreen';
 import {RegisterScreen} from '../screens/RegisterScreen';
@@ -48,19 +47,24 @@ function useNavTheme() {
 }
 
 /**
- * A count, as a dot.
+ * A count, on the tab it belongs to.
  *
- * The design's tab bar is words with a 5px dot beside the one that has something waiting.
- * The number itself moves into the accessibility label rather than disappearing: sighted
- * users get "something is waiting, go look", which is all a tab bar can usefully say, and
- * the exact figure is one tap away on the screen it belongs to.
+ * The design puts the number on the badge rather than a bare dot, and it is right to: on
+ * a tab bar you check while walking, "3 waiting" and "1 waiting" are different decisions.
+ * Capped at 99+ so a runaway count cannot widen the pill past its own tab.
  */
-function TabDot({count, color}: {count: number; color: string}) {
+function TabBadge({count}: {count: number}) {
   const styles = useStyles();
   if (count <= 0) {
     return null;
   }
-  return <View style={[styles.tabDot, {backgroundColor: color}]} />;
+  return (
+    <View style={styles.tabBadge}>
+      <DenseText style={styles.tabBadgeText} numberOfLines={1} maxFontSizeMultiplier={1}>
+        {count > 99 ? '99+' : count}
+      </DenseText>
+    </View>
+  );
 }
 
 function useUnreadTotal(): number {
@@ -72,28 +76,22 @@ function useConnectedCount(): number {
 }
 
 /**
- * The tab itself: an icon, a word, and a dot when there is something behind it.
+ * One tab: a 19px icon over a 10.5px label, and a badge when something is waiting.
  *
- * The icon is a line glyph on the bar, not a glyph inside a filled lozenge. That keeps
- * what the lozenge was actually for — saying which tab is current — in the two things
- * already doing it, weight and colour, without putting four more boxes back on a bar
- * that just lost them.
- *
- * Focus lifts the icon by two points and settles it. It is a small movement on purpose:
- * a tab bar is tapped constantly, and anything larger becomes something you wait for.
+ * Both the icon and the label take the accent when current — the design lights the whole
+ * tab rather than only its word, which is what makes the active one findable without
+ * reading. Focus still lifts the icon a couple of points and settles it.
  */
 function TabItem({
   icon,
   title,
   focused,
-  dot,
-  dotColor,
+  badge = 0,
 }: {
   icon: IconName;
   title: string;
   focused: boolean;
-  dot: number;
-  dotColor: string;
+  badge?: number;
 }) {
   const styles = useStyles();
   const theme = useTheme();
@@ -114,28 +112,19 @@ function TabItem({
   }, [focused, reduced, lift]);
 
   const translateY = lift.interpolate({inputRange: [0, 1], outputRange: [0, -2]});
+  const tint = focused ? theme.accent : theme.textDim;
 
   return (
     <View style={styles.tabItem}>
       <Animated.View style={{transform: [{translateY}]}}>
-        <Icon
-          name={icon}
-          size={20}
-          color={focused ? theme.accent : theme.textDim}
-          strokeWidth={focused ? 2.1 : 1.7}
-        />
+        <Icon name={icon} size={19} color={tint} strokeWidth={1.9} />
       </Animated.View>
-      <View style={styles.tabLabelRow}>
-        <DenseText
-          style={[
-            styles.tabLabel,
-            focused ? {color: theme.text, fontWeight: '500'} : {color: theme.textDim},
-          ]}
-          numberOfLines={1}>
-          {title}
-        </DenseText>
-        <TabDot count={dot} color={dotColor} />
-      </View>
+      <DenseText
+        style={[styles.tabLabel, {color: tint, fontWeight: focused ? '500' : '400'}]}
+        numberOfLines={1}>
+        {title}
+      </DenseText>
+      <TabBadge count={badge} />
     </View>
   );
 }
@@ -148,39 +137,36 @@ function TabItem({
 // mount timing — where an emulator never showed the gap. Setting an explicit height built
 // from real safe-area insets removes the guess entirely instead of hoping the library's
 // own measurement lines up with what actually got laid out.
-const TAB_CONTENT_HEIGHT = 68;
+const TAB_CONTENT_HEIGHT = 58;
 
 function Tabs() {
   const styles = useStyles();
   const theme = useTheme();
   const insets = useSafeAreaInsets();
   const unread = useUnreadTotal();
-  const connected = useConnectedCount();
 
   return (
     <Tab.Navigator
+      // Nearby first, because it is the screen the app is for: everything else follows
+      // from having found somebody. Home's contents moved onto it, and Debug moved under
+      // You as "Advanced" — neither was dropped, they stopped being destinations.
+      initialRouteName="Nearby"
       screenOptions={{
         headerShown: false,
         tabBarStyle: [
           styles.tabBar,
           {height: TAB_CONTENT_HEIGHT + insets.bottom, paddingBottom: insets.bottom},
         ],
-        // One slot, not two: the icon and the word are drawn together by TabItem, so
-        // React Navigation's separate icon slot would only add a gap between them.
+        // The icon and the label are drawn together by TabItem, so the separate icon
+        // slot would only insert a gap between them.
         tabBarIcon: () => null,
       }}>
       <Tab.Screen
-        name="Home"
-        component={HomeScreen}
+        name="Nearby"
+        component={NearbyScreen}
         options={{
           tabBarLabel: ({focused}) => (
-            <TabItem
-              icon="house"
-              title="Home"
-              focused={focused}
-              dot={0}
-              dotColor={theme.accent}
-            />
+            <TabItem icon="tabNearby" title="Nearby" focused={focused} />
           ),
         }}
       />
@@ -188,48 +174,18 @@ function Tabs() {
         name="Chats"
         component={ChatsScreen}
         options={{
-          tabBarAccessibilityLabel:
-            unread > 0 ? `Chats, ${unread} unread` : 'Chats',
+          tabBarAccessibilityLabel: unread > 0 ? `Chats, ${unread} unread` : 'Chats',
           tabBarLabel: ({focused}) => (
-            <TabItem
-              icon="chatBubble"
-              title="Chats"
-              focused={focused}
-              dot={unread}
-              dotColor={theme.accent}
-            />
+            <TabItem icon="tabChats" title="Chats" focused={focused} badge={unread} />
           ),
         }}
       />
       <Tab.Screen
-        name="Nearby"
-        component={NearbyScreen}
-        options={{
-          tabBarAccessibilityLabel:
-            connected > 0 ? `Nearby, ${connected} connected` : 'Nearby',
-          tabBarLabel: ({focused}) => (
-            <TabItem
-              icon="target"
-              title="Nearby"
-              focused={focused}
-              dot={connected}
-              dotColor={theme.ok}
-            />
-          ),
-        }}
-      />
-      <Tab.Screen
-        name="Debug"
-        component={DebugScreen}
+        name="You"
+        component={SettingsScreen}
         options={{
           tabBarLabel: ({focused}) => (
-            <TabItem
-              icon="code"
-              title="Debug"
-              focused={focused}
-              dot={0}
-              dotColor={theme.accent}
-            />
+            <TabItem icon="tabYou" title="You" focused={focused} />
           ),
         }}
       />
@@ -263,6 +219,13 @@ export function AppNavigator() {
           options={{headerShown: false}}
         />
         <Stack.Screen
+          name="Debug"
+          component={DebugScreen}
+          // Its own screen draws the title and the back affordance, same as every other
+          // screen in this app; the platform header would be a second one on top.
+          options={{headerShown: false, animation: 'slide_from_right'}}
+        />
+        <Stack.Screen
           name="NewGroup"
           component={NewGroupScreen}
           options={{headerShown: false}}
@@ -293,8 +256,19 @@ const useStyles = makeStyles(t => ({
     borderTopColor: t.divider,
     borderTopWidth: StyleSheet.hairlineWidth,
   },
-  tabItem: {alignItems: 'center', gap: 4},
-  tabLabelRow: {flexDirection: 'row', alignItems: 'center', gap: 5},
-  tabLabel: {...typography.caption},
-  tabDot: {width: 5, height: 5, borderRadius: 2.5},
+  tabItem: {alignItems: 'center', gap: 3},
+  tabLabel: {fontSize: 10.5, lineHeight: 14},
+  tabBadge: {
+    position: 'absolute',
+    top: -2,
+    right: 26,
+    minWidth: 15,
+    height: 15,
+    borderRadius: radius.pill,
+    backgroundColor: t.accent,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 4,
+  },
+  tabBadgeText: {color: '#ffffff', fontSize: 9.5, lineHeight: 13},
 }));

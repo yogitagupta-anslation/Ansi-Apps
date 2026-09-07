@@ -19,6 +19,14 @@ import {MessageInput} from '../components/MessageInput';
 import {Icon} from '../components/ui/Icon';
 import {ThemeProvider} from '../theme/ThemeProvider';
 
+/**
+ * The first render in this worker pays a one-off cost — React Native's own modules plus
+ * react-native-svg for the icons — which on a loaded machine has taken past the 5s
+ * default and failed a test that has nothing slow in it. Raised so a busy CI box reports
+ * real failures rather than its own scheduling.
+ */
+jest.setTimeout(20_000);
+
 interface Rendered {
   tree: TestRenderer.ReactTestRenderer;
   text: string;

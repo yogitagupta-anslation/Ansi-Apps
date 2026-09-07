@@ -38,7 +38,17 @@ const TABS: Array<{key: Category; label: string}> = [
   {key: 'system', label: 'System'},
 ];
 
-export function SettingsScreen({route, navigation}: RootStackScreenProps<'Settings'>) {
+/**
+ * Both a tab ("You") and a pushed screen.
+ *
+ * As a tab there is no route param to read and nowhere to go back to, so both are
+ * optional — a tab that rendered a back chevron would offer to leave a screen that is
+ * already the root of its stack.
+ */
+export function SettingsScreen({
+  route,
+  navigation,
+}: Partial<RootStackScreenProps<'Settings'>>) {
   const styles = useStyles();
   const theme = useTheme();
   const settings = useAppStore(s => s.settings);
@@ -60,13 +70,13 @@ export function SettingsScreen({route, navigation}: RootStackScreenProps<'Settin
    * animating to it after a timeout, because the measurement had not landed on first
    * render. A deep link is now a tab selection: nothing to measure, nothing to race.
    */
-  const [tab, setTab] = useState<Category>(route.params?.section ?? 'profile');
+  const [tab, setTab] = useState<Category>(route?.params?.section ?? 'profile');
 
   useEffect(() => {
-    if (route.params?.section) {
+    if (route?.params?.section) {
       setTab(route.params.section);
     }
-  }, [route.params?.section]);
+  }, [route?.params?.section]);
 
   // A blocked peerId alone is not a name — the person may not be in range, or may never
   // have been, if they were blocked straight from a Nearby row before a full handshake
@@ -117,7 +127,7 @@ export function SettingsScreen({route, navigation}: RootStackScreenProps<'Settin
       <View style={styles.header}>
         <Touchable
           scale={false}
-          onPress={() => navigation.goBack()}
+          onPress={() => navigation?.goBack()}
           hitSlop={12}
           style={styles.headerIconButton}
           accessibilityLabel="Back">
@@ -535,6 +545,27 @@ export function SettingsScreen({route, navigation}: RootStackScreenProps<'Settin
           </DenseText>
         </Section>
 
+        {/* Diagnostics used to be a fourth tab. It is a place you go deliberately when
+            something is wrong, not one of three you switch between all day, so it lives
+            here — one tap further away, and off the bar. */}
+        <Section title="Advanced">
+          <Touchable
+            scale={false}
+            onPress={() => navigation?.navigate('Debug')}
+            style={styles.advancedRow}
+            accessibilityRole="button"
+            accessibilityLabel="Open diagnostics">
+            <Icon name="code" color={theme.textDim} size={17} />
+            <View style={styles.grow}>
+              <AppText style={styles.advancedLabel}>Diagnostics</AppText>
+              <DenseText style={styles.advancedHint}>
+                Radio, packets and logs — the export a bug report needs
+              </DenseText>
+            </View>
+            <Icon name="chevronRight" color={theme.textFaint} size={16} />
+          </Touchable>
+        </Section>
+
         <Section title="Device security">
           <Row label="Screenshots & screen recording" value="Allowed (test build)" />
           <DenseText style={styles.hint}>
@@ -693,6 +724,10 @@ const useStyles = makeStyles(t => ({
   label: {...typography.callout, color: t.text, fontWeight: '600'},
   spaced: {marginTop: spacing.lg},
   hint: {...typography.caption, color: t.textDim, marginTop: 3, lineHeight: 16},
+  grow: {flex: 1},
+  advancedRow: {flexDirection: 'row', alignItems: 'center', gap: spacing.md, paddingVertical: spacing.md},
+  advancedLabel: {...typography.body, color: t.text},
+  advancedHint: {...typography.caption, color: t.textDim, marginTop: 2},
   picker: {marginTop: spacing.md},
 
   input: {

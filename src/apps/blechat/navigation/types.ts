@@ -11,17 +11,25 @@ export type RootStackParamList = {
   Chat: {peerId?: string; groupId?: string; displayName: string};
   NewGroup: undefined;
   /**
-   * A drill-in screen, not a tab — reached from Home's profile menu, same as Chat and
-   * NewGroup. Which category to land on and scroll to; omitted just opens at the top.
+   * Also the "You" tab. Kept as a stack route as well, so a deep link can open it at a
+   * particular category; omitted just opens at the top.
    */
   Settings: {section?: 'profile' | 'app' | 'system'} | undefined;
+  /** Diagnostics, reached from You. A drill-in rather than a tab of its own. */
+  Debug: undefined;
 };
 
+/**
+ * Three tabs, as the design draws them.
+ *
+ * Home's contents moved onto Nearby — it was a summary of a screen one tap away — and
+ * Debug moved under You as "Advanced". Neither was removed; they stopped being
+ * destinations of their own.
+ */
 export type TabParamList = {
-  Home: undefined;
-  Chats: undefined;
   Nearby: undefined;
-  Debug: undefined;
+  Chats: undefined;
+  You: undefined;
 };
 
 export type RootStackScreenProps<T extends keyof RootStackParamList> =

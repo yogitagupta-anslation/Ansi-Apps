@@ -35,6 +35,7 @@ import {
   BLE_TX_CHAR_UUID,
 } from '../config/constants';
 import type {Peer} from '../types/Peer';
+import type {RootStackScreenProps} from '../navigation/types';
 import {BUILD_LABEL, BUILD_NOTES} from '../config/build';
 
 function levelColor(level: LogLevel, t: Theme): string {
@@ -62,7 +63,7 @@ const DEBUG_TABS: Array<{key: DebugTab; label: string}> = [
   {key: 'logs', label: 'Logs'},
 ];
 
-export function DebugScreen() {
+export function DebugScreen({navigation}: RootStackScreenProps<'Debug'>) {
   const styles = useStyles();
   const theme = useTheme();
   const tints = tintsFor(theme);
@@ -139,6 +140,25 @@ export function DebugScreen() {
             the three things every bug report needs, as one line rather than a card and
             a section apiece. */}
         <View style={styles.brandRow}>
+          {/* Diagnostics is reached from You now rather than being a tab, so it needs
+              its own way back — hardware back works, but a screen with no visible exit
+              reads as somewhere you are stuck. */}
+          <Touchable
+            scale={false}
+            onPress={() =>
+              // Popping is only right when there is something to pop. If Diagnostics is
+              // the only screen on the stack — which happens when the app is reopened
+              // straight onto it — goBack leaves BLE Chat altogether and drops the
+              // reader back in the hub, which is not what a back arrow inside a screen
+              // should ever do.
+              navigation.canGoBack() ? navigation.goBack() : navigation.navigate('Tabs')
+            }
+            hitSlop={10}
+            style={styles.backButton}
+            accessibilityRole="button"
+            accessibilityLabel="Back">
+            <Icon name="chevronLeft" color={theme.text} size={20} />
+          </Touchable>
           <View style={styles.flex}>
             <AppText style={styles.brand}>Diagnostics</AppText>
             <DenseText style={styles.brandMeta} numberOfLines={1}>
@@ -880,6 +900,7 @@ const useStyles = makeStyles(t => ({
   content: {padding: spacing.lg, paddingBottom: spacing.xl},
 
   flex: {flex: 1},
+  backButton: {paddingRight: spacing.sm, paddingVertical: 4},
   brandRow: {
     flexDirection: 'row',
     alignItems: 'center',

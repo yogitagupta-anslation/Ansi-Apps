@@ -22,6 +22,11 @@ export type IconName =
   | 'arrowUp'
   | 'info'
   | 'checkDouble'
+  | 'link2'
+  | 'chatPlus'
+  | 'tabYou'
+  | 'tabChats'
+  | 'tabNearby'
   | 'plus'
   | 'pencil'
   | 'shield'
@@ -125,6 +130,46 @@ const ICONS: Record<IconName, (p: StrokeProps, color: string) => React.ReactNode
     </>
   ),
   chevronRight: p => <Path {...p} d="M9 5l7 7-7 7" />,
+  // The tab-bar set and the row pills, traced from the design rather than approximated
+  // with the nearest existing glyph — these are the icons a reader sees most often, so a
+  // near-miss is visible every time the app is opened.
+  tabNearby: p => (
+    <>
+      <Circle cx={12} cy={12} r={7.5} {...p} />
+      <Circle cx={12} cy={12} r={2.2} fill={p.stroke} stroke="none" />
+    </>
+  ),
+  tabChats: p => (
+    <Path
+      {...p}
+      d="M4 6.5A2.5 2.5 0 016.5 4h11A2.5 2.5 0 0120 6.5v8a2.5 2.5 0 01-2.5 2.5H10l-4.5 4v-4H6.5A2.5 2.5 0 014 14.5v-8z"
+    />
+  ),
+  tabYou: p => (
+    <>
+      <Circle cx={12} cy={8.5} r={3.4} {...p} />
+      <Path {...p} d="M5.5 19.5c0-3.6 2.9-6 6.5-6s6.5 2.4 6.5 6" />
+    </>
+  ),
+  /** "Start a conversation" — a bubble with a second one joining it. */
+  chatPlus: p => (
+    <>
+      <Path {...p} d="M18 8.5V6.2a2 2 0 00-2-2H6a2 2 0 00-2 2v7a2 2 0 002 2h1v3l3.5-3" />
+      <Path
+        {...p}
+        d="M12 11h6.5a1.5 1.5 0 011.5 1.5v4a1.5 1.5 0 01-1.5 1.5H17v2.2L14 18h-2a1.5 1.5 0 01-1.5-1.5"
+      />
+    </>
+  ),
+  /** A link, for a live connection. */
+  link2: p => (
+    <>
+      <Path {...p} d="M9.5 14.5l5-5" />
+      <Path {...p} d="M11 6.5l1-1a3.5 3.5 0 015 5l-1 1" />
+      <Path {...p} d="M13 17.5l-1 1a3.5 3.5 0 01-5-5l1-1" />
+    </>
+  ),
+
   // Two ticks, the second trailing the first. "Sent" is one write completing; this is
   // the peer having acknowledged it, which is a different fact and needs a different mark.
   checkDouble: p => (
