@@ -9,8 +9,8 @@ import {
 import {createNativeStackNavigator} from '@react-navigation/native-stack';
 import {createBottomTabNavigator} from '@react-navigation/bottom-tabs';
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
+import {typography} from '../config/theme';
 import {makeStyles, useTheme} from '../theme/ThemeProvider';
-import {Icon, type IconName} from '../components/ui/Icon';
 import {useMemo} from 'react';
 import {ChatScreen} from '../screens/ChatScreen';
 import {ChatsScreen} from '../screens/ChatsScreen';
@@ -46,87 +46,61 @@ function useNavTheme() {
 }
 
 /**
- * Only the focused tab carries colour — every inactive icon sits in the same neutral
- * grey. That is what makes the row read as "here is where you are" rather than four
- * permanently lit destinations; a bar where nothing is grey has nothing left to
- * highlight. The active icon sits in a soft filled lozenge rather than a circle:
- * wider than it is tall, it reads as a selected segment instead of a button.
+ * A count, as a dot.
+ *
+ * The design's tab bar is words with a 5px dot beside the one that has something waiting.
+ * The number itself moves into the accessibility label rather than disappearing: sighted
+ * users get "something is waiting, go look", which is all a tab bar can usefully say, and
+ * the exact figure is one tap away on the screen it belongs to.
  */
-function TabIcon({
-  icon,
-  focused,
-  activeColor,
-}: {
-  icon: IconName;
-  focused: boolean;
-  activeColor: string;
-}) {
+function TabDot({count, color}: {count: number; color: string}) {
   const styles = useStyles();
-  const theme = useTheme();
-  return (
-    <View style={[styles.tabIconWrap, focused && {backgroundColor: theme.accentSoft}]}>
-      <Icon name={icon} color={focused ? activeColor : theme.textFaint} size={19} />
-    </View>
-  );
+  if (count <= 0) {
+    return null;
+  }
+  return <View style={[styles.tabDot, {backgroundColor: color}]} />;
 }
 
-function NearbyTabIcon({focused, activeColor}: {focused: boolean; activeColor: string}) {
-  const styles = useStyles();
-  const theme = useTheme();
-  const count = useAppStore(s => s.peers.filter(p => p.state === 'connected').length);
-  return (
-    <View>
-      <TabIcon icon="target" focused={focused} activeColor={activeColor} />
-      {count > 0 && (
-        <View style={[styles.badge, {backgroundColor: theme.ok}]}>
-          {/* Fixed 16x16 circle — a scaled-up count would spill out of it, so this one
-              stays at native size rather than following the dense cap. */}
-          <DenseText style={styles.badgeText} numberOfLines={1} maxFontSizeMultiplier={1}>
-            {count}
-          </DenseText>
-        </View>
-      )}
-    </View>
-  );
+function useUnreadTotal(): number {
+  return useAppStore(s => Object.values(s.unread).reduce((sum, n) => sum + n, 0));
 }
 
-function ChatsTabIcon({focused, activeColor}: {focused: boolean; activeColor: string}) {
-  const styles = useStyles();
-  const theme = useTheme();
-  const unreadTotal = useAppStore(s =>
-    Object.values(s.unread).reduce((sum, n) => sum + n, 0),
-  );
-  return (
-    <View>
-      <TabIcon icon="chatBubble" focused={focused} activeColor={activeColor} />
-      {unreadTotal > 0 && (
-        <View style={[styles.badge, {backgroundColor: theme.accent}]}>
-          <DenseText style={styles.badgeText} numberOfLines={1} maxFontSizeMultiplier={1}>
-            {unreadTotal > 99 ? '99+' : unreadTotal}
-          </DenseText>
-        </View>
-      )}
-    </View>
-  );
+function useConnectedCount(): number {
+  return useAppStore(s => s.peers.filter(p => p.state === 'connected').length);
 }
 
-/** Weight, not decoration, marks the focused label — the lozenge above it does the rest. */
+/**
+ * The tab itself: a word, and a dot when there is something behind it.
+ *
+ * The icon lozenge is gone. Four glyphs in four tinted circles was the bar carrying more
+ * weight than a bar should, and with only four destinations the words are already the
+ * fastest thing to read — the design's own answer to "does everything need a box".
+ */
 function TabLabel({
   title,
   focused,
-  color,
+  dot,
+  dotColor,
 }: {
   title: string;
   focused: boolean;
-  color: string;
+  dot: number;
+  dotColor: string;
 }) {
   const styles = useStyles();
+  const theme = useTheme();
   return (
-    <DenseText
-      style={[styles.tabLabel, {color, fontWeight: focused ? '700' : '600'}]}
-      numberOfLines={1}>
-      {title}
-    </DenseText>
+    <View style={styles.tabLabelRow}>
+      <DenseText
+        style={[
+          styles.tabLabel,
+          focused ? {color: theme.text, fontWeight: '500'} : {color: theme.textDim},
+        ]}
+        numberOfLines={1}>
+        {title}
+      </DenseText>
+      <TabDot count={dot} color={dotColor} />
+    </View>
   );
 }
 
@@ -138,27 +112,14 @@ function TabLabel({
 // mount timing — where an emulator never showed the gap. Setting an explicit height built
 // from real safe-area insets removes the guess entirely instead of hoping the library's
 // own measurement lines up with what actually got laid out.
-const TAB_CONTENT_HEIGHT = 70;
+const TAB_CONTENT_HEIGHT = 64;
 
 function Tabs() {
   const styles = useStyles();
   const theme = useTheme();
   const insets = useSafeAreaInsets();
-
-  // One accent for every focused tab, not a colour per destination — only a single hue
-  // is ever lit at a time, on whichever tab is actually current.
-  const renderHomeIcon = ({focused}: {focused: boolean}) => (
-    <TabIcon icon="house" focused={focused} activeColor={theme.accent} />
-  );
-  const renderChatsIcon = ({focused}: {focused: boolean}) => (
-    <ChatsTabIcon focused={focused} activeColor={theme.accent} />
-  );
-  const renderNearbyIcon = ({focused}: {focused: boolean}) => (
-    <NearbyTabIcon focused={focused} activeColor={theme.accent} />
-  );
-  const renderDebugIcon = ({focused}: {focused: boolean}) => (
-    <TabIcon icon="code" focused={focused} activeColor={theme.accent} />
-  );
+  const unread = useUnreadTotal();
+  const connected = useConnectedCount();
 
   return (
     <Tab.Navigator
@@ -168,16 +129,16 @@ function Tabs() {
           styles.tabBar,
           {height: TAB_CONTENT_HEIGHT + insets.bottom, paddingBottom: insets.bottom},
         ],
-        tabBarActiveTintColor: theme.accent,
-        tabBarInactiveTintColor: theme.textFaint,
+        // No icon slot at all: leaving it empty would still reserve its height and
+        // leave the words floating below centre.
+        tabBarIcon: () => null,
       }}>
       <Tab.Screen
         name="Home"
         component={HomeScreen}
         options={{
-          tabBarIcon: renderHomeIcon,
-          tabBarLabel: ({focused, color}) => (
-            <TabLabel title="Home" focused={focused} color={color} />
+          tabBarLabel: ({focused}) => (
+            <TabLabel title="Home" focused={focused} dot={0} dotColor={theme.accent} />
           ),
         }}
       />
@@ -185,9 +146,15 @@ function Tabs() {
         name="Chats"
         component={ChatsScreen}
         options={{
-          tabBarIcon: renderChatsIcon,
-          tabBarLabel: ({focused, color}) => (
-            <TabLabel title="Chats" focused={focused} color={color} />
+          tabBarAccessibilityLabel:
+            unread > 0 ? `Chats, ${unread} unread` : 'Chats',
+          tabBarLabel: ({focused}) => (
+            <TabLabel
+              title="Chats"
+              focused={focused}
+              dot={unread}
+              dotColor={theme.accent}
+            />
           ),
         }}
       />
@@ -195,9 +162,15 @@ function Tabs() {
         name="Nearby"
         component={NearbyScreen}
         options={{
-          tabBarIcon: renderNearbyIcon,
-          tabBarLabel: ({focused, color}) => (
-            <TabLabel title="Nearby" focused={focused} color={color} />
+          tabBarAccessibilityLabel:
+            connected > 0 ? `Nearby, ${connected} connected` : 'Nearby',
+          tabBarLabel: ({focused}) => (
+            <TabLabel
+              title="Nearby"
+              focused={focused}
+              dot={connected}
+              dotColor={theme.ok}
+            />
           ),
         }}
       />
@@ -205,9 +178,8 @@ function Tabs() {
         name="Debug"
         component={DebugScreen}
         options={{
-          tabBarIcon: renderDebugIcon,
-          tabBarLabel: ({focused, color}) => (
-            <TabLabel title="Debug" focused={focused} color={color} />
+          tabBarLabel: ({focused}) => (
+            <TabLabel title="Debug" focused={focused} dot={0} dotColor={theme.accent} />
           ),
         }}
       />
@@ -266,31 +238,12 @@ export function AppNavigator() {
 
 const useStyles = makeStyles(t => ({
   tabBar: {
-    backgroundColor: t.surface,
-    // Hairline, not 1px: at the top of the bar a full pixel reads as a drawn line
-    // rather than the edge of a surface.
+    // The page colour, not a raised surface. The hairline is the whole boundary.
+    backgroundColor: t.bg,
     borderTopColor: t.divider,
     borderTopWidth: StyleSheet.hairlineWidth,
-    paddingTop: 8,
   },
-  tabIconWrap: {
-    width: 44,
-    height: 30,
-    borderRadius: 15,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  tabLabel: {fontSize: 11, marginTop: 3},
-  badge: {
-    position: 'absolute',
-    right: 4,
-    top: -2,
-    minWidth: 16,
-    height: 16,
-    borderRadius: 8,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 3,
-  },
-  badgeText: {color: '#ffffff', fontSize: 10, fontWeight: '700'},
+  tabLabelRow: {flexDirection: 'row', alignItems: 'center', gap: 5},
+  tabLabel: {...typography.caption},
+  tabDot: {width: 5, height: 5, borderRadius: 2.5},
 }));

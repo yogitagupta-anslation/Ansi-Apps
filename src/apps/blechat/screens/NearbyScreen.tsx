@@ -9,19 +9,20 @@ import {
   View,
 } from 'react-native';
 import {useFocusEffect} from '@react-navigation/native';
-import {radius, spacing, typography} from '../config/theme';
+import {avatarHue, radius, spacing, typography} from '../config/theme';
 import {makeStyles, useTheme} from '../theme/ThemeProvider';
 import {sharedInterests} from '../config/interests';
 import {EmptyState} from '../components/ui/Surface';
 import {Screen} from '../components/ui/Screen';
-import {FadeIn, Pulse, Touchable} from '../components/Motion';
+import {BreathingDot, FadeIn, Touchable} from '../components/Motion';
 import {Icon, type IconName} from '../components/ui/Icon';
 import {LABELS as LINK_STATE_LABELS} from '../components/ConnectionIndicator';
 import {PeerProfileSheet} from '../components/PeerProfileSheet';
 import {RECONNECT_MAX_ATTEMPTS} from '../config/constants';
 import {describeFailure} from '../ble/LinkErrors';
 import {AppText, DenseText} from '../components/AppText';
-import {InitialAvatar, SignalBars} from '../components/ui/Primitives';
+import {InitialAvatar} from '../components/ui/Primitives';
+import {MascotAvatar} from '../components/ui/Mascot';
 import {Radar, isLive} from '../components/ui/Radar';
 import {
   ConnectRing,
@@ -373,32 +374,31 @@ export function NearbyScreen({navigation}: RootTabScreenProps<'Nearby'>) {
                 </AppText>
                 <View style={styles.subtitleRow}>
                   {/* The dot only lives while a scan does. A static one would look the
-                      same whether the radio is sweeping or wedged. */}
-                  <Pulse active={scanning}>
-                    <View
-                      style={[
-                        styles.subtitleDot,
-                        {backgroundColor: scanning ? theme.accent : theme.textFaint},
-                      ]}
-                    />
-                  </Pulse>
+                      same whether the radio is sweeping or wedged — which is also why
+                      the word beside it says "Scanning" rather than relying on the beat,
+                      since reduce-motion holds the dot still. */}
+                  <BreathingDot
+                    size={6}
+                    active={scanning}
+                    color={scanning ? theme.accent : theme.textFaint}
+                  />
                   <DenseText style={styles.subtitle} numberOfLines={1}>
-                    <DenseText style={styles.subtitleStrong}>
-                      {chatRows.length} peer{chatRows.length === 1 ? '' : 's'}
-                    </DenseText>
+                    {scanning ? 'Scanning' : 'Not scanning'}
+                    {' · '}
+                    {chatRows.length} peer{chatRows.length === 1 ? '' : 's'}
                     {subtitleTail ? ` · ${subtitleTail}` : ''}
                   </DenseText>
                 </View>
               </View>
-              {/* Filled lavender chip rather than an outline, and purple rather than red
-                  — this is a mode toggle (Scan/Stop), not a destructive action, so it
-                  reads as the brand's own control language rather than a warning. */}
-              <Touchable scale={false} onPress={toggleScan} style={styles.stopButton}>
-                <Icon
-                  name={scanning ? 'stop' : 'radar'}
-                  color={theme.accent}
-                  size={scanning ? 12 : 14}
-                />
+              {/* A word in the accent, not a filled chip. This is the one action on the
+                  screen, and the screen below it is now a list of rows with no fills at
+                  all — a lavender pill up here would be the loudest thing on it. */}
+              <Touchable
+                scale={false}
+                onPress={toggleScan}
+                style={styles.stopButton}
+                accessibilityRole="button"
+                accessibilityLabel={scanning ? 'Stop scanning' : 'Start scanning'}>
                 <DenseText style={styles.stopText}>
                   {scanning ? 'Stop' : 'Scan'}
                 </DenseText>
@@ -468,6 +468,14 @@ export function NearbyScreen({navigation}: RootTabScreenProps<'Nearby'>) {
                 <DenseText style={styles.connectAllGo}>Go</DenseText>
               </Touchable>
             ) : null}
+
+            {/* The list below is people who are in range right now; the footer's EARLIER
+                is people who were. Naming both is what makes the second one legible. */}
+            {chatRows.length > 0 ? (
+              <View style={styles.ruleHeader}>
+                <DenseText style={styles.ruleTitle}>IN RANGE</DenseText>
+              </View>
+            ) : null}
           </>
         }
         renderItem={({item, index}) => (
@@ -489,8 +497,7 @@ export function NearbyScreen({navigation}: RootTabScreenProps<'Nearby'>) {
           recent.length > 0 ? (
             <View style={styles.recentBlock}>
               <View style={styles.ruleHeader}>
-                <DenseText style={styles.ruleTitle}>RECENTLY CONNECTED</DenseText>
-                <View style={styles.rule} />
+                <DenseText style={styles.ruleTitle}>EARLIER</DenseText>
               </View>
               {recent.map((peer, index) => (
                 <FadeIn key={peer.peerId!} index={index}>
@@ -652,35 +659,50 @@ function PeerCard({
   const name = peer?.displayName ?? device.name ?? 'Someone nearby';
 
   /**
-   * One line, not four badges.
+   * A word and a measurement, split.
    *
-   * State, quality, MTU and signal were a pill, a pill, a fragment and a number spread
-   * across two columns. Every one of them is still here — they are just facts about the
-   * same link, so they read as one sentence about it.
+   * These used to be one joined sentence — state, quality, MTU and signal all in the same
+   * grey run-on. They are two different kinds of thing: the first is a STATUS, which is
+   * what colour is for in this app, and the rest are MEASUREMENTS, which belong in mono
+   * so a column of them aligns down the list. Every value that was in the sentence is
+   * still here.
    */
-  const meta = failed
+  const word = failed
     ? describeFailure(peer!.failure!)
-    : [
-        connected
-          ? traffic.active
-            ? trafficLabel(traffic)
-            : 'Connected'
-          : connecting
-          ? stageCaption(peer!.state)
-          : reconnecting
-          ? `Reconnecting ${peer!.reconnectAttempt}/${RECONNECT_MAX_ATTEMPTS}`
-          : busy
-          ? LINK_STATE_LABELS[peer!.state]
-          : unconnectable
-          ? 'Not connectable'
-          : 'Available',
-        connected ? qualityLabel(peer?.metrics?.quality ?? null) : null,
-        connected && peer?.gatt ? `MTU ${peer.gatt.mtu}` : null,
-        device.rssi !== null ? `${device.rssi} dBm` : null,
-        connected ? null : `seen ${relativeTime(device.lastSeen)}`,
-      ]
-        .filter(Boolean)
-        .join(' · ');
+    : connected
+    ? traffic.active
+      ? trafficLabel(traffic)
+      : 'Connected'
+    : connecting
+    ? stageCaption(peer!.state)
+    : reconnecting
+    ? `Reconnecting ${peer!.reconnectAttempt}/${RECONNECT_MAX_ATTEMPTS}`
+    : busy
+    ? LINK_STATE_LABELS[peer!.state]
+    : unconnectable
+    ? 'Not connectable'
+    : 'Available';
+
+  const wordColor = failed
+    ? theme.error
+    : connected
+    ? theme.ok
+    : reconnecting || busy || connecting
+    ? theme.warn
+    : unconnectable
+    ? theme.textDim
+    : theme.textDim;
+
+  // U+2212, not a hyphen: in a mono column the true minus is the width of a digit, so
+  // the values line up on their first significant figure instead of drifting a pixel.
+  const measurement = [
+    device.rssi !== null ? String(device.rssi).replace('-', '−') : null,
+    connected && peer?.gatt ? String(peer.gatt.mtu) : null,
+    connected ? qualityLabel(peer?.metrics?.quality ?? null) : null,
+    connected ? null : `seen ${relativeTime(device.lastSeen)}`,
+  ]
+    .filter(Boolean)
+    .join(' · ');
 
   const shared = peer ? sharedInterests(myInterests, peer.interests) : [];
   const rest = (peer?.interests ?? []).filter(
@@ -688,9 +710,9 @@ function PeerCard({
   );
 
   return (
-    <View style={failed ? [styles.card, styles.cardFailed] : styles.card}>
+    <View style={styles.row}>
       {/* ---- who ---- */}
-      <View style={styles.cardHead}>
+      <View style={styles.rowHead}>
         <Ringed
           state={peer?.state ?? null}
           trafficActive={traffic.active}
@@ -700,27 +722,22 @@ function PeerCard({
               scale={false}
               onPress={() => onOpenProfile(peer.peerId!)}
               accessibilityLabel={`View ${name}'s profile`}>
-              <InitialAvatar
-                name={name}
-                seed={peer.peerId}
-                size={44}
-                online={connected ? true : undefined}
-                bg={failed ? theme.error + '1f' : undefined}
-                fg={failed ? theme.error : undefined}
+              <MascotAvatar
+                size={38}
+                tint={avatarHue(theme, peer.peerId).fg}
+                status={connected ? theme.ok : null}
               />
             </Touchable>
           ) : (
-            <InitialAvatar
-              name={name}
-              seed={device.linkId}
-              size={44}
-              bg={failed ? theme.error + '1f' : undefined}
-              fg={failed ? theme.error : undefined}
+            <MascotAvatar
+              size={38}
+              tint={failed ? theme.neutral : avatarHue(theme, device.linkId).fg}
+              faded={failed ? 0.5 : 0}
             />
           )}
         </Ringed>
 
-        <View style={styles.cardHeadBody}>
+        <View style={styles.rowBody}>
           <View style={styles.nameRow}>
             <AppText style={styles.name} numberOfLines={1}>
               {name}
@@ -728,27 +745,57 @@ function PeerCard({
             {/* Every handshake is authenticated or the link never reaches "connected" —
                 this is not a claim beyond what the crypto already proved. */}
             {peer?.authenticated ? (
-              <Icon name="shield" color={theme.ok} size={13} strokeWidth={2} />
+              <Icon name="shield" color={theme.ok} size={12} strokeWidth={2} />
             ) : null}
             {peer?.peerId ? <FavoriteStar peerId={peer.peerId} /> : null}
-            {failed ? (
-              <View style={[styles.statePill, {backgroundColor: theme.error + '1f'}]}>
-                <DenseText
-                  style={[styles.statePillText, {color: theme.error}]}
-                  maxFontSizeMultiplier={1}>
-                  FAILED
-                </DenseText>
-              </View>
-            ) : null}
-            <View style={styles.grow} />
-            {!failed ? <SignalBars rssi={device.rssi} size="sm" /> : null}
           </View>
-          <DenseText
-            style={failed ? [styles.meta, {color: theme.error}] : styles.meta}
-            numberOfLines={2}>
-            {meta}
-          </DenseText>
+          <View style={styles.metaRow}>
+            <DenseText style={[styles.metaWord, {color: wordColor}]} numberOfLines={1}>
+              {word}
+            </DenseText>
+            {measurement.length > 0 ? (
+              <DenseText style={styles.metaValue} numberOfLines={1}>
+                {measurement}
+              </DenseText>
+            ) : null}
+          </View>
         </View>
+
+        <RowAction
+          styles={styles}
+          unconnectable={unconnectable}
+          cls={cls}
+          connected={connected}
+          busy={busy}
+          reconnecting={reconnecting}
+          failed={failed}
+          onOpenChat={() => onOpenChat(peer!)}
+          onCancel={() => onCancel(device.linkId)}
+          onConnect={() => onConnect(device.linkId)}
+        />
+
+        {/* Profile, block and the failure detail, behind one glyph.
+            They were three bordered icon buttons on a row that has just lost its own
+            border; as a menu they stay one tap away and stop being three more boxes. */}
+        {peer?.peerId || failed ? (
+          <Touchable
+            scale={false}
+            onPress={() =>
+              openPeerMenu({
+                name,
+                peerId: peer?.peerId ?? null,
+                failure: failed ? describeFailure(peer!.failure!) : null,
+                onOpenProfile,
+                onBlock,
+              })
+            }
+            style={styles.more}
+            accessibilityLabel={`More options for ${name}`}>
+            <AppText style={styles.moreGlyph} maxFontSizeMultiplier={1}>
+              ···
+            </AppText>
+          </Touchable>
+        ) : null}
       </View>
 
       {/* The five stages, named. The ring says how far; this says which — and the name
@@ -761,108 +808,140 @@ function PeerCard({
         <ByteSparkline traffic={traffic} />
       ) : null}
 
-      {/* ---- why ---- */}
+      {/* ---- why ----
+          Words, not chips, and indented to clear the avatar so they read as belonging to
+          the name above rather than starting a new column. Shared ones take the accent;
+          the rest stay grey. */}
       {!failed && !connecting && (shared.length > 0 || rest.length > 0) ? (
         <View style={styles.interests}>
-          {shared.map(interest => (
-            <View key={interest} style={styles.chipShared}>
-              <DenseText style={styles.chipSharedText} maxFontSizeMultiplier={1}>
-                {interest}
-              </DenseText>
-            </View>
-          ))}
           {shared.length > 0 ? (
-            <DenseText style={styles.sharedCount} maxFontSizeMultiplier={1}>
-              {shared.length} shared
-            </DenseText>
+            <DenseText style={styles.interestShared}>{shared.join(', ')}</DenseText>
           ) : null}
-          {rest.map(interest => (
-            <View key={interest} style={styles.chip}>
-              <DenseText style={styles.chipText} maxFontSizeMultiplier={1}>
-                {interest}
-              </DenseText>
-            </View>
-          ))}
+          {shared.length > 0 && rest.length > 0 ? (
+            <DenseText style={styles.interestSep}>·</DenseText>
+          ) : null}
+          {rest.length > 0 ? (
+            <DenseText style={styles.interestRest}>{rest.join(', ')}</DenseText>
+          ) : null}
         </View>
       ) : null}
 
-      {/* ---- what you can do ---- */}
-      <View style={styles.actions}>
-        {unconnectable ? (
-          <View style={[styles.actionPrimary, styles.actionDisabled]}>
-            <DenseText style={styles.actionDisabledText} numberOfLines={1}>
-              {cls.kind === 'chat' ? 'Not connectable' : 'Not a BLE Chat device'}
-            </DenseText>
-          </View>
-        ) : connected && peer ? (
-          <Touchable
-            scale={false}
-            onPress={() => onOpenChat(peer)}
-            style={[styles.actionPrimary, styles.actionFilled]}>
-            <Icon name="chatBubble" color={theme.onAccent} size={14} />
-            <DenseText style={styles.actionFilledText}>Open chat</DenseText>
-          </Touchable>
-        ) : busy || reconnecting ? (
-          // Every attempt gets a way out. Tapping Connect by accident should not commit
-          // the phone to a full timeout plus the whole retry budget.
-          <Touchable
-            scale={false}
-            onPress={() => onCancel(device.linkId)}
-            style={[styles.actionPrimary, styles.actionOutlineNeutral]}>
-            <DenseText style={styles.actionOutlineNeutralText}>Cancel</DenseText>
-          </Touchable>
-        ) : failed ? (
-          <>
-            <Touchable
-              scale={false}
-              onPress={() => onConnect(device.linkId)}
-              style={[styles.actionPrimary, styles.actionOutlineNeutral]}>
-              <DenseText style={styles.actionOutlineNeutralText}>Retry</DenseText>
-            </Touchable>
-            <Touchable
-              scale={false}
-              onPress={() =>
-                Alert.alert('Why did this fail?', describeFailure(peer!.failure!))
-              }
-              style={[styles.actionPrimary, styles.actionPlain]}>
-              <DenseText style={styles.actionPlainText} numberOfLines={1}>
-                Why did this fail?
-              </DenseText>
-            </Touchable>
-          </>
-        ) : (
-          <Touchable
-            scale={false}
-            onPress={() => onConnect(device.linkId)}
-            style={[styles.actionPrimary, styles.actionOutline]}>
-            <Icon name="link" color={theme.accent} size={14} />
-            <DenseText style={styles.actionOutlineText}>Connect</DenseText>
-          </Touchable>
-        )}
-
-        {/* A known identity only — blocking a device we have never handshaken with would
-            block nothing real, since there is no proven peerId to refuse yet. */}
-        {!failed && peer?.peerId ? (
-          <>
-            <Touchable
-              scale={false}
-              onPress={() => onOpenProfile(peer.peerId!)}
-              style={styles.actionIcon}
-              accessibilityLabel="View profile">
-              <Icon name="device" color={theme.textDim} size={15} />
-            </Touchable>
-            <Touchable
-              scale={false}
-              onPress={() => onBlock(peer.peerId!, name)}
-              style={styles.actionIcon}
-              accessibilityLabel="Block">
-              <Icon name="block" color={theme.textDim} size={15} />
-            </Touchable>
-          </>
-        ) : null}
-      </View>
     </View>
   );
+}
+
+/**
+ * The one action on a row.
+ *
+ * One, not three. Every state here already had a primary thing to do; what it also had
+ * was a second and third button competing with it for the same strip of width. The
+ * secondary ones now live behind the row's overflow glyph, which leaves this able to sit
+ * on the head row beside the name instead of claiming a band of its own.
+ *
+ * Only the connected state gets the accent outline: an accent on every row is the same
+ * as an accent on none.
+ */
+function RowAction({
+  styles,
+  unconnectable,
+  cls,
+  connected,
+  busy,
+  reconnecting,
+  failed,
+  onOpenChat,
+  onCancel,
+  onConnect,
+}: {
+  styles: ReturnType<typeof useStyles>;
+  unconnectable: boolean;
+  cls: DeviceClass;
+  connected: boolean;
+  busy: boolean;
+  reconnecting: boolean;
+  failed: boolean;
+  onOpenChat: () => void;
+  onCancel: () => void;
+  onConnect: () => void;
+}) {
+  if (unconnectable) {
+    return (
+      <View style={[styles.pill, styles.pillDisabled]}>
+        <DenseText style={[styles.pillText, styles.pillDisabledText]} numberOfLines={1}>
+          {cls.kind === 'chat' ? 'Unreachable' : 'Not chat'}
+        </DenseText>
+      </View>
+    );
+  }
+
+  const [label, onPress, accent] = connected
+    ? (['Open', onOpenChat, true] as const)
+    : busy || reconnecting
+    ? // Every attempt keeps a way out: tapping Connect by accident should not commit the
+      // phone to a full timeout plus the whole retry budget.
+      (['Cancel', onCancel, false] as const)
+    : failed
+    ? (['Retry', onConnect, false] as const)
+    : (['Connect', onConnect, false] as const);
+
+  return (
+    <Touchable
+      scale={false}
+      onPress={onPress}
+      style={[styles.pill, accent ? styles.pillAccent : styles.pillNeutral]}>
+      <DenseText
+        style={[styles.pillText, accent ? styles.pillAccentText : styles.pillNeutralText]}
+        numberOfLines={1}>
+        {label}
+      </DenseText>
+    </Touchable>
+  );
+}
+
+/**
+ * The row's overflow menu.
+ *
+ * A plain Alert rather than a custom sheet: it is two or three destinations, the platform
+ * already draws one correctly, and a bespoke sheet here would be a new overlay to
+ * maintain for no gain. Block is marked destructive so it reads as the one that cannot be
+ * undone by tapping again.
+ */
+function openPeerMenu({
+  name,
+  peerId,
+  failure,
+  onOpenProfile,
+  onBlock,
+}: {
+  name: string;
+  peerId: string | null;
+  failure: string | null;
+  onOpenProfile: (peerId: string) => void;
+  onBlock: (peerId: string, name: string) => void;
+}): void {
+  const buttons: Array<{
+    text: string;
+    style?: 'cancel' | 'destructive';
+    onPress?: () => void;
+  }> = [];
+
+  if (failure !== null) {
+    buttons.push({
+      text: 'Why did this fail?',
+      onPress: () => Alert.alert('Why did this fail?', failure),
+    });
+  }
+  if (peerId !== null) {
+    buttons.push({text: 'View profile', onPress: () => onOpenProfile(peerId)});
+    buttons.push({
+      text: 'Block',
+      style: 'destructive',
+      onPress: () => onBlock(peerId, name),
+    });
+  }
+  buttons.push({text: 'Cancel', style: 'cancel'});
+
+  Alert.alert(name, undefined, buttons);
 }
 
 /**
@@ -972,185 +1051,128 @@ const useStyles = makeStyles(t => ({
   grow: {flex: 1},
 
   // ---- header ------------------------------------------------------------
-  header: {flexDirection: 'row', alignItems: 'center', gap: spacing.md},
+  header: {flexDirection: 'row', alignItems: 'flex-start', gap: spacing.md},
   headerText: {flex: 1},
-  title: {fontSize: 26, fontWeight: '800', letterSpacing: -0.6, color: t.text},
-  subtitleRow: {flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 3},
+  title: {...typography.display, color: t.text, lineHeight: 32},
+  subtitleRow: {flexDirection: 'row', alignItems: 'center', gap: 7, marginTop: 9},
   subtitleDot: {width: 6, height: 6, borderRadius: 3},
   subtitle: {...typography.caption, color: t.textDim, flex: 1},
-  subtitleStrong: {color: t.text, fontWeight: '700'},
-  stopButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 7,
-    backgroundColor: t.accentSoft,
-    borderRadius: radius.pill,
-    paddingVertical: 8,
-    paddingHorizontal: 13,
-  },
-  stopText: {...typography.callout, color: t.accent, fontWeight: '700'},
+  stopButton: {paddingTop: 6, paddingLeft: spacing.sm},
+  stopText: {...typography.callout, color: t.accent},
 
   // ---- sort --------------------------------------------------------------
-  controls: {flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 14},
-  segmented: {
-    flex: 1,
+  controls: {
     flexDirection: 'row',
-    gap: 2,
-    backgroundColor: t.surfaceAlt,
-    borderRadius: 12,
-    padding: 3,
+    alignItems: 'flex-end',
+    gap: 6,
+    marginTop: 22,
+    borderBottomWidth: 1,
+    borderBottomColor: t.divider,
   },
-  segment: {flex: 1, alignItems: 'center', paddingVertical: 7, borderRadius: 9},
-  // A raised chip, not a tint: the selected segment should look like it is on top of the
-  // track rather than a differently-coloured part of it.
-  segmentActive: {
-    backgroundColor: t.surface,
-    shadowColor: '#000',
-    shadowOpacity: t.isDark ? 0.3 : 0.08,
-    shadowRadius: 2,
-    shadowOffset: {width: 0, height: 1},
-    elevation: 1,
-  },
-  segmentText: {...typography.caption, color: t.textDim, fontWeight: '600'},
-  segmentTextActive: {...typography.caption, color: t.text, fontWeight: '700'},
+  // Underlined tabs rather than a raised chip on a filled track. The track was a box and
+  // the chip was a box on top of it, for a control whose whole job is to say which one of
+  // four words is current — which an underline says with no fill at all.
+  segmented: {flex: 1, flexDirection: 'row', gap: 18},
+  segment: {alignItems: 'center', paddingBottom: 9, borderBottomWidth: 1.5, borderBottomColor: 'transparent'},
+  segmentActive: {borderBottomColor: t.text},
+  segmentText: {...typography.caption, color: t.textDim},
+  segmentTextActive: {...typography.caption, color: t.text, fontWeight: '500'},
   filterButton: {
-    width: 34,
-    height: 34,
-    borderRadius: 11,
-    borderWidth: 1,
-    borderColor: t.border,
-    backgroundColor: t.surface,
+    width: 32,
+    height: 32,
     alignItems: 'center',
     justifyContent: 'center',
+    marginBottom: 6,
   },
-  filterButtonActive: {borderColor: t.ok, backgroundColor: t.tileGreen},
+  filterButtonActive: {},
 
   connectAll: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.sm,
-    backgroundColor: t.surface,
-    borderWidth: 1,
-    borderStyle: 'dashed',
-    borderColor: t.textFaint + '77',
-    borderRadius: 14,
-    paddingHorizontal: 13,
-    paddingVertical: 11,
-    marginTop: 14,
-    marginBottom: 14,
+    paddingVertical: 12,
+    marginTop: 10,
   },
-  connectAllText: {...typography.callout, color: t.text, fontWeight: '600', flex: 1},
-  connectAllGo: {...typography.callout, color: t.accent, fontWeight: '700'},
+  connectAllText: {...typography.caption, color: t.textDim, flex: 1},
+  connectAllGo: {...typography.callout, color: t.accent},
 
-  // ---- peer card ---------------------------------------------------------
-  card: {
-    backgroundColor: t.surface,
-    borderWidth: 1,
-    borderColor: t.border,
-    borderRadius: 20,
-    padding: 14,
-    marginBottom: 10,
-    shadowColor: '#000',
-    shadowOpacity: t.isDark ? 0.2 : 0.05,
-    shadowRadius: 3,
-    shadowOffset: {width: 0, height: 1},
-    elevation: 1,
+  // ---- peer row ----------------------------------------------------------
+  //
+  // Not a card. This was a bordered, shadowed, rounded container holding three stacked
+  // bands; it is now a plain row on the page with a hairline beneath it. The negative
+  // margin cancels the list's own padding so that hairline runs edge to edge, which is
+  // what makes a run of rows read as one list rather than as a stack of separate things.
+  row: {
+    marginHorizontal: -(spacing.lg + 4),
+    paddingHorizontal: spacing.lg + 4,
+    paddingVertical: spacing.lg,
+    borderBottomWidth: 1,
+    borderBottomColor: t.divider,
   },
-  cardFailed: {borderColor: t.error + '55'},
-  cardHead: {flexDirection: 'row', alignItems: 'center', gap: spacing.md},
-  cardHeadBody: {flex: 1, minWidth: 0},
+  rowHead: {flexDirection: 'row', alignItems: 'center', gap: 13},
+  rowBody: {flex: 1, minWidth: 0},
   nameRow: {flexDirection: 'row', alignItems: 'center', gap: 5},
-  name: {fontSize: 16, fontWeight: '700', color: t.text, flexShrink: 1},
-  statePill: {borderRadius: radius.pill, paddingHorizontal: 8, paddingVertical: 2},
-  statePillText: {fontSize: 10, fontWeight: '800', letterSpacing: 0.4},
-  meta: {...typography.caption, color: t.textDim, fontSize: 11, marginTop: 3},
+  name: {...typography.headline, color: t.text, flexShrink: 1},
+  nameMuted: {...typography.headline, fontWeight: '400', color: t.textDim, flexShrink: 1},
+  metaRow: {flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 3},
+  // The status word carries the colour; nothing behind it does.
+  metaWord: {...typography.caption, flexShrink: 1},
+  // Measurements are mono so a column of them aligns down the list and stops competing
+  // with the name, which is the thing you actually scan for.
+  metaValue: {...typography.monoSmall, color: t.textDim},
 
+  // Shared interests are coloured words rather than filled chips: the accent still marks
+  // them, without adding four more boxes to a row that just lost its own.
   interests: {
     flexDirection: 'row',
     alignItems: 'center',
     flexWrap: 'wrap',
-    gap: 5,
-    marginTop: 11,
-  },
-  // flexShrink: 0 — in a wrapping row a flex layout may squeeze a chip narrower than its
-  // text needs before wrapping it, which clips the last character with no ellipsis.
-  chipShared: {
-    backgroundColor: t.accentSoft,
-    borderWidth: 1,
-    borderColor: t.accent + '33',
-    borderRadius: radius.pill,
-    paddingHorizontal: 9,
-    paddingVertical: 3,
-    flexShrink: 0,
-  },
-  chipSharedText: {fontSize: 11, fontWeight: '700', color: t.accent},
-  sharedCount: {fontSize: 11, fontWeight: '600', color: t.textFaint},
-  chip: {
-    borderWidth: 1,
-    borderColor: t.divider,
-    borderRadius: radius.pill,
-    paddingHorizontal: 9,
-    paddingVertical: 3,
-    flexShrink: 0,
-  },
-  chipText: {fontSize: 11, color: t.textFaint},
-
-  actions: {flexDirection: 'row', alignItems: 'center', gap: spacing.sm, marginTop: 12},
-  actionPrimary: {
-    flex: 1,
-    height: 38,
-    borderRadius: radius.pill,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
     gap: 6,
+    marginTop: 10,
+    // Clears the 38pt avatar and its 13pt gap, so the line hangs under the name.
+    paddingLeft: 51,
   },
-  actionFilled: {backgroundColor: t.accent},
-  actionFilledText: {...typography.callout, color: t.onAccent, fontWeight: '700'},
-  actionOutline: {borderWidth: 1, borderColor: t.accent},
-  actionOutlineText: {...typography.callout, color: t.accent, fontWeight: '700'},
-  actionOutlineNeutral: {borderWidth: 1, borderColor: t.border},
-  actionOutlineNeutralText: {...typography.callout, color: t.text, fontWeight: '700'},
-  actionPlain: {},
-  actionPlainText: {...typography.callout, color: t.textDim, fontWeight: '600'},
-  actionDisabled: {borderWidth: 1, borderColor: t.border, backgroundColor: t.surfaceAlt},
-  actionDisabledText: {...typography.callout, color: t.textDim, fontWeight: '600'},
-  actionIcon: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
+  interestShared: {...typography.caption, color: t.accentQuiet},
+  interestRest: {...typography.caption, color: t.textDim},
+  interestSep: {...typography.caption, color: t.separator},
+
+  // One pill, on the right of the head row, sized to its label.
+  pill: {
     borderWidth: 1,
-    borderColor: t.border,
-    alignItems: 'center',
-    justifyContent: 'center',
+    borderRadius: radius.pill,
+    paddingVertical: 7,
+    paddingHorizontal: 14,
+    flexShrink: 0,
   },
+  pillText: {...typography.callout},
+  pillAccent: {borderColor: t.accent},
+  pillAccentText: {color: t.accent},
+  pillNeutral: {borderColor: t.border},
+  pillNeutralText: {color: t.text},
+  pillDisabled: {borderColor: t.divider},
+  pillDisabledText: {color: t.textFaint},
+  // The overflow affordance, in the same language as the thread header's.
+  more: {paddingHorizontal: 6, paddingVertical: 4, flexShrink: 0},
+  moreGlyph: {fontSize: 17, color: t.textDim, lineHeight: 20},
 
   // ---- recently connected ------------------------------------------------
   recentBlock: {marginTop: 6},
-  ruleHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.sm,
-    marginTop: 16,
-    marginBottom: 8,
-  },
+  // A label and space, no rule line. The hairlines under the rows already say where one
+  // group stops; a second horizontal line above the label was drawing the same boundary
+  // twice.
+  ruleHeader: {marginTop: 26, marginBottom: 2},
   ruleTitle: {...typography.overline, color: t.textDim},
-  rule: {flex: 1, height: 1, backgroundColor: t.divider},
   recentRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: spacing.md,
-    backgroundColor: t.surface,
-    borderWidth: 1,
-    borderColor: t.divider,
-    borderRadius: 18,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    marginBottom: spacing.sm,
+    gap: 13,
+    marginHorizontal: -(spacing.lg + 4),
+    paddingHorizontal: spacing.lg + 4,
+    paddingVertical: spacing.lg,
   },
-  recentName: {...typography.callout, fontSize: 14, fontWeight: '700', color: t.text},
-  recentMeta: {...typography.caption, color: t.textFaint, fontSize: 11, marginTop: 2},
-  recentAction: {...typography.callout, color: t.textDim, fontWeight: '700'},
+  recentName: {...typography.headline, fontWeight: '400', color: t.textDim},
+  recentMeta: {...typography.caption, color: t.textDim, marginTop: 3},
+  recentAction: {...typography.callout, color: t.accent},
 
   // ---- radar ---------------------------------------------------------------
   radarWrap: {alignItems: 'center', paddingTop: 6, paddingBottom: spacing.lg},

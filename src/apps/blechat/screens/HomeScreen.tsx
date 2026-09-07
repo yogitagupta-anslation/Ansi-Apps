@@ -9,7 +9,7 @@ import {Screen} from '../components/ui/Screen';
 import {GroupAvatar, InitialAvatar} from '../components/ui/Primitives';
 import {Mascot} from '../components/ui/Mascot';
 import {Icon, type IconName} from '../components/ui/Icon';
-import {GradientSurface, Wordmark, brandGradient} from '../components/ui/Gradient';
+import {Wordmark, brandGradient} from '../components/ui/Gradient';
 import {elevation, radius, spacing, typography} from '../config/theme';
 import {makeStyles, useTheme} from '../theme/ThemeProvider';
 import {openAppSettings} from '../ble/BLEPermissions';
@@ -206,19 +206,15 @@ export function HomeScreen({navigation}: RootTabScreenProps<'Home'>) {
           </FadeIn>
         ) : null}
 
-        {/* ---- hero: the whole reason to open the app ------------------------ */}
+        {/* ---- the whole reason to open the app -------------------------------
+            Not a filled panel any more. A violet slab the height of a third of the screen
+            was the loudest thing in the app, on the screen you see first — and with one
+            accent now doing the work of marking a single action, a hero painted in it
+            would leave that action nothing to say. The count is large type on the page
+            instead, which is what carries it. */}
         <FadeIn index={1}>
-          <GradientSurface
-            gradient={brandGradient(theme)}
-            radius={26}
-            style={styles.hero}>
-            {/* The only decorative element on the screen, and it is doing work: the ring
-                is anchored to the count, so a hero with nobody in it looks visibly
-                emptier rather than merely reading a different number. */}
-            <View style={styles.heroRing} pointerEvents="none" />
-
+          <View style={styles.hero}>
             <View style={styles.heroEyebrow}>
-              <Icon name="radar" color="rgba(255,255,255,0.9)" size={15} />
               <DenseText style={styles.heroEyebrowText}>AROUND YOU RIGHT NOW</DenseText>
             </View>
 
@@ -240,7 +236,7 @@ export function HomeScreen({navigation}: RootTabScreenProps<'Home'>) {
                       style={[
                         styles.heroFace,
                         i > 0 && styles.heroFaceOverlap,
-                        {borderColor: theme.gradient[1]},
+                        {borderColor: theme.bg},
                       ]}>
                       <InitialAvatar
                         name={peer.displayName}
@@ -266,8 +262,7 @@ export function HomeScreen({navigation}: RootTabScreenProps<'Home'>) {
                 onPress={() => navigation.navigate('Nearby')}
                 style={styles.heroPrimary}
                 accessibilityLabel="See who's nearby">
-                <Icon name="target" color={theme.gradient[1]} size={17} />
-                <AppText style={[styles.heroPrimaryText, {color: theme.gradient[0]}]}>
+                <AppText style={[styles.heroPrimaryText, {color: theme.onAccent}]}>
                   See who&apos;s nearby
                 </AppText>
               </Touchable>
@@ -276,14 +271,12 @@ export function HomeScreen({navigation}: RootTabScreenProps<'Home'>) {
                 onPress={toggleScan}
                 style={styles.heroSecondary}
                 accessibilityLabel={scanning ? 'Stop scanning' : 'Start scanning'}>
-                <Icon
-                  name={scanning ? 'stop' : 'radar'}
-                  color="#ffffff"
-                  size={scanning ? 12 : 16}
-                />
+                <DenseText style={styles.heroSecondaryText}>
+                  {scanning ? 'Stop' : 'Scan'}
+                </DenseText>
               </Touchable>
             </View>
-          </GradientSurface>
+          </View>
         </FadeIn>
 
         {/* ---- link ledger: three facts, each one tappable ------------------- */}
@@ -640,42 +633,25 @@ const useStyles = makeStyles(t => ({
   errorText: {...typography.callout, color: t.error, lineHeight: 18},
 
   // ---- hero --------------------------------------------------------------
-  hero: {padding: 20, marginTop: spacing.lg, overflow: 'hidden'},
-  heroRing: {
-    position: 'absolute',
-    right: -40,
-    top: -40,
-    width: 180,
-    height: 180,
-    borderRadius: 90,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.35)',
-  },
+  hero: {marginTop: spacing.xl, paddingBottom: spacing.xl, borderBottomWidth: 1, borderBottomColor: t.divider},
   heroEyebrow: {flexDirection: 'row', alignItems: 'center', gap: spacing.sm},
-  heroEyebrowText: {
-    ...typography.overline,
-    color: 'rgba(255,255,255,0.82)',
-    letterSpacing: 0.9,
-  },
+  heroEyebrowText: {...typography.overline, color: t.textDim},
   heroCountRow: {
     flexDirection: 'row',
     alignItems: 'flex-end',
     gap: spacing.sm + 2,
-    marginTop: spacing.sm + 2,
+    marginTop: spacing.md,
   },
+  // 44/600 rather than 44/800. The figure is already the biggest thing on the screen;
+  // the extra weight was shouting on top of that.
   heroCount: {
-    color: '#ffffff',
+    color: t.text,
     fontSize: 44,
-    fontWeight: '800',
+    fontWeight: '600',
     letterSpacing: -1.6,
     lineHeight: 46,
   },
-  heroCountLabel: {
-    color: 'rgba(255,255,255,0.92)',
-    fontSize: 15,
-    fontWeight: '600',
-    paddingBottom: 5,
-  },
+  heroCountLabel: {...typography.body, color: t.textDim, paddingBottom: 6},
   heroFacesRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -693,36 +669,30 @@ const useStyles = makeStyles(t => ({
     overflow: 'hidden',
   },
   heroFaceOverlap: {marginLeft: -10},
-  heroFacesText: {color: 'rgba(255,255,255,0.86)', fontSize: 13, flex: 1},
-  heroActions: {flexDirection: 'row', gap: spacing.sm, marginTop: 18},
+  heroFacesText: {...typography.caption, color: t.textDim, flex: 1},
+  heroActions: {flexDirection: 'row', alignItems: 'center', gap: spacing.lg, marginTop: 20},
+  // The one filled control on the screen.
   heroPrimary: {
     flex: 1,
     height: 46,
     borderRadius: radius.pill,
-    backgroundColor: '#ffffff',
+    backgroundColor: t.accent,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: 7,
   },
-  heroPrimaryText: {fontSize: 15, fontWeight: '700'},
-  heroSecondary: {
-    width: 46,
-    height: 46,
-    borderRadius: 23,
-    backgroundColor: 'rgba(255,255,255,0.18)',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.34)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
+  heroPrimaryText: {...typography.body, fontWeight: '500'},
+  // A word beside it, not a second button. Scan/Stop is a mode toggle, and giving it a
+  // circle of its own made two controls compete where one is primary.
+  heroSecondary: {height: 46, alignItems: 'center', justifyContent: 'center'},
+  heroSecondaryText: {...typography.callout, color: t.accent},
 
   // ---- ledger ------------------------------------------------------------
-  ledger: {flexDirection: 'row', gap: spacing.sm, marginTop: spacing.md + 2},
+  ledger: {flexDirection: 'row', gap: spacing.sm, marginTop: spacing.lg},
   ledgerCellWrap: {flex: 1},
   ledgerCell: {
-    backgroundColor: t.surface,
-    borderWidth: 1,
+    borderWidth: 0,
     borderColor: t.border,
     borderRadius: 16,
     paddingHorizontal: spacing.md,

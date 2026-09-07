@@ -1,6 +1,6 @@
 import React from 'react';
 import {TouchableOpacity, View} from 'react-native';
-import {spacing, typography} from '../config/theme';
+import {radius, spacing, typography} from '../config/theme';
 import {makeStyles, useTheme} from '../theme/ThemeProvider';
 import type {Theme} from '../config/theme';
 import type {ChatMessage} from '../types/Message';
@@ -201,26 +201,19 @@ const useStyles = makeStyles(t => ({
     minWidth: 96,
     // A larger radius with one corner tucked in: the tucked corner is what makes a
     // bubble read as coming FROM a side rather than floating.
-    borderRadius: 20,
-    paddingVertical: 11,
+    borderRadius: radius.xl,
+    paddingVertical: 10,
     paddingHorizontal: 14,
   },
-  out: {backgroundColor: t.bubbleOut, borderBottomRightRadius: 6},
-  in: {
-    backgroundColor: t.bubbleIn,
-    borderBottomLeftRadius: 6,
-    borderWidth: 1,
-    borderColor: t.divider,
-    // Barely there, and only on the incoming bubble: it is the one that shares a colour
-    // with the thread behind it, so it needs the lift to separate at all.
-    shadowColor: '#000',
-    shadowOpacity: t.isDark ? 0 : 0.04,
-    shadowRadius: 2,
-    shadowOffset: {width: 0, height: 1},
-  },
+  out: {backgroundColor: t.bubbleOut, borderBottomRightRadius: radius.sm},
+  // A fill, never a border. The incoming bubble used to be white with a hairline and a
+  // shadow because it shared a colour with the thread behind it; giving it the sunk grey
+  // instead separates it with no outline at all — and on dark, a hairline round a bubble
+  // is louder than the bubble.
+  in: {backgroundColor: t.bubbleIn, borderBottomLeftRadius: radius.sm},
   failed: {borderWidth: 1, borderColor: t.error},
-  sender: {...typography.caption, fontWeight: '700', marginBottom: 3},
-  text: {...typography.body, lineHeight: 21},
+  sender: {...typography.caption, fontWeight: '500', marginBottom: 3},
+  text: {...typography.body},
   // An incoming bubble is light in light mode, so white text would be invisible.
   textOut: {color: t.bubbleOutText},
   textIn: {color: t.bubbleInText},
@@ -233,10 +226,11 @@ const useStyles = makeStyles(t => ({
     flexWrap: 'wrap',
     gap: spacing.xs,
   },
-  time: {...typography.caption, fontSize: 10},
-  metaOut: {color: t.onAccentDim},
+  // Mono, like every other measured value in the app: a clock time is one.
+  time: {...typography.monoTiny},
+  metaOut: {color: t.bubbleOutMeta},
   metaIn: {color: t.bubbleMeta},
-  tick: {...typography.caption, fontSize: 10, fontWeight: '600'},
+  tick: {...typography.caption, fontSize: 11, fontWeight: '500'},
   progressRow: {flexDirection: 'row', alignItems: 'center', gap: 6, flex: 1, marginTop: 2},
   progressTrack: {
     flex: 1,

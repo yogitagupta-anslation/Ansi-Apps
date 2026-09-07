@@ -223,11 +223,14 @@ export function KeyValue({
 const useStyles = makeStyles(t => ({
   grow: {flex: 1},
 
+  // A card marks a real boundary — a tappable group, an overlay. It was being used as a
+  // container for prose, for helper text and for single rows, which is how a screen ends
+  // up with nine stacked outlines and an eye that reads borders instead of content.
+  // Grouping is space and a hairline now; what is left keeps the fill but drops the
+  // outline, so it still reads as a group without drawing one.
   card: {
-    backgroundColor: t.surface,
+    backgroundColor: t.surfaceAlt,
     borderRadius: radius.lg,
-    borderWidth: 1,
-    borderColor: t.border,
   },
   cardPadded: {padding: spacing.lg},
 
@@ -238,10 +241,10 @@ const useStyles = makeStyles(t => ({
     paddingHorizontal: spacing.xs,
   },
   sectionTitle: {...typography.overline, color: t.textDim},
-  sectionAction: {...typography.callout, color: t.accent, fontWeight: '600'},
+  sectionAction: {...typography.callout, color: t.accent},
 
   button: {
-    borderRadius: radius.md,
+    borderRadius: radius.pill,
     paddingVertical: 13,
     paddingHorizontal: spacing.lg,
     alignItems: 'center',
@@ -258,31 +261,30 @@ const useStyles = makeStyles(t => ({
     borderColor: 'transparent',
     opacity: 0.6,
   },
-  buttonLabel: {...typography.headline},
+  buttonLabel: {...typography.body, fontWeight: '500'},
   buttonLabelPrimary: {color: t.onAccent},
   buttonLabelSecondary: {color: t.text},
   buttonLabelGhost: {color: t.accent},
   buttonLabelDanger: {color: t.error},
 
   empty: {alignItems: 'center', paddingVertical: spacing.xl * 2},
+  // No tinted disc behind the glyph. An empty state is already the quietest thing on a
+  // screen; giving its icon a filled circle made the absence look like a component.
   emptyGlyphWrap: {
     width: 56,
     height: 56,
-    borderRadius: 28,
-    backgroundColor: t.surfaceAlt,
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: spacing.md,
+    marginBottom: spacing.sm,
   },
-  emptyGlyph: {fontSize: 22, color: t.textDim},
-  emptyTitle: {...typography.headline, color: t.text},
+  emptyGlyph: {fontSize: 26, color: t.textFaint},
+  emptyTitle: {...typography.title, color: t.text},
   emptyDetail: {
-    ...typography.caption,
+    ...typography.body,
     color: t.textDim,
     textAlign: 'center',
-    marginTop: spacing.xs,
-    maxWidth: 260,
-    lineHeight: 17,
+    marginTop: spacing.sm,
+    maxWidth: 280,
   },
 
   badgeSoft: {borderColor: 'transparent'},
@@ -296,6 +298,6 @@ const useStyles = makeStyles(t => ({
 
   kv: {flexDirection: 'row', alignItems: 'center', paddingVertical: spacing.sm},
   kvLabel: {...typography.callout, color: t.textDim},
-  kvValue: {...typography.callout, color: t.text, fontWeight: '600', flexShrink: 1},
-  kvMono: {fontFamily: 'monospace', fontSize: 12, fontWeight: '400'},
+  kvValue: {...typography.callout, color: t.text, flexShrink: 1},
+  kvMono: {...typography.monoSmall},
 }));

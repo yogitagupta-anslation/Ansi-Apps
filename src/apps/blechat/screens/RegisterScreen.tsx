@@ -13,8 +13,7 @@ import {makeStyles, useTheme} from '../theme/ThemeProvider';
 import {AppText, DenseText} from '../components/AppText';
 import {Screen} from '../components/ui/Screen';
 import {Icon} from '../components/ui/Icon';
-import {Mascot} from '../components/ui/Mascot';
-import {GradientSurface, brandGradient} from '../components/ui/Gradient';
+import {MascotAvatar} from '../components/ui/Mascot';
 import {FadeIn, Touchable} from '../components/Motion';
 import {bleChat} from '../services/BleChatService';
 import {openAppSettings} from '../ble/BLEPermissions';
@@ -203,11 +202,11 @@ export function RegisterScreen() {
             <FadeIn>
               {/* The promise, made literal. "This is what they will see" above a form is
                   a claim; a card that fills in as you tap is the thing itself. */}
-              <GradientSurface
-                gradient={brandGradient(theme)}
-                radius={20}
-                style={styles.preview}>
-                <Mascot size={54} />
+              {/* On the page, not in a filled violet panel. This shows how you will look
+                  to somebody else, which a coloured slab behind it actively works against
+                  — the row they will actually see has no fill at all. */}
+              <View style={styles.preview}>
+                <MascotAvatar size={54} tint={theme.accent} />
                 <View style={styles.previewBody}>
                   <DenseText style={styles.previewEyebrow}>
                     HOW YOU&apos;LL APPEAR NEARBY
@@ -238,7 +237,7 @@ export function RegisterScreen() {
                     </DenseText>
                   )}
                 </View>
-              </GradientSurface>
+              </View>
 
               <View style={styles.counterRow}>
                 <DenseText style={styles.counter}>
@@ -385,7 +384,7 @@ export function RegisterScreen() {
                 onPress={() => setStep((step - 1) as Step)}
                 style={styles.backButton}
                 accessibilityLabel="Back">
-                <Icon name="chevronLeft" color={theme.text} size={18} />
+                <AppText style={[styles.nextText, {color: theme.textDim}]}>Back</AppText>
               </Touchable>
             ) : null}
             <Touchable
@@ -393,14 +392,19 @@ export function RegisterScreen() {
               onPress={advance}
               disabled={!canAdvance || saving}
               style={styles.nextWrap}>
-              <GradientSurface
-                gradient={
-                  canAdvance && !saving
-                    ? brandGradient(theme)
-                    : [theme.surfaceAlt, theme.surfaceAlt, theme.surfaceAlt]
-                }
-                radius={radius.pill}
-                style={styles.nextButton}>
+              {/* One flat accent, no chevron. The gradient was on every hero and every
+                  button in the old design, which is exactly why nothing stood out; this
+                  is the single action on the screen, so the fill alone is enough to say
+                  so. */}
+              <View
+                style={[
+                  styles.nextButton,
+                  {
+                    borderRadius: radius.pill,
+                    backgroundColor:
+                      canAdvance && !saving ? theme.accent : theme.surfaceAlt,
+                  },
+                ]}>
                 <AppText
                   style={[
                     styles.nextText,
@@ -408,14 +412,7 @@ export function RegisterScreen() {
                   ]}>
                   {saving ? 'Saving…' : step === 2 ? 'Start chatting' : 'Continue'}
                 </AppText>
-                {!saving ? (
-                  <Icon
-                    name="chevronRight"
-                    color={canAdvance ? theme.onAccent : theme.textFaint}
-                    size={18}
-                  />
-                ) : null}
-              </GradientSurface>
+              </View>
             </Touchable>
           </View>
         </View>
@@ -429,17 +426,21 @@ const useStyles = makeStyles(t => ({
   grow: {flex: 1},
 
   head: {paddingHorizontal: spacing.lg + 4, paddingTop: spacing.sm},
-  progress: {flexDirection: 'row', gap: 6},
-  progressSegment: {flex: 1, height: 4, borderRadius: 2},
-  eyebrow: {...typography.overline, color: t.textFaint, marginTop: spacing.md},
+  // 2px rails, square. A 4px rounded bar reads as a control you could drag; this is a
+  // position indicator and nothing else.
+  progress: {flexDirection: 'row', gap: 4},
+  progressSegment: {flex: 1, height: 2},
+  // Mono, because it is a position — "02 / 05" is a measurement of where you are.
+  eyebrow: {...typography.monoTiny, color: t.textDim, letterSpacing: 0.5, marginTop: spacing.lg},
   title: {
-    fontSize: 26,
-    fontWeight: '800',
-    letterSpacing: -0.6,
+    fontSize: 29,
+    fontWeight: '600',
+    letterSpacing: -1,
+    lineHeight: 33,
     color: t.text,
-    marginTop: 6,
+    marginTop: 10,
   },
-  lede: {...typography.callout, color: t.textDim, lineHeight: 19, marginTop: 6},
+  lede: {...typography.body, color: t.textDim, lineHeight: 23, marginTop: 12},
 
   content: {
     paddingHorizontal: spacing.lg + 4,
@@ -447,51 +448,45 @@ const useStyles = makeStyles(t => ({
     paddingBottom: spacing.lg,
   },
 
+  // A rule, not a rounded box. One text field on an otherwise empty screen does not need
+  // an outline to be found.
   input: {
-    backgroundColor: t.surface,
-    borderWidth: 1,
-    borderColor: t.border,
-    borderRadius: radius.lg,
-    paddingHorizontal: spacing.lg,
-    paddingVertical: spacing.md + 2,
+    borderBottomWidth: 1,
+    borderBottomColor: t.border,
+    paddingVertical: spacing.md,
     color: t.text,
-    fontSize: 16,
+    fontSize: 21,
+    fontWeight: '500',
   },
-  helper: {...typography.caption, color: t.textDim, marginTop: 8, lineHeight: 16},
+  helper: {...typography.caption, color: t.textDim, marginTop: 10, lineHeight: 19},
 
   // ---- live preview ------------------------------------------------------
-  preview: {flexDirection: 'row', alignItems: 'center', gap: 11, padding: 14},
+  preview: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 13,
+    paddingVertical: 16,
+    borderTopWidth: 1,
+    borderTopColor: t.divider,
+    borderBottomWidth: 1,
+    borderBottomColor: t.divider,
+  },
   previewBody: {flex: 1, minWidth: 0},
-  previewEyebrow: {
-    fontSize: 10,
-    fontWeight: '700',
-    letterSpacing: 0.8,
-    color: 'rgba(255,255,255,0.72)',
-  },
-  previewName: {fontSize: 17, fontWeight: '700', color: '#ffffff', marginTop: 3},
+  previewEyebrow: {...typography.overline, color: t.textDim},
+  previewName: {...typography.headline, color: t.text, marginTop: 4},
   previewChips: {flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 5, marginTop: 6},
-  previewChip: {
-    backgroundColor: 'rgba(255,255,255,0.2)',
-    borderRadius: radius.pill,
-    paddingHorizontal: 9,
-    paddingVertical: 3,
-  },
-  previewChipText: {fontSize: 11, fontWeight: '600', color: '#ffffff'},
-  previewMore: {fontSize: 11, fontWeight: '600', color: 'rgba(255,255,255,0.8)'},
-  previewEmpty: {fontSize: 11, color: 'rgba(255,255,255,0.72)', marginTop: 6},
+  // Words, matching the Nearby row they are previewing.
+  previewChip: {},
+  previewChipText: {...typography.caption, color: t.accentQuiet},
+  previewMore: {...typography.caption, color: t.textDim},
+  previewEmpty: {...typography.caption, color: t.textDim, marginTop: 6},
 
   counterRow: {flexDirection: 'row', alignItems: 'center', marginTop: 18},
   counter: {...typography.overline, color: t.textDim},
   counterHint: {...typography.caption, color: t.textFaint, fontSize: 11},
 
   category: {marginTop: 14},
-  categoryTitle: {
-    fontSize: 10,
-    fontWeight: '800',
-    letterSpacing: 0.7,
-    color: t.textFaint,
-    marginBottom: 7,
-  },
+  categoryTitle: {...typography.overline, color: t.textDim, marginBottom: 9},
   chipWrap: {flexDirection: 'row', flexWrap: 'wrap', gap: 7},
   // flexShrink: 0 — in a wrapping row a flex layout may squeeze a chip narrower than its
   // text needs before wrapping it, which clips the last character with no ellipsis.
@@ -506,7 +501,7 @@ const useStyles = makeStyles(t => ({
   },
   chipOn: {borderColor: t.accent, backgroundColor: t.accent},
   chipText: {...typography.callout, color: t.text, fontWeight: '500'},
-  chipTextOn: {...typography.callout, color: t.onAccent, fontWeight: '700'},
+  chipTextOn: {...typography.callout, color: t.onAccent, fontWeight: '500'},
   customRow: {marginTop: 8},
   customInput: {
     backgroundColor: t.surface,
@@ -521,28 +516,21 @@ const useStyles = makeStyles(t => ({
   },
 
   // ---- permission --------------------------------------------------------
-  permissionCard: {
-    backgroundColor: t.surface,
-    borderWidth: 1,
-    borderColor: t.border,
-    borderRadius: 22,
-    padding: spacing.xl,
-    alignItems: 'center',
-  },
+  // No card, no icon tile. This step is one sentence and one button; wrapping it in a
+  // bordered panel with a tinted glyph tile was three containers for that.
+  permissionCard: {alignItems: 'center', paddingTop: spacing.xl},
   permissionTile: {
     width: 56,
     height: 56,
-    borderRadius: 18,
     alignItems: 'center',
     justifyContent: 'center',
   },
   permissionTitle: {...typography.title, color: t.text, marginTop: spacing.md},
   permissionBody: {
-    ...typography.callout,
+    ...typography.body,
     color: t.textDim,
-    lineHeight: 19,
     textAlign: 'center',
-    marginTop: 6,
+    marginTop: 8,
   },
   permissionButton: {
     marginTop: spacing.lg,
@@ -578,23 +566,20 @@ const useStyles = makeStyles(t => ({
   privacyRow: {flexDirection: 'row', alignItems: 'flex-start', gap: 7, marginBottom: 12},
   privacy: {...typography.caption, color: t.textFaint, fontSize: 11, lineHeight: 15, flex: 1},
   footerButtons: {flexDirection: 'row', gap: spacing.sm},
+  // Back is a word, not an outlined circle. Only one thing on the screen is a button.
   backButton: {
-    width: 52,
-    height: 50,
-    borderRadius: radius.pill,
-    borderWidth: 1,
-    borderColor: t.border,
-    backgroundColor: t.surface,
+    height: 46,
+    paddingRight: spacing.lg,
     alignItems: 'center',
     justifyContent: 'center',
   },
   nextWrap: {flex: 1},
   nextButton: {
-    height: 50,
+    height: 46,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: spacing.sm,
   },
-  nextText: {fontSize: 16, fontWeight: '700'},
+  nextText: {...typography.body, fontWeight: '500'},
 }));

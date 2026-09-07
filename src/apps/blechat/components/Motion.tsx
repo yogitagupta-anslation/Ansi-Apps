@@ -418,3 +418,75 @@ export function Pulse({
 
   return <Animated.View style={[style, {opacity: value}]}>{children}</Animated.View>;
 }
+
+/**
+ * The design's breathing dot: opacity 1 → 0.3 → 1 over 1.2s, ease-in-out, forever.
+ *
+ * Separate from `Pulse` rather than a prop on it because the two mean different things.
+ * `Pulse` marks one element as live and fades to 0.45; this is the "something is ongoing"
+ * beat used in three places — the scanning dot on Nearby, and the three typing dots in a
+ * thread, which are the reason `delay` exists. Staggering them by 0.18s is what turns
+ * three blinking dots into one travelling wave.
+ *
+ * It honours reduce-motion by holding at full opacity. A caller that needs the state to
+ * survive that must say it in text as well — a dot that has stopped moving cannot be the
+ * only thing reporting that a scan is running.
+ */
+export function BreathingDot({
+  size = 6,
+  color,
+  delay = 0,
+  active = true,
+  style,
+}: {
+  size?: number;
+  color: string;
+  /** Seconds-scale offset, in ms. The design staggers by 180 and 360. */
+  delay?: number;
+  active?: boolean;
+  style?: ViewStyle | ViewStyle[];
+}) {
+  const reduced = useReduceMotion();
+  const value = useRef(new Animated.Value(1)).current;
+
+  useEffect(() => {
+    if (!active || reduced) {
+      value.setValue(1);
+      return;
+    }
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(value, {
+          toValue: 0.3,
+          duration: 600,
+          easing: Easing.inOut(Easing.quad),
+          useNativeDriver: true,
+        }),
+        Animated.timing(value, {
+          toValue: 1,
+          duration: 600,
+          easing: Easing.inOut(Easing.quad),
+          useNativeDriver: true,
+        }),
+      ]),
+    );
+    // Delay once, before the loop, rather than inside it: a delay inside the sequence
+    // would insert a pause into every cycle and the three dots would stutter together
+    // instead of chasing each other.
+    const timer = setTimeout(() => loop.start(), delay);
+    return () => {
+      clearTimeout(timer);
+      loop.stop();
+    };
+  }, [active, delay, reduced, value]);
+
+  return (
+    <Animated.View
+      style={[
+        {width: size, height: size, borderRadius: size / 2, backgroundColor: color},
+        style,
+        {opacity: value},
+      ]}
+    />
+  );
+}

@@ -1,3 +1,5 @@
+import {Platform} from 'react-native';
+
 /**
  * Semantic colour tokens.
  *
@@ -38,6 +40,14 @@ export interface Theme {
 
   accent: string;
   accentSoft: string;
+  /**
+   * The accent at reading weight, for accent-coloured TEXT sitting on the page.
+   *
+   * Shared interests are the case that needs it: they are marked by colour rather than
+   * by a filled chip, and on dark the full accent at 13px on a near-black ground is
+   * brighter than the name above it.
+   */
+  accentQuiet: string;
 
   ok: string;
   warn: string;
@@ -45,13 +55,24 @@ export interface Theme {
   purple: string;
   amber: string;
   neutral: string;
+  /** The faint mark between two words that are not a list. */
+  separator: string;
 
   bubbleOut: string;
   bubbleOutText: string;
   bubbleIn: string;
   bubbleInText: string;
-  /** Timestamp/tick text inside a bubble. */
+  /** Timestamp/tick text inside an INCOMING bubble. */
   bubbleMeta: string;
+  /**
+   * The same, inside an outgoing one.
+   *
+   * Separate from `onAccentDim` because the outgoing bubble does not follow the accent:
+   * it holds #4C3FE0 in both modes so that "mine" never changes meaning, while the dark
+   * palette's accent lifts to a pale violet that takes dark ink. Sharing one token would
+   * put near-black timestamps on a dark violet bubble the moment the theme flipped.
+   */
+  bubbleOutMeta: string;
 
   /** Scrim behind the scanning banner. */
   bannerFrom: string;
@@ -83,111 +104,135 @@ export const darkTheme: Theme = {
   name: 'dark',
   isDark: true,
 
-  // Lifted off pure black so a card reads as a surface rather than a hole. Neutral-cool
-  // rather than blue-tinted: the accent should be the only thing with real chroma.
-  bg: '#0b0f16',
-  surface: '#141a24',
-  surfaceAlt: '#1b2330',
-  card: '#171e29',
-  border: '#252d3a',
-  divider: '#1e2632',
+  // Two grounds do all the elevation work. Warm-neutral rather than blue-tinted: a
+  // blue-grey ground is what made the old screens read as a dashboard.
+  bg: '#0C0C0E',
+  surface: '#18181B',
+  surfaceAlt: '#1E1E22',
+  // Rows sit on the page, not on a tile of their own — see the note on `card`.
+  card: '#0C0C0E',
+  border: '#26262B',
+  divider: '#1E1E22',
 
-  text: '#eef2f7',
-  textDim: '#8b97a8',
-  textFaint: '#66738a',
-  onAccent: '#ffffff',
-  onAccentDim: 'rgba(255,255,255,0.74)',
+  text: '#F4F4F5',
+  textDim: '#9A9AA3',
+  textFaint: '#71717A',
+  // Ink on a filled accent follows the ACCENT's luminance, not the mode. The lifted
+  // accent below is light, so it takes dark ink; assuming white on any accent is the
+  // mistake this replaces.
+  onAccent: '#18181B',
+  onAccentDim: 'rgba(24,24,27,0.72)',
 
-  // Graphite, not a hue.
+  // One flat accent, and it appears on ONE action per screen.
   //
-  // The chrome deliberately carries no chroma of its own, which leaves status as the
-  // only coloured thing on screen: green is connected, amber is queued or waiting, red
-  // is failed. An accent competing with those is an accent that makes them harder to
-  // spot, and on this app spotting them is the whole job.
-  accent: '#94A3B8',
-  accentSoft: 'rgba(148,163,184,0.16)',
+  // The previous graphite avoided competing with status by having no chroma at all,
+  // which also left nothing to mark the single action that matters on a screen. The
+  // discipline now lives in frequency rather than in saturation: status keeps green,
+  // amber and red, and the accent is rationed hard enough not to crowd them.
+  accent: '#8B7CF6',
+  accentSoft: 'rgba(139,124,246,0.16)',
+  // A dimmer accent for text that must sit on the page rather than on a fill — shared
+  // interests, mostly, where full accent on every row would be the crowding above.
+  accentQuiet: '#A99BFF',
 
-  ok: '#34d399',
-  warn: '#fbbf24',
-  error: '#f87171',
-  purple: '#a78bfa',
-  amber: '#fbbf24',
-  neutral: '#64748b',
+  ok: '#34D399',
+  warn: '#FBBF24',
+  error: '#F87171',
+  purple: '#A78BFA',
+  amber: '#FBBF24',
+  neutral: '#52525B',
+  // The faint mark between two words that are not a list — an interest separator.
+  separator: '#3F3F46',
 
-  // The gradient's middle stop, flat: the outgoing bubble is the one place in the chat
-  // itself that ties back to the brand identity on Home. Neutral rather than tinted, so
-  // the only colour in a thread is a delivery tick that has something to report.
-  bubbleOut: '#334155',
-  bubbleOutText: '#ffffff',
-  bubbleIn: '#1b2330',
-  bubbleInText: '#eef2f7',
-  bubbleMeta: 'rgba(255,255,255,0.6)',
+  // The one colour that must mean "mine" identically in both modes, so it does NOT
+  // lift with the rest of the dark palette. White ink on it in both modes too.
+  bubbleOut: '#4C3FE0',
+  bubbleOutText: '#FFFFFF',
+  // A fill, never a border: on a dark ground a hairline round a bubble is louder than
+  // the bubble.
+  bubbleIn: '#1E1E22',
+  bubbleInText: '#F4F4F5',
+  bubbleMeta: 'rgba(244,244,245,0.62)',
+  bubbleOutMeta: 'rgba(255,255,255,0.72)',
 
-  bannerFrom: 'rgba(47,129,247,0.14)',
-  bannerTo: 'rgba(168,85,247,0.10)',
+  bannerFrom: 'rgba(139,124,246,0.12)',
+  bannerTo: 'rgba(139,124,246,0.04)',
 
-  gradient: ['#0F172A', '#334155', '#64748B'],
-  tileBlue: 'rgba(59,130,246,0.16)',
+  // Flat. Kept as a tuple because the type says so and several call sites read three
+  // stops, but every stop is the accent now — the near-black-to-violet ramp was on
+  // every hero and every button, which is precisely why nothing could stand out.
+  gradient: ['#8B7CF6', '#8B7CF6', '#8B7CF6'],
+  tileBlue: 'rgba(91,155,255,0.14)',
   tileBlueFg: '#5B9BFF',
-  tileGreen: 'rgba(34,197,94,0.16)',
+  tileGreen: 'rgba(52,211,153,0.14)',
   tileGreenFg: '#34D399',
-  tilePurple: 'rgba(139,92,246,0.18)',
-  tilePurpleFg: '#B794FF',
-  tileAmber: 'rgba(245,158,11,0.16)',
+  tilePurple: 'rgba(139,124,246,0.16)',
+  tilePurpleFg: '#A99BFF',
+  tileAmber: 'rgba(251,191,36,0.14)',
   tileAmberFg: '#FBBF24',
-  glow: 'rgba(139,92,246,0.16)',
+  glow: 'rgba(139,124,246,0.14)',
 };
 
 export const lightTheme: Theme = {
   name: 'light',
   isDark: false,
 
-  bg: '#f7f8fa',
-  surface: '#ffffff',
-  surfaceAlt: '#f1f3f7',
-  card: '#fbfcfd',
-  border: '#e3e7ee',
-  divider: '#eef1f6',
+  // Warm, not blue. The greys carry a little yellow so the page reads as paper rather
+  // than as a control panel.
+  bg: '#FBFBF9',
+  // Reserved for a real boundary — a sheet or an overlay, the two places a raised
+  // surface still earns its edge.
+  surface: '#FFFFFF',
+  // "Sunk": received bubbles and inset fills.
+  surfaceAlt: '#F2F1EC',
+  card: '#FBFBF9',
+  border: '#E4E3DE',
+  divider: '#EDECE7',
 
-  text: '#141a24',
-  textDim: '#6b7688',
-  textFaint: '#98a1b0',
-  onAccent: '#ffffff',
-  // The accent stays dark blue in light mode, so this remains a light tint.
+  text: '#17171A',
+  textDim: '#6E6E76',
+  textFaint: '#8E8D95',
+  // This accent is dark, so it takes white — the inverse of the dark palette's, and
+  // the reason this is a per-palette token rather than a constant.
+  onAccent: '#FFFFFF',
   onAccentDim: 'rgba(255,255,255,0.78)',
 
-  accent: '#334155',
-  accentSoft: '#EDF0F4',
+  accent: '#4C3FE0',
+  accentSoft: 'rgba(76,63,224,0.10)',
+  accentQuiet: '#4C3FE0',
 
-  ok: '#059669',
-  warn: '#b45309',
-  error: '#dc2626',
-  purple: '#7c3aed',
-  amber: '#b45309',
-  neutral: '#64748b',
+  ok: '#0F7B54',
+  warn: '#A8620E',
+  error: '#B42318',
+  purple: '#6D4AE0',
+  amber: '#A8620E',
+  neutral: '#8E8D95',
+  separator: '#C6C5BE',
 
-  bubbleOut: '#334155',
-  bubbleOutText: '#ffffff',
-  // White on the page's off-white ground, separated by a hairline rather than a fill:
-  // a grey bubble against a grey thread makes every incoming message look muted, which
-  // is the wrong emphasis for the half of the conversation you did not write.
-  bubbleIn: '#ffffff',
-  bubbleInText: '#141a24',
-  bubbleMeta: 'rgba(15,23,42,0.55)',
+  // Identical to dark, deliberately: "mine" is the one thing that must not change
+  // meaning between the two modes.
+  bubbleOut: '#4C3FE0',
+  bubbleOutText: '#FFFFFF',
+  // The sunk grey, filled rather than outlined. A white bubble on an off-white page
+  // needed a border to exist at all, and that border was one more box.
+  bubbleIn: '#F2F1EC',
+  bubbleInText: '#17171A',
+  bubbleMeta: 'rgba(23,23,26,0.55)',
+  bubbleOutMeta: 'rgba(255,255,255,0.72)',
 
-  bannerFrom: 'rgba(22,104,227,0.08)',
-  bannerTo: 'rgba(126,34,206,0.06)',
+  bannerFrom: 'rgba(76,63,224,0.07)',
+  bannerTo: 'rgba(76,63,224,0.02)',
 
-  gradient: ['#0F172A', '#334155', '#64748B'],
-  tileBlue: '#DBEAFE',
+  gradient: ['#4C3FE0', '#4C3FE0', '#4C3FE0'],
+  tileBlue: 'rgba(37,99,235,0.10)',
   tileBlueFg: '#2563EB',
-  tileGreen: '#DCFCE7',
-  tileGreenFg: '#16A34A',
-  tilePurple: '#EDE9FE',
-  tilePurpleFg: '#7C3AED',
-  tileAmber: '#FEF3C7',
-  tileAmberFg: '#D97706',
-  glow: '#EEF2FF',
+  tileGreen: 'rgba(15,123,84,0.10)',
+  tileGreenFg: '#0F7B54',
+  tilePurple: 'rgba(76,63,224,0.10)',
+  tilePurpleFg: '#4C3FE0',
+  tileAmber: 'rgba(168,98,14,0.10)',
+  tileAmberFg: '#A8620E',
+  glow: 'rgba(76,63,224,0.08)',
 };
 
 export type ThemeMode = 'system' | 'light' | 'dark';
@@ -285,12 +330,32 @@ export const spacing = {
 };
 
 export const radius = {
+  /** The tail corner of a bubble, and nothing else. */
   sm: 6,
   md: 10,
   lg: 14,
-  xl: 20,
-  /** Fully rounded, for chips and status pills. */
+  /** Bubbles. */
+  xl: 19,
+  /** Fully rounded, for chips, pills and every action button. */
   pill: 999,
+};
+
+/**
+ * The monospace face.
+ *
+ * Mono is a semantic choice here, not a decorative one: it is reserved for things that
+ * are a MEASUREMENT — dBm, MTU, byte counts, pairing codes, clock times. Those want
+ * tabular figures so a column of them aligns and stops jittering as it updates, and the
+ * change of face is what tells you at a glance that a value is measured rather than
+ * written.
+ *
+ * The interface face is deliberately left unset, so text renders in the platform's own
+ * UI font. The design calls for Geist, which would mean adding a font package — a change
+ * outside this app's folder. Every role below routes through this module, so adopting it
+ * later is a one-file edit rather than a sweep.
+ */
+export const fonts = {
+  mono: Platform.select({ios: 'Menlo', android: 'monospace', default: 'monospace'}),
 };
 
 /**
@@ -298,43 +363,67 @@ export const radius = {
  *
  * One scale, applied everywhere, is most of what separates a designed screen from an
  * assembled one — sizes chosen per component drift apart and the hierarchy stops reading.
+ *
+ * Two rules run through it. Weight tops out at 500 except on `display`: heavy weight with
+ * tight tracking was doing the shouting, and hierarchy reads better from size and colour.
+ * And prose never goes below 13 — `caption` used to be 12, which put supporting text one
+ * step below comfortable on a screen that is mostly supporting text. Only the mono roles
+ * go smaller, because a measurement is scanned rather than read.
+ *
  * Line heights are deliberately generous; `AppText` caps the font-scale multiplier rather
  * than pinning line height, so these still reflow when the system font is enlarged.
  */
 export const typography = {
-  display: {fontSize: 28, fontWeight: '700' as const, letterSpacing: -0.5},
-  title: {fontSize: 20, fontWeight: '700' as const, letterSpacing: -0.3},
-  headline: {fontSize: 16, fontWeight: '600' as const, letterSpacing: -0.2},
-  body: {fontSize: 15, fontWeight: '400' as const},
+  display: {fontSize: 30, fontWeight: '600' as const, letterSpacing: -1},
+  title: {fontSize: 21, fontWeight: '500' as const, letterSpacing: -0.4},
+  /** A person's name in a row or a header. */
+  headline: {fontSize: 16, fontWeight: '500' as const},
+  body: {fontSize: 15, fontWeight: '400' as const, lineHeight: 22},
   callout: {fontSize: 13, fontWeight: '500' as const},
-  caption: {fontSize: 12, fontWeight: '400' as const},
+  /** Secondary prose. The floor for anything that is read rather than scanned. */
+  caption: {fontSize: 13, fontWeight: '400' as const},
   /** Section headers and other all-caps labels. */
   overline: {
     fontSize: 11,
-    fontWeight: '700' as const,
-    letterSpacing: 0.8,
+    fontWeight: '500' as const,
+    letterSpacing: 1,
     textTransform: 'uppercase' as const,
   },
+
+  // ---- measurements ------------------------------------------------------------
+  /** The default for a measured value shown beside prose. */
+  mono: {fontFamily: fonts.mono, fontSize: 13, fontWeight: '400' as const},
+  /** Inside a dense row, where the value trails a status word. */
+  monoSmall: {fontFamily: fonts.mono, fontSize: 12, fontWeight: '400' as const},
+  /** Clock times, step counters, and other position markers. */
+  monoTiny: {fontFamily: fonts.mono, fontSize: 11, fontWeight: '400' as const},
+
   /** Figures that should not jitter as they count up. */
-  numeric: {fontSize: 22, fontWeight: '700' as const, letterSpacing: -0.5},
+  numeric: {fontFamily: fonts.mono, fontSize: 22, fontWeight: '500' as const, letterSpacing: -0.5},
 };
 
 /**
  * Elevation.
  *
- * Restrained on purpose: a border plus a barely-there shadow reads as a considered
- * surface, where a heavy drop shadow reads as a demo. Android needs `elevation`, iOS the
- * shadow properties, so both are set.
+ * Level 1 is now nothing at all. A shadow is a claim that something floats, and almost
+ * nothing in this app does: rows, sections and helper text sit on the page and are
+ * separated by space and a hairline. Leaving the function in place — rather than deleting
+ * the call sites — keeps that decision in one spot, so it can be revisited without
+ * hunting for it.
+ *
+ * Level 2 survives for the things that genuinely float: a sheet, a menu, the marker
+ * pinned over a bubble. Android needs `elevation`, iOS the shadow properties, so both
+ * are set.
  */
 export function elevation(theme: Theme, level: 0 | 1 | 2 = 1) {
-  if (level === 0) {
+  if (level !== 2) {
     return {};
   }
   return {
     shadowColor: '#000',
-    shadowOpacity: theme.isDark ? 0.32 : 0.06,
-    shadowRadius: level === 1 ? 8 : 16,
-    shadowOffset: {width: 0, height: level === 1 ? 2 : 6},
-    elevation: level === 1 ? 2 : 6,
+    shadowOpacity: theme.isDark ? 0.4 : 0.14,
+    shadowRadius: 16,
+    shadowOffset: {width: 0, height: 6},
+    elevation: 6,
   };
 }

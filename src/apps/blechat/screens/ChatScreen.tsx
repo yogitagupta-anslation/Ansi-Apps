@@ -21,6 +21,7 @@ import {
   LABELS as LINK_STATE_LABELS,
 } from '../components/ConnectionIndicator';
 import {GroupAvatar, InitialAvatar, SignalBars} from '../components/ui/Primitives';
+import {MascotAvatar} from '../components/ui/Mascot';
 import {MessageBubble} from '../components/MessageBubble';
 import {MessageInput} from '../components/MessageInput';
 import {Screen} from '../components/ui/Screen';
@@ -30,7 +31,7 @@ import {FadeIn, SendIn, Touchable} from '../components/Motion';
 import {Icon} from '../components/ui/Icon';
 import {describeFailure} from '../ble/LinkErrors';
 import {qualityLabel} from '../peers/LinkMetrics';
-import {elevation, radius, spacing, speakerTint, typography} from '../config/theme';
+import {avatarHue, elevation, radius, spacing, speakerTint, typography} from '../config/theme';
 import {makeStyles, useTheme} from '../theme/ThemeProvider';
 import {bleChat} from '../services/BleChatService';
 import {useAppStore, useMessages} from '../state/appStore';
@@ -459,11 +460,10 @@ export function ChatScreen({route, navigation}: RootStackScreenProps<'Chat'>) {
           {isGroup ? (
             <GroupAvatar size={40} online={reachableMembers > 0} />
           ) : (
-            <InitialAvatar
-              name={peer?.displayName ?? displayName}
-              seed={peer?.peerId ?? displayName}
-              size={40}
-              online={connected}
+            <MascotAvatar
+              size={34}
+              tint={avatarHue(theme, peer?.peerId ?? displayName).fg}
+              status={connected ? theme.ok : null}
             />
           )}
           <View style={styles.headerText}>
@@ -842,18 +842,18 @@ function GroupMembersSheet({
 const useStyles = makeStyles(t => ({
   safe: {flex: 1, backgroundColor: t.bg},
   flex: {flex: 1},
-  // Surface-coloured, with a hairline under it: the header is the one piece of chrome
-  // left above the thread, so it separates itself by being a different plane rather
-  // than by stacking more strips.
+  // On the page, with a hairline under it. It used to be a second plane in `surface`,
+  // which made the top of every thread a slab of a different colour before a single
+  // message; the hairline alone does the separating now.
   header: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 11,
+    gap: 12,
     paddingLeft: spacing.md,
     paddingRight: spacing.lg,
-    paddingTop: spacing.sm,
-    paddingBottom: spacing.md,
-    backgroundColor: t.surface,
+    paddingTop: 10,
+    paddingBottom: 14,
+    backgroundColor: t.bg,
     borderBottomWidth: 1,
     borderBottomColor: t.divider,
   },
@@ -861,16 +861,10 @@ const useStyles = makeStyles(t => ({
   headerIdentity: {flex: 1, flexDirection: 'row', alignItems: 'center', gap: 11},
   headerText: {flex: 1, minWidth: 0},
   headerNameRow: {flexDirection: 'row', alignItems: 'center', gap: 5},
-  headerName: {
-    fontSize: 17,
-    fontWeight: '700',
-    letterSpacing: -0.2,
-    color: t.text,
-    flexShrink: 1,
-  },
-  headerMetaRow: {flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 1},
-  headerMeta: {...typography.caption, color: t.textDim, fontSize: 11, flexShrink: 1},
-  headerState: {fontWeight: '700'},
+  headerName: {...typography.headline, color: t.text, flexShrink: 1},
+  headerMetaRow: {flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 2},
+  headerMeta: {...typography.caption, color: t.textDim, fontSize: 12, flexShrink: 1},
+  headerState: {fontWeight: '400'},
   headerWarn: {
     width: 32,
     height: 32,
