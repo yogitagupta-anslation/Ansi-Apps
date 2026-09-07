@@ -50,6 +50,7 @@ import type {Peer, PeerIdentity, SignalStrength} from '../types/Peer';
 import {EventBus} from '../utils/EventBus';
 import {logger} from '../utils/logger';
 import {sanitiseInterests} from '../config/interests';
+import {sanitiseLanguages} from '../config/languages';
 import {shortId} from '../utils/id';
 import {makeFailure, toLinkFailure} from '../utils/linkFailure';
 
@@ -112,6 +113,7 @@ interface Negotiated {
   publicKey: string;
   /** Sanitised: the peer chose these bytes, so they are bounded before we keep them. */
   interests: string[];
+  languages: string[];
 }
 
 /**
@@ -157,6 +159,7 @@ function blankPeer(linkId: LinkId, state: LinkState): Peer {
     peerIdPrefix: null,
     displayName: null,
     interests: [],
+    languages: [],
     linkId,
     role: isCentralLink(linkId) ? 'central' : 'peripheral',
     state,
@@ -225,6 +228,7 @@ export class PeerManager implements PeerRouteResolver {
    * reaches the next peer you meet without restarting anything.
    */
   private interestsProvider: () => string[] = () => [];
+  private languagesProvider: () => string[] = () => [];
 
   /**
    * Links we tore down ourselves because a better link to the same peer already exists.
@@ -283,6 +287,7 @@ export class PeerManager implements PeerRouteResolver {
       displayName: string;
       lastSeen: number;
       interests?: string[];
+      languages?: string[];
       connectCount?: number;
       firstSeen?: number;
       lastConnected?: number;
@@ -298,6 +303,7 @@ export class PeerManager implements PeerRouteResolver {
         peerId: entry.peerId,
         peerIdPrefix: entry.peerId.slice(0, 16),
         interests: entry.interests ?? [],
+        languages: entry.languages ?? [],
         attempts: 0,
         failures: 0,
         reconnectAttempt: 0,
@@ -390,6 +396,10 @@ export class PeerManager implements PeerRouteResolver {
 
   setCapabilitiesProvider(provider: () => Capabilities): void {
     this.capabilitiesProvider = provider;
+  }
+
+  setLanguagesProvider(provider: () => string[]): void {
+    this.languagesProvider = provider;
   }
 
   setInterestsProvider(provider: () => string[]): void {
@@ -691,7 +701,11 @@ export class PeerManager implements PeerRouteResolver {
     // The side that dialled speaks first.
     if (role === 'central') {
       const hello = buildHello(
-        {...this.identity, interests: this.interestsProvider()},
+        {
+          ...this.identity,
+          interests: this.interestsProvider(),
+          languages: this.languagesProvider(),
+        },
         this.capabilitiesProvider(),
         session.ourChallenge,
         ephemeralPublicKeyToHex(session.ephemeral.publicKey),
@@ -957,7 +971,11 @@ export class PeerManager implements PeerRouteResolver {
     );
 
     const ack = buildHelloAck(
-      {...this.identity, interests: this.interestsProvider()},
+      {
+          ...this.identity,
+          interests: this.interestsProvider(),
+          languages: this.languagesProvider(),
+        },
       payload.peerId,
       this.capabilitiesProvider(),
       negotiated.protocolVersion,
@@ -1220,6 +1238,7 @@ export class PeerManager implements PeerRouteResolver {
       publicKey?: string;
       challenge?: string;
       interests?: string[];
+      languages?: string[];
     },
   ): Negotiated | null {
     // Checked before anything else: refusing a blocked identity is cheaper than
@@ -1299,6 +1318,7 @@ export class PeerManager implements PeerRouteResolver {
       protocolVersion: outcome.agreed,
       capabilities: remoteCaps,
       agreed,
+      languages: sanitiseLanguages(payload.languages),
       compatibilityNote:
         outcome.verdict === 'exact' ? null : outcome.explanation,
       publicKey: publicKeyHex,
@@ -1378,6 +1398,7 @@ export class PeerManager implements PeerRouteResolver {
       peerIdPrefix: info.peerId.slice(0, 16),
       displayName: info.displayName,
       interests: info.interests,
+      languages: info.languages,
       linkId: session.linkId,
       role: session.role,
       state: 'connected',

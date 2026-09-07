@@ -21,7 +21,8 @@ import {NearbyScreen} from '../screens/NearbyScreen';
 import {NewGroupScreen} from '../screens/NewGroupScreen';
 import {RegisterScreen} from '../screens/RegisterScreen';
 import {SettingsScreen} from '../screens/SettingsScreen';
-import {YouScreen} from '../screens/YouScreen';
+import {ProfileScreen} from '../screens/ProfileScreen';
+import {ChipPickerScreen} from '../screens/ChipPickerScreen';
 import type {RootStackParamList, TabParamList} from './types';
 import {useAppStore} from '../state/appStore';
 
@@ -183,7 +184,7 @@ function Tabs() {
       />
       <Tab.Screen
         name="You"
-        component={YouScreen}
+        component={ProfileScreen}
         options={{
           tabBarLabel: ({focused}) => (
             <TabItem icon="tabYou" title="You" focused={focused} />
@@ -218,6 +219,16 @@ export function AppNavigator() {
           name="Tabs"
           component={Tabs}
           options={{headerShown: false}}
+        />
+        <Stack.Screen
+          name="InterestPicker"
+          component={ChipPickerScreen}
+          options={{headerShown: false, animation: 'slide_from_right'}}
+        />
+        <Stack.Screen
+          name="LanguagePicker"
+          component={ChipPickerScreen}
+          options={{headerShown: false, animation: 'slide_from_right'}}
         />
         <Stack.Screen
           name="Debug"

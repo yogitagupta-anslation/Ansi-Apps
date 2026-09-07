@@ -274,6 +274,7 @@ class BleChatService {
     // actual negotiated MTU are reflected rather than assumed.
     this.peerManager.setCapabilitiesProvider(() => this.currentCapabilities());
     this.peerManager.setInterestsProvider(() => this.settings.interests);
+    this.peerManager.setLanguagesProvider(() => this.settings.languages);
     this.peerManager.setQueuedCountProvider(peerId =>
       this.messages.queue.countFor(peerId),
     );
@@ -806,6 +807,29 @@ class BleChatService {
 
   getLinkStatus(): SchedulerSnapshot {
     return this.scheduler.snapshot();
+  }
+
+  /**
+   * Delete this phone's identity and everything derived from it.
+   *
+   * There is no account, so "log out" has to mean this: the Ed25519 key IS who you are,
+   * and conversations, verifications, the outbox and the at-rest key are all downstream
+   * of it. Nothing is stored anywhere else, so nothing survives and nothing can be
+   * restored — which is why the sheet that calls this says so twice before it does.
+   *
+   * The radio is stopped first, deliberately. Wiping the identity out from under a live
+   * handshake would leave the other phone talking to a peer that no longer exists, and
+   * the next `init` would advertise a new identity on a link opened by the old one.
+   */
+  async eraseIdentity(): Promise<void> {
+    logger.warn(TAG, 'erasing identity and all local state');
+    await this.shutdown();
+    // Every key this app writes lives under the same prefix, including the wrapped
+    // at-rest key and the app-lock hash — so this is the whole of it, not the parts
+    // somebody remembered to list.
+    await storage.clearAll();
+    // Straight back up on a fresh identity rather than leaving a dead shell on screen.
+    await this.init();
   }
 
   async shutdown(): Promise<void> {

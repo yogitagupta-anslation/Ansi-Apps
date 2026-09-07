@@ -4,6 +4,7 @@ import {
   PROTOCOL_VERSION,
 } from '../config/constants';
 import {sanitiseInterests} from '../config/interests';
+import {sanitiseLanguages} from '../config/languages';
 import type {Capabilities} from './Negotiation';
 import type {
   AckPayload,
@@ -75,6 +76,7 @@ export function buildHello(
     displayName: string;
     publicKey: string;
     interests?: string[];
+    languages?: string[];
   },
   capabilities: Capabilities,
   challenge: string,
@@ -98,6 +100,7 @@ export function buildHello(
       // have been fragmented across the air, and past the reassembly caps it stalls the
       // handshake entirely. Capping here means we can never do that to a peer.
       interests: sanitiseInterests(self.interests),
+      languages: sanitiseLanguages(self.languages),
       capabilities: {...capabilities},
       ephemeralKey,
     },
@@ -110,6 +113,7 @@ export function buildHelloAck(
     displayName: string;
     publicKey: string;
     interests?: string[];
+    languages?: string[];
   },
   destinationId: string,
   capabilities: Capabilities,
@@ -135,6 +139,7 @@ export function buildHelloAck(
       signature,
       displayName: self.displayName,
       interests: sanitiseInterests(self.interests),
+      languages: sanitiseLanguages(self.languages),
       capabilities: {...capabilities},
       ephemeralKey,
     },
