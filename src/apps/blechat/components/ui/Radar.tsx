@@ -84,6 +84,11 @@ export function Radar({
           ...blip,
           x: centre + r * Math.cos(a),
           y: centre + r * Math.sin(a),
+          // Labels sit to the right of their blip by default, which runs them off the
+          // dial — and off the screen — for anything near the right rim. Past the
+          // midline they flip to the left instead, so the text stays inside the radar
+          // whatever the signal happens to be.
+          flip: centre + r * Math.cos(a) > centre,
           tone:
             blip.rssi === null
               ? theme.textFaint
@@ -153,7 +158,12 @@ export function Radar({
           <Touchable scale={false} onPress={blip.onPress} hitSlop={10}>
             <View style={[styles.blip, {backgroundColor: blip.tone}]} />
           </Touchable>
-          <View style={[styles.label, {backgroundColor: theme.surface, borderColor: theme.border}]}>
+          <View
+            style={[
+              styles.label,
+              blip.flip ? styles.labelLeft : styles.labelRight,
+              {backgroundColor: theme.surface, borderColor: theme.border},
+            ]}>
             <AppText style={styles.labelName} numberOfLines={1} maxFontSizeMultiplier={1}>
               {blip.name}
             </AppText>
@@ -190,7 +200,6 @@ const useStyles = makeStyles(t => ({
   blip: {width: 12, height: 12, borderRadius: 6, borderWidth: 2, borderColor: t.bg},
   label: {
     position: 'absolute',
-    left: 18,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
@@ -199,6 +208,16 @@ const useStyles = makeStyles(t => ({
     paddingHorizontal: 7,
     paddingVertical: 2,
   },
-  labelName: {...typography.caption, color: t.text, fontWeight: '700', fontSize: 11},
+  labelRight: {left: 18},
+  labelLeft: {right: 18, flexDirection: 'row-reverse'},
+  // Capped so a long name cannot push the pill back out over the rim it was just
+  // moved away from.
+  labelName: {
+    ...typography.caption,
+    color: t.text,
+    fontWeight: '700',
+    fontSize: 11,
+    maxWidth: 88,
+  },
   labelRssi: {...typography.caption, color: t.textFaint, fontSize: 10},
 }));

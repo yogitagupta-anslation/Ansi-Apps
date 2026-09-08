@@ -1,20 +1,23 @@
 /**
- * The frame every hosted app runs inside.
+ * The frame every hosted app runs inside — the session.
  *
- * Three apps, three complete UIs, none of which was written to share a screen
- * with anything. So the frame takes the one strip of space nobody was using — the
- * band under the status bar — and puts the way out there, rather than floating a
- * button over content it cannot see.
+ * Five apps, five complete UIs, none of which was written to share a screen with anything
+ * else. So the frame takes the one strip of space nobody was using — the band under the
+ * status bar — and puts the way out there, rather than floating a button over content it
+ * cannot see.
  *
- * The inset override underneath is the part that makes that safe. Every screen in
- * all three apps pads its own top by `useSafeAreaInsets().top`; with a strip
- * already sitting in that space they would each pad past it and leave a second
- * gap. Handing the subtree a top inset of zero says, truthfully, that the unsafe
- * area above is already dealt with.
+ * The inset override underneath is the part that makes that safe. Every screen in all five
+ * apps pads its own top by `useSafeAreaInsets().top`; with a strip already sitting in that
+ * space they would each pad past it and leave a second gap. Handing the subtree a top
+ * inset of zero says, truthfully, that the unsafe area above is already dealt with.
  *
- * Android's hardware back is not wired here: the root stack already pops to the
- * hub once the app's own nested navigator has nothing left to go back to, which
- * is exactly the behaviour you want and costs nothing to get.
+ * This is also the third and last place an app's accent is allowed to appear. The strip
+ * wears it so the session reads as belonging to the app you launched rather than to the
+ * launcher you left.
+ *
+ * Android's hardware back is not wired here: the root stack already pops to the hub once
+ * the app's own nested navigator has nothing left to go back to, which is exactly the
+ * behaviour you want and costs nothing to get.
  */
 
 import React, { Suspense, useMemo } from 'react';
@@ -23,7 +26,8 @@ import { SafeAreaInsetsContext, useSafeAreaInsets } from 'react-native-safe-area
 
 import { Press } from '../hub/components/Press';
 import type { HubApp } from '../hub/registry';
-import { space, useHubTheme } from '../hub/theme';
+import { ChevronLeftIcon } from '../hub/store/icons';
+import { radius, space, type as t, useHubTheme } from '../hub/theme';
 
 interface AppFrameProps {
   app: HubApp;
@@ -58,13 +62,13 @@ export function AppFrame({ app, onExit, children }: AppFrameProps): React.ReactE
             accessibilityLabel="Back to App Hub"
             style={styles.back}
           >
-            <Text style={[styles.chevron, { color: theme.textDim }]}>‹</Text>
-            <Text style={[styles.backLabel, { color: theme.textDim }]}>App Hub</Text>
+            <ChevronLeftIcon size={18} color={theme.textDim} />
+            <Text style={[t.meta, { color: theme.textDim }]}>App Hub</Text>
           </Press>
 
-          <View style={styles.appTag}>
-            <Text style={styles.appIcon}>{app.icon}</Text>
-            <Text style={[styles.appName, { color: app.accent }]} numberOfLines={1}>
+          <View style={[styles.tag, { backgroundColor: app.accentSoft }]}>
+            <View style={[styles.dot, { backgroundColor: app.accent }]} />
+            <Text style={[t.badge, { color: app.accent }]} numberOfLines={1}>
               {app.name}
             </Text>
           </View>
@@ -73,7 +77,7 @@ export function AppFrame({ app, onExit, children }: AppFrameProps): React.ReactE
 
       <SafeAreaInsetsContext.Provider value={childInsets}>
         <View style={styles.body}>
-          <Suspense fallback={<Booting accent={app.accent} name={app.name} />}>{children}</Suspense>
+          <Suspense fallback={<Booting app={app} />}>{children}</Suspense>
         </View>
       </SafeAreaInsetsContext.Provider>
     </View>
@@ -85,12 +89,12 @@ export function AppFrame({ app, onExit, children }: AppFrameProps): React.ReactE
  * code-split, so on a cold launch there is a real moment here — better a named
  * spinner than a blank rectangle.
  */
-function Booting({ accent, name }: { accent: string; name: string }): React.ReactElement {
+function Booting({ app }: { app: HubApp }): React.ReactElement {
   const theme = useHubTheme();
   return (
     <View style={[styles.booting, { backgroundColor: theme.bg }]}>
-      <ActivityIndicator size="large" color={accent} />
-      <Text style={[styles.bootingLabel, { color: theme.textDim }]}>Starting {name}…</Text>
+      <ActivityIndicator size="large" color={app.accent} />
+      <Text style={[t.body, { color: theme.textDim }]}>Starting {app.name}…</Text>
     </View>
   );
 }
@@ -99,20 +103,23 @@ const styles = StyleSheet.create({
   root: { flex: 1 },
   strip: { borderBottomWidth: StyleSheet.hairlineWidth },
   stripRow: {
-    height: 40,
+    height: 42,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: space.md,
   },
-  back: { flexDirection: 'row', alignItems: 'center', gap: space.xs, paddingRight: space.sm },
-  // Nudged up because the glyph's own bearing sits it low in the line box.
-  chevron: { fontSize: 22, fontWeight: '600', marginTop: -3 },
-  backLabel: { fontSize: 14, fontWeight: '600' },
-  appTag: { flexDirection: 'row', alignItems: 'center', gap: space.xs, maxWidth: '55%' },
-  appIcon: { fontSize: 13 },
-  appName: { fontSize: 13, fontWeight: '700' },
+  back: { flexDirection: 'row', alignItems: 'center', gap: 2, paddingRight: space.sm },
+  tag: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    maxWidth: '55%',
+    borderRadius: radius.pill,
+    paddingVertical: 4,
+    paddingHorizontal: 10,
+  },
+  dot: { width: 6, height: 6, borderRadius: 3 },
   body: { flex: 1 },
   booting: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: space.md },
-  bootingLabel: { fontSize: 14 },
 });
