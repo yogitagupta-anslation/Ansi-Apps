@@ -82,6 +82,24 @@ function reasonFromBleErrorCode(code: BleErrorCode): LinkFailureReason | null {
 }
 
 /**
+ * The Android GATT client refused to START the operation.
+ *
+ * `BluetoothGatt` allows one operation at a time and clears its busy flag from the
+ * completion callback. An operation issued in the same tick as the previous one's
+ * completion is rejected outright — writeCharacteristic returns false, ble-plx reports
+ * OperationStartFailed, and the failure comes back in zero milliseconds without any
+ * radio traffic. It says nothing about the peer or the link, and the same call succeeds
+ * a moment later, which is exactly what makes it worth retrying rather than reporting.
+ */
+export function isGattBusy(err: unknown): boolean {
+  if (err instanceof BleError && err.errorCode === BleErrorCode.OperationStartFailed) {
+    return true;
+  }
+  const message = (err instanceof Error ? err.message : String(err)).toLowerCase();
+  return message.includes('operation was rejected');
+}
+
+/**
  * Spot Android's GATT_ERROR (133).
  *
  * It has to be checked before the generic code mapping, because ble-plx surfaces it as a

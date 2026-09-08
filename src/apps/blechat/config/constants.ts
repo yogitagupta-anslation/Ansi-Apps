@@ -176,6 +176,41 @@ export const CONNECT_RETRY_MAX_DELAY_MS = 4_000;
 export const CONNECT_TEARDOWN_SETTLE_MS = 250;
 
 /**
+ * How long to let the GATT client settle after subscribing, before writing to it.
+ *
+ * Enabling notifications writes the CCCD, and the handshake's first write went out in
+ * the same millisecond that write completed — which Android refuses, because its busy
+ * flag is cleared from the completion callback rather than before it. A short pause
+ * turns a guaranteed first-attempt failure into a clean one.
+ */
+export const NOTIFY_SETTLE_MS = 180;
+
+/**
+ * Android refuses a sixth scan start inside thirty seconds.
+ *
+ * The limit is the platform's, not a guess: `startScan` fails with "Cannot start
+ * scanning operation" and the app is left not scanning at all. Pausing the scan around
+ * every connection makes it easy to reach — a handful of connect attempts is enough —
+ * and the failure looks to the user like the app has simply stopped finding anybody.
+ */
+export const SCAN_STARTS_PER_WINDOW = 5;
+export const SCAN_START_WINDOW_MS = 30_000;
+/** A little past the window edge, so a deferred start is not refused by a millisecond. */
+export const SCAN_START_MARGIN_MS = 750;
+
+/** Backoff between retries of a write the GATT client refused to start. */
+export const GATT_BUSY_RETRY_MS = 70;
+
+/**
+ * How many times to re-offer a refused write.
+ *
+ * Generous, because each wait is short and the alternative is dropping a frame that the
+ * radio never saw. A peer that is genuinely gone fails elsewhere — on the disconnect,
+ * not here.
+ */
+export const GATT_BUSY_MAX_RETRIES = 6;
+
+/**
  * How long the radio stays off scanning after a link comes up.
  *
  * The handshake's first write happens in the moment right after a connection is

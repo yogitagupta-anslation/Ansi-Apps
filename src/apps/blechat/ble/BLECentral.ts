@@ -24,10 +24,16 @@ import type {
   GattDiagnostics,
   LinkState,
 } from '../types/BLE';
-import {BleLinkError, classifyBleError} from './LinkErrors';
+import {BleLinkError, classifyBleError, isGattBusy} from './LinkErrors';
 import {withConnectRetry} from './ConnectRetry';
 import {
   CONNECT_TEARDOWN_SETTLE_MS,
+  SCAN_STARTS_PER_WINDOW,
+  SCAN_START_MARGIN_MS,
+  SCAN_START_WINDOW_MS,
+  GATT_BUSY_MAX_RETRIES,
+  GATT_BUSY_RETRY_MS,
+  NOTIFY_SETTLE_MS,
   POST_CONNECT_SCAN_QUIET_MS,
 } from '../config/constants';
 import {base64ToBytes, bytesToHex} from '../utils/bytes';
@@ -45,6 +51,16 @@ import {
 } from './ScanDutyCycle';
 
 const TAG = 'Central';
+
+/** The platform's own words when the scan-start budget is spent. */
+function isScanRateLimited(error: {message?: string} | null): boolean {
+  const text = (error?.message ?? '').toLowerCase();
+  return (
+    text.includes('cannot start scanning') ||
+    text.includes('scanning too frequently') ||
+    text.includes('registration failed')
+  );
+}
 
 type CentralEvents = {
   bluetoothState: BluetoothState;
@@ -97,6 +113,15 @@ export class BLECentral {
    * finishes.
    */
   private scanHolds = new Map<string, ReturnType<typeof setTimeout> | null>();
+  /**
+   * When each scan was actually started, for the last half-minute.
+   *
+   * Android counts starts, not scanning time, and refuses the sixth in any thirty second
+   * window. Pausing for every connection spends them quickly, so they are budgeted here
+   * rather than discovered by a failure.
+   */
+  private scanStarts: number[] = [];
+  private deferredScan: ReturnType<typeof setTimeout> | null = null;
   private intensity: ScanIntensity = 'balanced';
   /**
    * Paces the radio. Without it the scan ran continuously in the most power-hungry mode
@@ -203,11 +228,39 @@ export class BLECentral {
     return this.duty.telemetry();
   }
 
+  /** How long until Android would accept another scan start, 0 when one is free. */
+  private msUntilScanAllowed(): number {
+    const now = Date.now();
+    this.scanStarts = this.scanStarts.filter(t => now - t < SCAN_START_WINDOW_MS);
+    if (this.scanStarts.length < SCAN_STARTS_PER_WINDOW) {
+      return 0;
+    }
+    const oldest = this.scanStarts[0];
+    return SCAN_START_WINDOW_MS - (now - oldest) + SCAN_START_MARGIN_MS;
+  }
+
   /** One burst of real scanning. Driven by the duty cycler, never called directly. */
   private beginRadioScan(lowPower: boolean): void {
     if (!this.manager) {
       return;
     }
+    // Spend a start only if the platform will accept one; otherwise wait for the window
+    // to roll rather than burning the attempt on a refusal.
+    const wait = this.msUntilScanAllowed();
+    if (wait > 0) {
+      if (this.deferredScan) {
+        return;
+      }
+      logger.info(TAG, `scan start budget spent; waiting ${wait}ms for the window`);
+      this.deferredScan = setTimeout(() => {
+        this.deferredScan = null;
+        if (this.scanning) {
+          this.beginRadioScan(lowPower);
+        }
+      }, wait);
+      return;
+    }
+    this.scanStarts.push(Date.now());
     this.manager.startDeviceScan(
       // Unfiltered: the Nearby screen lists every BLE device in range, not only chat
       // peers. Chat peers are identified by parseAdvertisement instead, which checks for
@@ -219,7 +272,27 @@ export class BLECentral {
       },
       (error, device) => {
         if (error) {
-          // A scan error ends the whole cycle: continuing to pace a radio that is
+          /**
+           * Being rate-limited is not a broken radio.
+           *
+           * Tearing the whole cycle down here left the app not scanning until the user
+           * went and asked again, for a condition that clears itself in seconds. The
+           * budget above should prevent this, but the count is per app and survives a
+           * restart, so it can still be met on the way in — and the right answer is to
+           * wait, not to stop.
+           */
+          if (isScanRateLimited(error)) {
+            logger.warn(TAG, 'scan refused: too many starts recently, waiting it out');
+            // Treat the window as full, so the next start is deferred rather than tried.
+            const now = Date.now();
+            this.scanStarts = Array.from(
+              {length: SCAN_STARTS_PER_WINDOW},
+              (_, i) => now - i,
+            );
+            this.beginRadioScan(lowPower);
+            return;
+          }
+          // Any other scan error ends the cycle: continuing to pace a radio that is
           // refusing to scan would hide the failure behind the rest periods.
           this.scanning = false;
           this.duty.stop();
@@ -511,6 +584,16 @@ export class BLECentral {
           this.bus.emit('data', {linkId, base64: characteristic.value});
         }
       });
+      /**
+       * Let the subscription settle before anything writes.
+       *
+       * `monitor()` writes the CCCD, and Android clears its one-operation-at-a-time
+       * busy flag from that write's completion callback. The handshake's first write
+       * landed in the same millisecond and was refused outright — start failure, zero
+       * milliseconds, no radio traffic. A pause here costs a fraction of a second once
+       * per connection and removes a failure that happened every single time.
+       */
+      await delay(NOTIFY_SETTLE_MS);
       gatt.notificationsEnabled = true;
       logger.info(TAG, `${linkId}: notifications enabled`);
 
@@ -577,14 +660,47 @@ export class BLECentral {
     if (!link) {
       throw new Error(`No central link ${linkId}`);
     }
-    // Write-with-response gives per-frame flow control from the peripheral, which keeps
-    // fragment ordering intact. Write-without-response is faster but can outrun the
-    // remote stack and silently drop frames — so it is used only when the remote
-    // characteristic does not accept the safer one.
-    if (link.writeMode === 'withResponse') {
-      await link.rx.writeWithResponse(base64);
-    } else {
-      await link.rx.writeWithoutResponse(base64);
+    /**
+     * Re-offer a write the GATT client refused to start.
+     *
+     * Not a retry of a failed transmission — the radio never saw it. Android rejects an
+     * operation issued while its client is still busy with the previous one, and clears
+     * that flag from the previous operation's completion callback, so back-to-back
+     * writes race it by a millisecond. Fragments of one message go out back to back,
+     * which is exactly the pattern that hits it.
+     *
+     * Anything that is NOT that condition is thrown on untouched, so a real failure
+     * still reads as a real failure.
+     */
+    for (let attempt = 0; ; attempt++) {
+      try {
+        // Write-with-response gives per-frame flow control from the peripheral, which
+        // keeps fragment ordering intact. Write-without-response is faster but can
+        // outrun the remote stack and silently drop frames — so it is used only when
+        // the remote characteristic does not accept the safer one.
+        if (link.writeMode === 'withResponse') {
+          await link.rx.writeWithResponse(base64);
+        } else {
+          await link.rx.writeWithoutResponse(base64);
+        }
+        return;
+      } catch (err) {
+        if (!isGattBusy(err) || attempt >= GATT_BUSY_MAX_RETRIES) {
+          throw err;
+        }
+        // Still connected? A busy client on a link that has since dropped is a
+        // disconnect, and waiting on it would only delay the real answer.
+        if (!this.links.has(linkId)) {
+          throw err;
+        }
+        const wait = GATT_BUSY_RETRY_MS * (attempt + 1);
+        logger.debug(
+          TAG,
+          `${linkId}: write refused as busy, re-offering in ${wait}ms ` +
+            `(attempt ${attempt + 1}/${GATT_BUSY_MAX_RETRIES})`,
+        );
+        await delay(wait);
+      }
     }
   }
 
