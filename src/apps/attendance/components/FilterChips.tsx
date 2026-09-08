@@ -38,7 +38,7 @@ export function FilterChips<T extends string>({
       // Negative margin lets chips bleed to the screen edge while the content
       // keeps the standard gutter, so the row reads as scrollable.
       style={{ marginHorizontal: -t.screenPadding, marginBottom: t.spacing.md }}
-      contentContainerStyle={{ paddingHorizontal: t.screenPadding, gap: t.spacing.sm }}>
+      contentContainerStyle={{ paddingHorizontal: t.screenPadding, gap: t.spacing.x7 }}>
       {options.map(option => {
         const isActive = option.key === active;
         return (
@@ -53,16 +53,18 @@ export function FilterChips<T extends string>({
             style={({ pressed }) => [
               styles.chip,
               {
-                backgroundColor: isActive ? t.colors.primary : t.colors.surfaceRaised,
+                backgroundColor: isActive ? t.colors.primary : t.colors.surface,
                 borderColor: isActive ? t.colors.primary : t.colors.border,
                 borderRadius: t.radius.pill,
-                paddingHorizontal: t.spacing.lg,
+                paddingHorizontal: t.spacing.x13,
                 opacity: pressed ? 0.85 : 1,
               },
             ]}>
             <Txt
-              variant="captionMedium"
-              color={isActive ? t.colors.textOnAccent : t.colors.textSecondary}>
+              style={[
+                styles.label,
+                { color: isActive ? t.colors.textOnAccent : t.colors.textSecondary },
+              ]}>
               {option.label}
             </Txt>
             {option.count !== undefined ? (
@@ -95,8 +97,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     borderWidth: StyleSheet.hairlineWidth,
     flexDirection: 'row',
-    // 38 keeps chips compact but still an easy target in a horizontal row.
-    minHeight: 38,
+    height: 32,
   },
+  label: { fontFamily: 'PlusJakartaSans_600SemiBold', fontSize: 12.5 },
   count: { marginLeft: 6, minWidth: 22, paddingHorizontal: 6, paddingVertical: 1 },
 });

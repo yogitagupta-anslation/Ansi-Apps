@@ -1,12 +1,19 @@
 /**
- * The hub's own palette and type scale.
+ * The store's design system.
  *
- * Deliberately separate from the five apps' theme systems. The hub is the store, not one
- * of the things on its shelves: it keeps a single quiet identity in violet while each app
- * goes on owning its own colour. The rule the design sets is narrow and worth stating —
- * **hub violet owns the chrome and the active tab; an app's own accent appears only
- * inside that app's card, its detail page and its running session.** Everything here
- * exists to make that rule easy to follow rather than remembered.
+ * Deliberately separate from the five apps' theme systems. The store is the frame,
+ * not one of the pictures: it keeps a single quiet identity while each app inside
+ * it goes on owning its own colours. Every per-app accent lives in the registry,
+ * so the store renders BLE Chat's purple and Higher or Lower's amber without
+ * importing anything from either app.
+ *
+ * THEME FOLLOWS THE SYSTEM. `useColorScheme()` is the only input; there is no
+ * toggle and no stored preference, so the store tracks the device the way the
+ * platform intends and every surface below reads from one palette object.
+ *
+ * The scales are not invented here — they are the measured values of the approved
+ * store design, deduplicated. Anything that appears more than once in that design
+ * appears exactly once in this file.
  */
 
 import { useColorScheme } from 'react-native';
@@ -16,147 +23,220 @@ export interface HubPalette {
   isDark: boolean;
   /** Page ground. */
   bg: string;
-  /** Cards, the search field, chips. */
+  /** Cards, the featured surface, filled ad creatives. */
   surface: string;
-  /** A surface sitting on another surface — stat cells, inset rows. */
-  surfaceAlt: string;
+  /**
+   * The recessed surface: search field, chips, ad trays, sponsored cards.
+   * Distinct from `surface` — this is what makes a sponsored card read as
+   * "not one of the organic ones" without a second border colour.
+   */
+  surfaceRaised: string;
+  /** The resting hairline on surfaces. */
   border: string;
-  /** Separator inside a card, lighter than the outline around it. */
-  divider: string;
+  /**
+   * The raised/interactive/sponsored hairline. Every outlined button, every
+   * sponsored surface and the dashed unfilled ad frame use this, never `border`.
+   */
+  borderStrong: string;
   text: string;
   textDim: string;
   textFaint: string;
-  /** Hub violet: chrome, the active tab, focus rings, the eyebrow. */
+  /** The store's own accent — the wordmark, the active chip, the primary CTA. */
   accent: string;
-  /** Same hue at low alpha, for tinted grounds. */
+  /** Same hue at low alpha — the active nav icon fill and pressed states. */
   accentSoft: string;
-  /** A filled chip that has to read as selected against the ground. */
-  chipOn: string;
-  chipOnText: string;
-  ok: string;
-  warn: string;
-  /** Lifted card shadow; nil in dark, where elevation is a lighter surface instead. */
-  shadowOpacity: number;
+  /** Text and glyphs that sit *on* the accent. */
+  onAccent: string;
+  /** Text that sits on an amber promo surface. */
+  onAmber: string;
+  /** The bottom bar's ground. Already carries its own alpha. */
+  nav: string;
+  /** The full-width promotional block's ground. */
+  promo: string;
 }
 
 const dark: HubPalette = {
   isDark: true,
-  // OLED-friendly rather than merely dark: a true-ish black ground makes the app
-  // accents on the cards the brightest thing on the screen, which is the point.
-  bg: '#0C0F17',
-  surface: '#141A26',
-  surfaceAlt: '#1B2333',
-  border: '#242C3E',
-  divider: '#1E2632',
+  bg: '#070A12',
+  surface: '#121826',
+  surfaceRaised: '#1B2334',
+  border: '#232C40',
+  borderStrong: '#2E3852',
   text: '#F2F5FA',
   textDim: '#98A3B8',
-  textFaint: '#5E6A80',
+  textFaint: '#8A94A8',
   accent: '#7C6CFF',
   accentSoft: 'rgba(124,108,255,0.16)',
-  chipOn: '#7C6CFF',
-  chipOnText: '#0B1020',
-  ok: '#34D399',
-  warn: '#FBBF24',
-  shadowOpacity: 0,
+  onAccent: '#0B0E17',
+  onAmber: '#FCD34D',
+  nav: 'rgba(7,10,18,0.92)',
+  promo: '#1B2334',
 };
 
 const light: HubPalette = {
   isDark: false,
   bg: '#F4F6FB',
   surface: '#FFFFFF',
-  surfaceAlt: '#F1F3F9',
-  border: '#E1E6F0',
-  divider: '#EDF0F6',
-  text: '#0F1523',
+  surfaceRaised: '#EDF0F7',
+  border: '#E2E7F1',
+  borderStrong: '#D3DAE8',
+  text: '#131722',
   textDim: '#5B6579',
-  textFaint: '#8B93A5',
-  // Deeper than the dark set's violet: the same hue at #7C6CFF on white is too light to
-  // carry a label, and the design calls for "deeper accents for contrast on white".
+  textFaint: '#5F6878',
   accent: '#5B4BE0',
-  accentSoft: 'rgba(91,75,224,0.10)',
-  // Violet, like the dark set. The design's rule is that hub violet owns the chrome, and
-  // a filter chip is chrome; giving light mode a near-black selection instead would make
-  // the same control mean something different in the two themes.
-  chipOn: '#5B4BE0',
-  // White on this violet, dark ink on the brighter one above — each is the readable
-  // direction for its own fill.
-  chipOnText: '#FFFFFF',
-  ok: '#059669',
-  warn: '#B45309',
-  shadowOpacity: 0.06,
+  accentSoft: 'rgba(91,75,224,0.12)',
+  onAccent: '#FFFFFF',
+  onAmber: '#7A5300',
+  nav: 'rgba(255,255,255,0.94)',
+  promo: '#131722',
 };
 
-export type HubThemeMode = 'system' | 'light' | 'dark';
-
-export function paletteFor(mode: HubThemeMode, systemIsDark: boolean): HubPalette {
-  if (mode === 'light') return light;
-  if (mode === 'dark') return dark;
-  // Dark is the default the design is drawn in, so an unknown system preference
-  // resolves that way rather than to light.
-  return systemIsDark ? dark : light;
-}
-
-export function useSystemIsDark(): boolean {
+export function useHubTheme(): HubPalette {
   const scheme = useColorScheme();
-  return useMemo(() => scheme !== 'light', [scheme]);
+  // `useColorScheme` re-renders on a system appearance change on its own, so the
+  // whole store follows the device with no listener of our own.
+  return useMemo(() => (scheme === 'light' ? light : dark), [scheme]);
 }
+
+/* ---------------------------------------------------------------- scales -- */
+
+export const radius = {
+  sm: 10,
+  md: 14,
+  lg: 20,
+  xl: 26,
+  /** Chips, list rows, ad creatives. The single most common radius in the design. */
+  chip: 12,
+  /** Cards that sit on the page ground. */
+  card: 18,
+  /** The search field and the primary CTA. */
+  field: 16,
+  /** The featured card — the only surface that gets it. */
+  featured: 28,
+  /** Anything fully rounded; RN clamps to half the height. */
+  pill: 999,
+};
+
+export const space = {
+  xs: 4,
+  sm: 8,
+  md: 12,
+  lg: 16,
+  xl: 24,
+  xxl: 32,
+  /** The values the store layout actually leans on. */
+  x6: 6,
+  x7: 7,
+  x10: 10,
+  x14: 14,
+  x18: 18,
+  x22: 22,
+  x26: 26,
+  x28: 28,
+};
+
+export const layout = {
+  /**
+   * The horizontal gutter, applied PER SECTION and never on a scroll root — that
+   * is what lets a rail bleed to the screen edge while its heading stays inset.
+   */
+  gutter: 20,
+  /** Gap between top-level sections on a tabbed screen. */
+  sectionGap: 28,
+  /** Trailing spacer so the last section clears the bottom bar. */
+  navSpacer: 76,
+  /** The bar's own height, excluding the gesture inset it pads for itself. */
+  navBarHeight: 65,
+  /** The bottom bar's built-in gesture-area padding. */
+  navBottomPad: 24,
+};
 
 /**
- * Two families, each with one job.
- *
- * Space Grotesk carries names and numbers — the things you scan for and compare.
- * Manrope carries body and labels — the things you read. Nothing drops below 11px and
- * body sits at 14, so the smallest text on screen is still text rather than decoration.
- *
- * The `*_FALLBACK` stacks matter: the families are loaded at runtime and a screen that
- * renders before they arrive must still be laid out in something sane rather than
- * whatever the platform picks by default.
+ * Every distinct text role in the design. Weight 400 is deliberately absent —
+ * the design never uses it, and adding it here would invite it back in.
  */
-export const font = {
-  display: 'SpaceGrotesk_600SemiBold',
-  displayBold: 'SpaceGrotesk_700Bold',
-  body: 'Manrope_500Medium',
-  bodySemi: 'Manrope_600SemiBold',
-  bodyBold: 'Manrope_700Bold',
-  bodyExtra: 'Manrope_800ExtraBold',
-} as const;
+export const type = {
+  wordmark: { fontSize: 21, fontWeight: '800' as const, letterSpacing: -0.5, lineHeight: 24 },
+  tagline: { fontSize: 12, fontWeight: '600' as const, lineHeight: 16 },
+  screenTitle: { fontSize: 28, fontWeight: '800' as const, letterSpacing: -0.6, lineHeight: 31 },
+  sectionTitle: { fontSize: 17, fontWeight: '800' as const, letterSpacing: -0.3 },
+  heroName: { fontSize: 23, fontWeight: '800' as const, letterSpacing: -0.5, lineHeight: 26 },
+  cardTitle: { fontSize: 15, fontWeight: '800' as const, letterSpacing: -0.3 },
+  railTitle: { fontSize: 13.5, fontWeight: '800' as const, letterSpacing: -0.3 },
+  body: { fontSize: 13, fontWeight: '500' as const, lineHeight: 19 },
+  bodyDim: { fontSize: 12.5, fontWeight: '500' as const, lineHeight: 18 },
+  meta: { fontSize: 11.5, fontWeight: '700' as const },
+  metaSoft: { fontSize: 11.5, fontWeight: '600' as const },
+  chip: { fontSize: 13.5, fontWeight: '700' as const },
+  navLabelActive: { fontSize: 11, fontWeight: '800' as const },
+  navLabelIdle: { fontSize: 11, fontWeight: '600' as const },
+  /** The sponsored eyebrow and the AD chip. */
+  adLabel: { fontSize: 9.5, fontWeight: '800' as const, letterSpacing: 1.4 },
+  badge: { fontSize: 10, fontWeight: '800' as const, letterSpacing: 0.4 },
+  eyebrow: { fontSize: 10.5, fontWeight: '800' as const, letterSpacing: 1.2 },
+  button: { fontSize: 15, fontWeight: '800' as const },
+  buttonSm: { fontSize: 13, fontWeight: '800' as const },
+};
 
-export const typeScale = {
-  /** Screen titles: "Hey, Alex", "Shared with every app". */
-  title: { fontFamily: font.displayBold, fontSize: 28, letterSpacing: -0.8 },
-  /** An app's name at the top of its detail page. */
-  headline: { fontFamily: font.displayBold, fontSize: 22, letterSpacing: -0.5 },
-  /** Names in a list, and the featured app's name. */
-  name: { fontFamily: font.display, fontSize: 17, letterSpacing: -0.3 },
-  nameSmall: { fontFamily: font.display, fontSize: 15, letterSpacing: -0.2 },
-  /** Figures in the stat strip and the count chips. */
-  figure: { fontFamily: font.displayBold, fontSize: 18, letterSpacing: -0.4 },
-  body: { fontFamily: font.body, fontSize: 14, lineHeight: 21 },
-  bodyStrong: { fontFamily: font.bodySemi, fontSize: 14, lineHeight: 21 },
-  meta: { fontFamily: font.body, fontSize: 12, lineHeight: 17 },
-  metaStrong: { fontFamily: font.bodySemi, fontSize: 12, lineHeight: 17 },
-  /** Section eyebrows: "APP HUB", "FEATURED THIS WEEK", "HUB SETTINGS". */
-  eyebrow: {
-    fontFamily: font.bodyExtra,
-    fontSize: 11,
-    letterSpacing: 1.4,
-    textTransform: 'uppercase' as const,
-  },
-  /** The floor. Nothing in the hub is smaller than this. */
-  micro: { fontFamily: font.bodySemi, fontSize: 11, lineHeight: 15 },
-} as const;
-
-export const radius = { sm: 10, md: 14, lg: 18, xl: 22, xxl: 26, pill: 999 };
-export const space = { xs: 4, sm: 8, md: 12, lg: 16, xl: 20, xxl: 28 };
-
-/** Card lift. A no-op in dark, where a lighter surface does the separating instead. */
-export function lift(t: HubPalette, level: 1 | 2 = 1) {
-  if (t.shadowOpacity === 0) return {};
-  return {
-    shadowColor: '#0F1523',
-    shadowOpacity: t.shadowOpacity,
-    shadowRadius: level === 1 ? 8 : 18,
-    shadowOffset: { width: 0, height: level === 1 ? 2 : 6 },
-    elevation: level === 1 ? 2 : 5,
-  };
+/**
+ * The app-icon tile. Its radius is a function of its size across the whole
+ * design — measured at 0.29 — so it is computed once here rather than being
+ * re-picked per surface and drifting.
+ */
+export function iconTile(size: number): { size: number; radius: number; glyph: number } {
+  return { size, radius: Math.round(size * 0.29), glyph: Math.round(size * 0.5) };
 }
+
+export const tile = {
+  hero: iconTile(88),
+  featured: iconTile(84),
+  categoryCard: iconTile(64),
+  rail: iconTile(58),
+  listRow: iconTile(56),
+  searchRow: iconTile(52),
+  related: iconTile(50),
+  libraryRow: iconTile(48),
+  recents: iconTile(46),
+  action: iconTile(44),
+  brand: iconTile(38),
+  glyph: iconTile(34),
+};
+
+/** Minimum comfortable target heights, so nothing here drops under a fingertip. */
+export const touch = {
+  chip: 40,
+  button: 44,
+  iconButton: 44,
+  cta: 46,
+  field: 48,
+  ctaLarge: 52,
+  navItem: 56,
+};
+
+/**
+ * The design has exactly two elevations and one of them has a single consumer.
+ * Kept separate so nobody sprays the card shadow across every surface.
+ */
+export const elevation = {
+  card: {
+    shadowColor: '#131722',
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.07,
+    shadowRadius: 30,
+    elevation: 6,
+  },
+  iconPlate: {
+    shadowColor: '#131722',
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.14,
+    shadowRadius: 24,
+    elevation: 8,
+  },
+};
+
+/**
+ * The numeric face. The design sets these in Roboto Mono, which is the platform
+ * monospace on Android, so the tabular feel comes for free without bundling a
+ * font — and iOS falls back to Menlo, which is the same shape of decision.
+ */
+export const monoFamily = undefined as string | undefined;

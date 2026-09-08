@@ -1,22 +1,22 @@
 /**
- * The registry is the single source of truth for what the hub can launch.
+ * The registry is the single source of truth for what the store can launch.
  *
- * Everything else — the home grid, the search index, the category chips, the recents
- * row, the featured slot, the detail page, the permission counts in Settings, the route
- * table in App.tsx — is derived from this list. Adding a sixth app is one entry here
- * plus one lazy component; no other file needs to learn its name.
+ * Everything else — the grid, the search index, the category chips, the recents
+ * rail, the featured slot, the detail page, the route table in App.tsx — is
+ * derived from this list. Adding a sixth app is therefore one entry here plus one
+ * lazy component; no other file needs to learn its name.
  *
- * A note on the fields the detail page reads. Everything below is checkable against the
- * app it describes — `needs` is the permissions that app's own code actually requests,
- * `offline` is whether it genuinely runs with the network off. There are no ratings,
- * download counts or install sizes in here, because none of those exist for an app that
- * ships inside this bundle and was never on a store. A store layout is not a reason to
- * invent store numbers.
+ * A NOTE ON METADATA. Every field below is either editorial copy or a fact that
+ * can be checked against the app's own source. There are deliberately no ratings,
+ * review counts, download counts or install numbers: nobody has rated these apps,
+ * so a number in that shape would be a decoration pretending to be a measurement.
+ * Usage figures ("opened 12 times", "yesterday") are real and come from
+ * `usage.ts`, which records them locally as apps are launched.
  */
 
 import type { ComponentType } from 'react';
 import { lazy } from 'react';
-import type { HubPermissionId } from './settings';
+import type { ImageSourcePropType } from 'react-native';
 
 export type AppId =
   | 'blechat'
@@ -24,6 +24,21 @@ export type AppId =
   | 'higherlower'
   | 'attendance'
   | 'treasurehunt';
+
+/** A capability badge on a card. Both are facts about every app that carries them. */
+export type AppBadge = 'bluetooth' | 'offline' | 'encrypted' | 'multiplayer';
+
+export interface AppFeature {
+  glyph: string;
+  title: string;
+  body: string;
+}
+
+export interface AppPermission {
+  name: string;
+  /** Why the app asks. Written plainly, because the detail page shows it verbatim. */
+  why: string;
+}
 
 export interface HubApp {
   id: AppId;
@@ -42,29 +57,28 @@ export interface HubApp {
   /** Extra words that should match in search but do not belong on the card. */
   keywords: string[];
   featured?: boolean;
-
-  // ---- read by the detail page -------------------------------------------------
-
-  /** Two or three sentences. What it is for, and what it is not. */
+  /** Capability badges. Derived from what the app actually does. */
+  badges: AppBadge[];
+  /** The detail page's long copy. */
   about: string;
-  /** Three things it actually does. Short enough to scan, specific enough to mean something. */
-  highlights: string[];
+  features: AppFeature[];
+  permissions: AppPermission[];
   /**
-   * The hub permissions this app's code genuinely requests. Drives "Uses from your hub",
-   * where each one is shown against its live OS state — so the page can warn you before
-   * a launch instead of after it.
+   * Real artwork from the app's own asset folder. Only Treasure Hunt and
+   * Attendance ship images; the rest render the fallback preview panel, which is
+   * honest about there being nothing to show yet.
    */
-  needs: HubPermissionId[];
-  /** True when it works with the network off. All five do; the field keeps that honest if one stops. */
-  offline: boolean;
-
+  previews: ImageSourcePropType[];
   /**
-   * Loaded on first launch, not at hub startup. Each of these pulls in a whole
-   * app — a BLE stack, a positioning engine, an audio bank — and the hub has no
+   * Loaded on first launch, not at store startup. Each of these pulls in a whole
+   * app — a BLE stack, a positioning engine, an audio bank — and the store has no
    * business paying for any of that before someone taps a card.
    */
   screen: ComponentType;
 }
+
+/** Every app here is bundled in this binary, so the version is the shell's. */
+export const APP_VERSION = '1.0.0';
 
 export const APPS: HubApp[] = [
   {
@@ -78,15 +92,40 @@ export const APPS: HubApp[] = [
     accent: '#A78BFA',
     accentSoft: 'rgba(167,139,250,0.16)',
     keywords: ['bluetooth', 'ble', 'chat', 'mesh', 'offline', 'encrypted', 'messaging', 'peers'],
+    badges: ['bluetooth', 'offline', 'encrypted'],
     about:
-      'Two phones in Bluetooth range can hold a conversation with nothing else involved — no account, no server, no signal. Keys are exchanged on first contact and messages are encrypted end to end. Range is the catch: this is a room, a carriage or a queue, not a city.',
-    highlights: [
-      'End-to-end encrypted, keys never leave the phones',
-      'A radar that places peers by measured signal strength',
-      'Threads survive a dropped link and resume when it returns',
+      'BLE Chat turns two phones in the same room into a private network. Each device carries its own key pair, sessions are negotiated directly between peers, and a message exists only on the handsets that were present to receive it. Nothing is uploaded, because there is nowhere to upload it to.',
+    features: [
+      {
+        glyph: '🔒',
+        title: 'End-to-end encrypted',
+        body: 'Every session is keyed between the two devices. Identities are held in the platform keystore.',
+      },
+      {
+        glyph: '📡',
+        title: 'Direct radio links',
+        body: 'One phone acts as the GATT server, the other as the central. There is no access point in between.',
+      },
+      {
+        glyph: '🧩',
+        title: 'Fragmented delivery',
+        body: 'Long messages are split, ordered and reassembled, so a message survives a link that only carries small frames.',
+      },
+      {
+        glyph: '👥',
+        title: 'Group conversations',
+        body: 'Groups are local objects shared between the peers in range, not rooms hosted somewhere.',
+      },
     ],
-    needs: ['bluetooth', 'location'],
-    offline: true,
+    permissions: [
+      { name: 'Bluetooth', why: 'the entire app; scanning, connecting and advertising to nearby phones' },
+      {
+        name: 'Location (Android 12+)',
+        why: 'required by the platform BLE stack. The app never reads a position',
+      },
+      { name: 'No network access', why: 'nothing typed here leaves the two devices' },
+    ],
+    previews: [],
     screen: lazy(() => import('../apps/blechat/BleChatApp')),
   },
   {
@@ -100,15 +139,41 @@ export const APPS: HubApp[] = [
     accent: '#38BDF8',
     accentSoft: 'rgba(56,189,248,0.16)',
     keywords: ['networking', 'event', 'conference', 'radar', 'map', 'attendees', 'proximity'],
+    badges: ['bluetooth', 'offline'],
     about:
-      'Built for the hour between talks. Everyone running it broadcasts a short profile, and the radar ranks the room by how close each person is. Signal strength is a rough proxy for distance, so treat the ordering as a hint about who is on this side of the room, not a measurement in metres.',
-    highlights: [
-      'A live ranking of who is in the room with you',
-      'Profiles and interests exchanged over the air',
-      'Sample events built in, so it demonstrates without a venue',
+      'EventPulse reads the strength of nearby Bluetooth advertisements and turns them into a live map of the room. Positions are relative — it knows who is close, not where anyone is — so the map works in a basement conference hall with no signal at all.',
+    features: [
+      {
+        glyph: '🛰️',
+        title: 'Relative positioning',
+        body: 'Signal strength is smoothed and solved into a layout of the room. No GPS is involved at any point.',
+      },
+      {
+        glyph: '🧭',
+        title: 'Orientation-aware map',
+        body: 'The compass keeps the map pointing the way you are facing as you turn.',
+      },
+      {
+        glyph: '🤝',
+        title: 'Worth walking over',
+        body: 'Matches attendees against your stated goals and surfaces the ones nearby right now.',
+      },
+      {
+        glyph: '🙈',
+        title: 'Visibility you control',
+        body: 'Go invisible, or block an individual, and the change takes effect on the next advertisement.',
+      },
     ],
-    needs: ['bluetooth', 'location', 'camera'],
-    offline: true,
+    permissions: [
+      { name: 'Bluetooth', why: 'discovering and advertising to other attendees in the room' },
+      { name: 'Motion and compass', why: 'keeping the event map oriented as you turn' },
+      { name: 'Photos', why: 'optional profile picture. The image is cropped and resized on the device' },
+      {
+        name: 'Location (Android 12+)',
+        why: 'required by the platform BLE stack. The app never reads a position',
+      },
+    ],
+    previews: [],
     screen: lazy(() => import('../apps/eventpulse/EventPulseApp')),
   },
   {
@@ -123,17 +188,40 @@ export const APPS: HubApp[] = [
     accentSoft: 'rgba(251,191,36,0.16)',
     keywords: ['game', 'guess', 'number', 'race', 'daily', 'multiplayer', 'higher', 'lower'],
     featured: true,
+    badges: ['offline', 'multiplayer'],
     about:
-      'Binary search as a sport. Pick a number, get told higher or lower, and try to close the gap before the clock or your guess budget does. Modifiers change what each guess costs, which turns an obvious strategy into a decision. The multiplayer race runs against a simulated opponent — the over-the-air version is still being built.',
-    highlights: [
-      'Daily challenge with a seed everyone shares',
-      'Modifiers that change the cost of a guess',
-      'Streaks and personal bests kept on the device',
+      'Pick a number, get told higher or lower, and close the gap before your opponent does. Play it solo, take the same daily challenge everyone else gets, or race a phone in the same room over Bluetooth. Modifiers change what a wrong guess costs you.',
+    features: [
+      {
+        glyph: '🏁',
+        title: 'Three ways to play',
+        body: 'Solo run, daily challenge, or head-to-head with a nearby phone.',
+      },
+      {
+        glyph: '📡',
+        title: 'Multiplayer over Bluetooth',
+        body: 'No lobby server. Two phones in range are the whole network.',
+      },
+      {
+        glyph: '⚙️',
+        title: 'Guess modifiers',
+        body: 'Each modifier changes how much a wrong guess costs you.',
+      },
+      {
+        glyph: '🔊',
+        title: 'Sound and haptics',
+        body: 'Audio players load on open and are released when you leave.',
+      },
     ],
-    // Nothing: the radio path is stubbed today, so claiming Bluetooth would be a
-    // permission asked for on behalf of code that never runs.
-    needs: [],
-    offline: true,
+    permissions: [
+      { name: 'Bluetooth', why: 'multiplayer only; solo and daily play need no radio' },
+      {
+        name: 'Location (Android 12+)',
+        why: 'required by the platform BLE stack. The app never reads a position',
+      },
+      { name: 'No network access', why: 'nothing about a game leaves the device' },
+    ],
+    previews: [],
     screen: lazy(() => import('../apps/higherlower/HigherLowerApp')),
   },
   {
@@ -157,15 +245,44 @@ export const APPS: HubApp[] = [
       'reports',
       'offline',
     ],
+    badges: ['bluetooth', 'offline'],
     about:
-      'One phone hosts, everyone else broadcasts, and the register fills itself as people walk in. Records stay on the host device and export as a spreadsheet. Presence here means "this phone was in range", which is the honest limit of what Bluetooth can tell you.',
-    highlights: [
-      'The host sees the room fill in as people arrive',
-      'Registers export to a formatted spreadsheet',
-      'Runs entirely on the phones — no backend to stand up',
+      'One phone runs as the host and listens; everyone else runs as an employee and advertises. Presence is recorded as people come into range and settled as they leave, and the month can be exported as a spreadsheet straight to the share sheet. The whole cycle happens without a network.',
+    features: [
+      {
+        glyph: '📡',
+        title: 'Host and employee roles',
+        body: 'Employees advertise a short identifier; the host records who was in range and when.',
+      },
+      {
+        glyph: '⏱️',
+        title: 'Present, left, absent',
+        body: 'A grace period decides when someone has actually left rather than briefly lost signal.',
+      },
+      {
+        glyph: '📊',
+        title: 'Monthly spreadsheet export',
+        body: 'The month builds into a styled workbook and hands it to the share sheet as a real file.',
+      },
+      {
+        glyph: '🔋',
+        title: 'Keeps broadcasting',
+        body: 'A foreground service keeps the advertisement on air, so a pocketed phone stays visible to the host.',
+      },
     ],
-    needs: ['bluetooth', 'location', 'camera', 'notifications'],
-    offline: true,
+    permissions: [
+      { name: 'Bluetooth', why: 'advertising as an employee and scanning as the host' },
+      { name: 'Notifications', why: 'the ongoing notification the foreground service is required to show' },
+      {
+        name: 'Location (Android 12+)',
+        why: 'required by the platform BLE stack. The app never reads a position',
+      },
+    ],
+    previews: [
+      require('../apps/attendance/assets/no-employees-nearby.png'),
+      require('../apps/attendance/assets/no-attendance-today.png'),
+      require('../apps/attendance/assets/no-history.png'),
+    ],
     screen: lazy(() => import('../apps/attendance/AttendanceApp')),
   },
   {
@@ -190,15 +307,45 @@ export const APPS: HubApp[] = [
       'offline',
       'compass',
     ],
+    badges: ['bluetooth', 'offline', 'multiplayer'],
     about:
-      'A hunt played across a virtual map rather than a real one, with Bluetooth carrying the whole game between phones. One player hosts a lobby, the rest join, and everyone races the same board. No GPS and no map data, so it works as well in a basement as in a park.',
-    highlights: [
-      'Host a lobby and everyone in range can join',
-      'A shared board with no server keeping score',
-      'A compass that points at objectives, not at north',
+      'A host phone generates a world and the players in range join it over Bluetooth. Everyone moves through the same generated map, hunting the same chests, with the radio carrying every position and pickup between handsets. The world is virtual, so the game works in a room, a garden or a train carriage.',
+    features: [
+      {
+        glyph: '🗺️',
+        title: 'A generated world',
+        body: 'Each match builds its own map from a shared seed, so every device draws the same world.',
+      },
+      {
+        glyph: '🧭',
+        title: 'Compass and proximity',
+        body: 'A radar warms and cools as you close on a chest, without ever reading a real position.',
+      },
+      {
+        glyph: '🎮',
+        title: 'Five game modes',
+        body: 'Individual, team, race, timed and shared-treasure hunts, each with its own scoring.',
+      },
+      {
+        glyph: '📡',
+        title: 'Reliable BLE mesh',
+        body: 'Framing, acknowledgement and reconnection sit under the game, so a dropped link rejoins itself.',
+      },
     ],
-    needs: ['bluetooth', 'location'],
-    offline: true,
+    permissions: [
+      { name: 'Bluetooth', why: 'hosting or joining a match with the phones around you' },
+      {
+        name: 'Location (Android 12+)',
+        why: 'required by the platform BLE stack. The app never reads a position',
+      },
+      { name: 'No network access', why: 'a match never leaves the phones playing it' },
+    ],
+    previews: [
+      require('../apps/treasure-hunt/assets/bg-lobby.png'),
+      require('../apps/treasure-hunt/assets/bg-world.png'),
+      require('../apps/treasure-hunt/assets/bg-map.png'),
+      require('../apps/treasure-hunt/assets/bg-results.png'),
+    ],
     screen: lazy(() => import('../apps/treasure-hunt/TreasureHuntApp')),
   },
 ];
@@ -218,14 +365,28 @@ export const CATEGORIES: string[] = [
   }, []),
 ];
 
+/** Categories without the "All" pseudo-entry, for the Explore grid. */
+export const REAL_CATEGORIES: string[] = CATEGORIES.filter((c) => c !== ALL_CATEGORY);
+
 export function appById(id: string): HubApp | undefined {
   return APPS.find((app) => app.id === id);
 }
 
-/** How many apps actually request a given permission. The number Settings shows. */
-export function appsNeeding(permission: HubPermissionId): HubApp[] {
-  return APPS.filter((app) => app.needs.includes(permission));
+export function appsInCategory(category: string): HubApp[] {
+  return category === ALL_CATEGORY ? APPS : APPS.filter((app) => app.tags.includes(category));
 }
+
+/** The app's primary home — the first tag, by the registry's own convention. */
+export function primaryCategory(app: HubApp): string {
+  return app.tags[0] ?? 'Apps';
+}
+
+export const BADGE_LABEL: Record<AppBadge, string> = {
+  bluetooth: 'Bluetooth',
+  offline: 'Offline',
+  encrypted: 'Encrypted',
+  multiplayer: 'Multiplayer',
+};
 
 /**
  * Name and tagline first, then the long description and hidden keywords. A blank
@@ -240,4 +401,20 @@ export function searchApps(apps: HubApp[], query: string): HubApp[] {
       .toLowerCase()
       .includes(needle),
   );
+}
+
+/**
+ * Why a result matched, for the line under a search row. Reports the strongest
+ * true reason rather than every one, so the note stays one line.
+ */
+export function matchReason(app: HubApp, query: string): string {
+  const needle = query.trim().toLowerCase();
+  if (!needle) return primaryCategory(app);
+  if (app.name.toLowerCase().includes(needle)) return `Matches name · ${app.tags.join(', ')}`;
+  if (app.tagline.toLowerCase().includes(needle)) return `Matches tagline · ${primaryCategory(app)}`;
+  const tag = app.tags.find((t) => t.toLowerCase().includes(needle));
+  if (tag) return `In ${tag}`;
+  const keyword = app.keywords.find((k) => k.includes(needle));
+  if (keyword) return `Matches “${keyword}” · ${primaryCategory(app)}`;
+  return `Matches description · ${primaryCategory(app)}`;
 }

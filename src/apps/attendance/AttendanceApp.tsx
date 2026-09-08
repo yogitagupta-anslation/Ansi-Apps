@@ -9,58 +9,43 @@
  * Everything below this file is the app exactly as it was: the same BLE
  * advertiser and scanner, the same role gate, the same storage.
  *
- * THEME BOOTSTRAP — why this file still loads a setting itself
+ * FONTS — why this file waits
  * ---------------------------------------------------------------------------
- * ThemeProvider seeds its state once, at mount. If it mounted with a default and
- * the real preference arrived later from storage, the saved theme would never be
- * applied — and putting ThemeProvider inside AppStoreProvider would still flash
- * the wrong colours for a frame while settings loaded.
+ * The design is set in Plus Jakarta Sans, with Space Grotesk for every figure
+ * and IBM Plex Mono for identifiers. Android does not synthesise weights for a
+ * custom family, so each weight is its own family and every style names one
+ * explicitly. If the tree mounted before those faces were registered, RN would
+ * fall back to the system font and then reflow when they arrived — every
+ * measured line height in the design would shift under it.
  *
- * So the theme preference — and ONLY that one key — is read before the subtree
- * mounts. It is a single AsyncStorage read, typically a few milliseconds, and it
- * renders nothing until it resolves. That is what makes the choice survive a
- * restart with no flash of the wrong theme, and it is equally what makes
- * re-opening the app from the hub not flash either.
+ * So the subtree waits, and paints the page ground meanwhile rather than a
+ * spinner: the fonts come from the bundle, not the network, so the wait is a
+ * frame or two and a spinner would flash for longer than it was useful.
+ *
+ * The theme no longer waits on anything — v3 follows the system appearance and
+ * stores nothing, so there is no preference to read first.
  */
 
-import React, { useCallback, useEffect, useState } from 'react';
+import React from 'react';
 import { View } from 'react-native';
+import { useFonts } from 'expo-font';
 
 import { AppNavigator } from './navigation/AppNavigator';
 import { AppStoreProvider } from './state/appStore';
-import { SETTINGS_KEYS } from './constants/appConfig';
-import { SettingsStorage } from './storage/SettingsStorage';
-import { ThemeProvider, type ThemePreference } from './theme/ThemeContext';
+import { FONT_ASSETS } from './theme/fonts';
+import { ThemeProvider } from './theme/ThemeContext';
 
 export default function AttendanceApp(): React.ReactElement {
-  const [themePreference, setThemePreference] = useState<ThemePreference | null>(null);
+  const [fontsLoaded, fontError] = useFonts(FONT_ASSETS);
 
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      const stored = (await SettingsStorage.get(SETTINGS_KEYS.theme)) as ThemePreference | null;
-      if (!cancelled) {
-        setThemePreference(stored ?? 'dark');
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  /** Persist the choice whenever the user changes it in Settings. */
-  const handlePreferenceChange = useCallback((preference: ThemePreference) => {
-    void SettingsStorage.set(SETTINGS_KEYS.theme, preference);
-  }, []);
-
-  // Render nothing (not a themed screen) until the preference is known —
-  // painting a default theme first is exactly the flash we are avoiding.
-  if (themePreference === null) {
-    return <View style={{ flex: 1, backgroundColor: '#0B0F14' }} />;
+  // A font that fails to load is a cosmetic problem, not a reason to withhold
+  // an attendance app — fall through to the system face and carry on.
+  if (!fontsLoaded && !fontError) {
+    return <View style={{ flex: 1, backgroundColor: '#0A0E14' }} />;
   }
 
   return (
-    <ThemeProvider initialPreference={themePreference} onPreferenceChange={handlePreferenceChange}>
+    <ThemeProvider>
       <AppStoreProvider>
         <AppNavigator />
       </AppStoreProvider>

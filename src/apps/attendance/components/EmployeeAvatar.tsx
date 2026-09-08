@@ -114,7 +114,10 @@ export function EmployeeAvatar({
         {initials ? (
           <Txt
             variant={size >= 44 ? 'bodyStrong' : 'label'}
-            color={dimmed ? t.colors.textMuted : '#FFFFFF'}>
+            color={dimmed ? t.colors.textMuted : '#FFFFFF'}
+            /* Glyphs scale with the disc rather than jumping at a 44px variant
+               cliff — the design keeps initials at ~0.32 of the avatar. */
+            style={{ fontSize: Math.round(size * 0.32), letterSpacing: 0 }}>
             {initials}
           </Txt>
         ) : (

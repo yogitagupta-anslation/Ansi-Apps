@@ -24,11 +24,10 @@ import React, { Suspense, useMemo } from 'react';
 import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaInsetsContext, useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { Icon } from '../hub/components/Icon';
 import { Press } from '../hub/components/Press';
 import type { HubApp } from '../hub/registry';
-import { radius, space, typeScale as t } from '../hub/theme';
-import { useHubTheme } from '../hub/useHubTheme';
+import { ChevronLeftIcon } from '../hub/store/icons';
+import { radius, space, type as t, useHubTheme } from '../hub/theme';
 
 interface AppFrameProps {
   app: HubApp;
@@ -63,13 +62,13 @@ export function AppFrame({ app, onExit, children }: AppFrameProps): React.ReactE
             accessibilityLabel="Back to App Hub"
             style={styles.back}
           >
-            <Icon name="chevron-left" size={18} color={theme.textDim} />
-            <Text style={[t.metaStrong, { color: theme.textDim }]}>App Hub</Text>
+            <ChevronLeftIcon size={18} color={theme.textDim} />
+            <Text style={[t.meta, { color: theme.textDim }]}>App Hub</Text>
           </Press>
 
           <View style={[styles.tag, { backgroundColor: app.accentSoft }]}>
             <View style={[styles.dot, { backgroundColor: app.accent }]} />
-            <Text style={[t.micro, { color: app.accent }]} numberOfLines={1}>
+            <Text style={[t.badge, { color: app.accent }]} numberOfLines={1}>
               {app.name}
             </Text>
           </View>

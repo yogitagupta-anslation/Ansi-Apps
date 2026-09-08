@@ -1,48 +1,53 @@
 /**
- * EmployeeHomeScreen.tsx
+ * EmployeeHomeScreen.tsx  — v3 "Orbit"
  * -----------------------------------------------------------------------------
- * The employee's punch-clock home: live clock, one big circular Check in /
- * Check out control, and a Check-in / Check-out / Total-hours row underneath.
+ * Greeting, live clock, the Orbit, three capability wells, and today's figures.
  *
  * WHERE EVERY NUMBER COMES FROM — the honesty contract of this screen.
  *
- *   The BUTTON controls this phone's radio. "Check in" starts broadcasting
- *   the employee ID; "Check out" stops it. That is all it can truthfully do.
+ *   The ORBIT controls this phone's radio. Tapping it starts broadcasting the
+ *   employee ID; tapping again stops. That is all it can truthfully do.
  *
- *   The TIMES in the bottom row come ONLY from the status report the Host
- *   delivers back over the BLE reply channel after it actually records the
- *   check-in. Until a report arrives they show dashes. Pressing the button
- *   never fills them in by itself — a phone that cannot reach a Host shows
- *   "broadcasting" and dashes, which is exactly the truth.
+ *   The TIMES come ONLY from the status report the Host delivers back over the
+ *   BLE reply channel after it actually records the check-in. Until one arrives
+ *   they show dashes. Tapping the orbit never fills them in.
+ *
+ * WHICH ORBIT STATES THIS SCREEN CAN HONESTLY REACH. The component knows seven;
+ * an employee phone can only observe four of them. It broadcasts one-way and is
+ * never told whether a Host heard it, so "device found" and "connected" are not
+ * facts this side of the exchange holds. Claiming them would be theatre, so the
+ * employee orbit moves between ready → scanning → checked-in, plus permission
+ * when the radio is blocked. The Host, which really does discover and connect,
+ * uses the full set.
  * -----------------------------------------------------------------------------
  */
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Modal, Pressable, StyleSheet, View } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
-import { AppHeader } from '../components/AppHeader';
 import { requestAdvertisePermissions } from '../bluetooth/permissions';
 import { BlockerSheet, type BlockerKind } from '../components/BlockerSheet';
-import { CheckInButton } from '../components/CheckInButton';
 import { CheckInSuccessScreen } from './CheckInSuccessScreen';
-import { EmployeeAvatar } from '../components/EmployeeAvatar';
-import { Icon, type IconName } from '../components/Icon';
-import { SettingGroup, SettingRow } from '../components/SettingRow';
-import { Banner, Button, Card, Screen, SectionHeader, Txt } from '../components/ui';
+import { Orbit, type OrbitState } from '../components/Orbit';
+import { Banner, Button, Card, Screen, Txt } from '../components/ui';
 import { formatClockTime } from '../constants/appConfig';
 import { useAppStore } from '../state/appStore';
+import { numeric } from '../theme/theme';
 import { useTheme } from '../theme/ThemeContext';
 
-const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
-function formatPunchDate(d: Date): string {
-  return (
-    MONTHS[d.getMonth()] + ' -' + d.getDate() + ' ' + d.getFullYear() + ' - ' + WEEKDAYS[d.getDay()]
-  );
+function greetingFor(d: Date): string {
+  const h = d.getHours();
+  return h < 12 ? 'Good morning' : h < 17 ? 'Good afternoon' : 'Good evening';
 }
 
-/** "7h 25m" from a millisecond span; sub-minute spans round down to 0m. */
+/** "Sep 7, Mon" — the approved short date. */
+function shortDate(d: Date): string {
+  return MONTHS[d.getMonth()] + ' ' + d.getDate() + ', ' + WEEKDAYS[d.getDay()];
+}
+
 function formatHours(ms: number): string {
   const minutes = Math.max(0, Math.floor(ms / 60_000));
   return Math.floor(minutes / 60) + 'h ' + (minutes % 60) + 'm';
@@ -56,11 +61,6 @@ export function EmployeeHomeScreen() {
     getParent: () => { navigate: (screen: string) => void } | undefined;
   }>();
 
-  const goToTab = useCallback(
-    (tab: string) => navigation.getParent()?.navigate(tab),
-    [navigation],
-  );
-
   const [busy, setBusy] = useState(false);
   const [permissionError, setPermissionError] = useState<string | null>(null);
   const [sheet, setSheet] = useState<BlockerKind | null>(null);
@@ -68,35 +68,32 @@ export function EmployeeHomeScreen() {
   const adv = store.advertiser;
   const readiness = store.readiness;
   const report = store.employeeStatusReport;
-  const { employeeId, employeeName } = store.settings;
+  const { employeeId, employeeName, employeeDepartment } = store.settings;
 
   const configured = employeeId.trim().length > 0;
   const onAir = adv.state === 'ACTIVE';
+  const btReady = !!readiness?.bluetooth.ready;
+  const permsReady = !!readiness?.permissionsGranted;
 
   /**
    * Celebrate a check-in the moment the HOST'S REPORT ARRIVES — not when the
-   * button is pressed. Pressing the button only starts the radio; being
-   * recorded is a separate fact that arrives later over the reply channel,
-   * and this screen must only cheer for the second one.
+   * orbit is tapped. Being recorded is a separate fact that arrives later over
+   * the reply channel, and this screen must only cheer for the second one.
    *
    * `seenReportKey` is seeded on the first render so reopening the app to an
-   * already-delivered report does not replay the confetti. Only a report that
-   * appears (or changes) after that first pass counts as new.
+   * already-delivered report does not replay the confetti.
    */
   const seenReportKey = useRef<string | null | undefined>(undefined);
   const [celebrate, setCelebrate] = useState<typeof report>(null);
 
   useEffect(() => {
     const key = report ? report.date + '|' + report.checkInTime : null;
-
     if (seenReportKey.current === undefined) {
       seenReportKey.current = key;
       return;
     }
     if (key && key !== seenReportKey.current) {
       seenReportKey.current = key;
-      // Only a fresh CHECK-IN is celebrated. A LEFT update changes the record
-      // but is not good news, so it updates the screen silently.
       if (report && report.status === 'PRESENT') {
         setCelebrate(report);
       }
@@ -154,173 +151,187 @@ export function EmployeeHomeScreen() {
     }
   }, [store]);
 
-  const handlePunch = useCallback(() => {
+  const handleTap = useCallback(() => {
+    if (!configured) {
+      navigation.getParent()?.navigate('Profile');
+      return;
+    }
     if (onAir) {
       void handleStop();
     } else {
       void handleStart();
     }
-  }, [onAir, handleStart, handleStop]);
+  }, [configured, onAir, handleStart, handleStop, navigation]);
+
+  /* --------------------------------------------------------- orbit state -- */
+
+  const orbitState: OrbitState = report
+    ? 'present'
+    : !btReady || !permsReady
+    ? 'permission'
+    : onAir
+    ? 'scanning'
+    : 'ready';
 
   /* ---------------------------------------------------- delivered values -- */
 
-  // ONLY the Host-delivered report may populate these. See header comment.
   const checkInLabel = report ? formatClockTime(report.checkInTime) : '--:--';
   const checkOutLabel = report?.leftTime ? formatClockTime(report.leftTime) : '--:--';
   const totalLabel = report
     ? formatHours((report.leftTime ?? now.getTime()) - report.checkInTime)
     : '--:--';
+  const valueTone = report ? t.colors.success : t.colors.textMuted;
 
-  const allSystemsGo = !!readiness?.bluetooth.ready && !!readiness?.permissionsGranted;
+  const wells = [
+    { label: 'BLUETOOTH', value: btReady ? 'On' : 'Off', ok: btReady },
+    { label: 'PERMISSIONS', value: permsReady ? 'Granted' : 'Needed', ok: permsReady },
+    { label: 'CONNECTION', value: onAir ? 'On air' : '—', ok: onAir },
+  ];
+
+  const cells = [
+    { label: 'CHECK IN', value: checkInLabel, tone: valueTone },
+    // Check-out only ever arrives as a LEFT update, so it is never green.
+    { label: 'CHECK OUT', value: checkOutLabel, tone: t.colors.textMuted },
+    { label: 'TOTAL', value: totalLabel, tone: valueTone },
+  ];
 
   return (
-    <Screen>
-      <AppHeader
-        name={employeeName ? 'Hey ' + employeeName.split(' ')[0] : 'Welcome'}
-        subtitle={configured ? 'Mark your attendance' : 'Set up your profile to begin'}
-        showAvatar={false}
-        right={
-          <Pressable
-            onPress={() => navigation.navigate('Profile')}
-            hitSlop={8}
-            accessibilityRole="button"
-            accessibilityLabel="Open your profile">
-            <EmployeeAvatar
-              name={employeeName || '?'}
-              employeeId={employeeId || 'unset'}
-              size={48}
-              photo={store.settings.employeePhoto || undefined}
-              badge={onAir ? t.colors.success : undefined}
-            />
-          </Pressable>
-        }
-      />
-
-      {/* ------------------------------------------------------- the clock -- */}
-      <View style={styles.clockBlock}>
-        <Txt variant="display" align="center" style={styles.clock}>
-          {formatClockTime(now.getTime())}
-        </Txt>
-        <Txt variant="caption" color={t.colors.textSecondary} align="center" style={{ marginTop: 4 }}>
-          {formatPunchDate(now)}
-        </Txt>
-      </View>
-
-      {/* ------------------------------------------------------ the button -- */}
-      <View style={{ marginVertical: t.spacing.xl }}>
-        <CheckInButton
-          live={onAir}
-          busy={busy}
-          disabled={!configured}
-          onPress={handlePunch}
-        />
-        <Txt
-          variant="caption"
-          color={onAir ? t.colors.success : t.colors.textMuted}
-          align="center"
-          style={{ marginTop: t.spacing.md }}>
-          {onAir
-            ? 'Broadcasting ' + (adv.employeeId ?? employeeId) + ' — the Host can detect you'
-            : configured
-            ? 'Tap to start attendance broadcasting'
-            : 'Add your Employee ID in Profile to begin'}
-        </Txt>
-      </View>
-
-      {/* ------------------------------------------- Host-reported numbers -- */}
-      <View style={[styles.punchRow, { marginBottom: t.spacing.sm }]}>
-        <PunchStat icon="log-in" value={checkInLabel} label="Check in" />
-        <PunchStat icon="log-out" value={checkOutLabel} label="Check out" />
-        <PunchStat icon="timer" value={totalLabel} label="Total hrs" />
-      </View>
+    <Screen contentStyle={styles.root}>
+      {/* ------------------------------------------------------- greeting -- */}
+      <Txt style={[styles.greeting, { color: t.colors.textMuted }]}>{greetingFor(now)}</Txt>
+      <Txt style={[styles.headline, { color: t.colors.textPrimary }]}>
+        {employeeName ? 'Hey ' + employeeName.split(' ')[0] : 'Welcome'}
+      </Txt>
       <Txt
         variant="caption"
         color={t.colors.textMuted}
-        align="center"
-        style={{ lineHeight: 17, marginBottom: t.spacing.lg }}>
+        mono
+        style={{ marginTop: 4, fontSize: 11.5 }}>
+        {configured
+          ? employeeDepartment
+            ? employeeId + ' · ' + employeeDepartment
+            : employeeId
+          : 'Set up your profile to begin'}
+      </Txt>
+
+      {/* ---------------------------------------------------------- clock -- */}
+      <View style={styles.clockRow}>
+        <Txt style={[styles.clock, numeric, { color: t.colors.textPrimary }]}>
+          {formatClockTime(now.getTime())}
+        </Txt>
+        <Txt style={[styles.date, { color: t.colors.textSecondary }]}>{shortDate(now)}</Txt>
+      </View>
+
+      {/* ---------------------------------------------------------- orbit -- */}
+      <View style={styles.orbitSlot}>
+        <Orbit
+          state={orbitState}
+          role="employee"
+          size={300}
+          deviceName={report?.hostId}
+          checkInTime={report ? formatClockTime(report.checkInTime) : undefined}
+          sub={configured ? undefined : 'Set up your profile first'}
+          onPress={handleTap}
+          disabled={busy}
+        />
+      </View>
+
+      {/* -------------------------------------------------- capability wells -- */}
+      <View style={styles.wellRow}>
+        {wells.map(w => (
+          <View key={w.label} style={[styles.well, t.neuIn(t.colors)]}>
+            <Txt style={[styles.wellLabel, { color: t.colors.textMuted }]}>{w.label}</Txt>
+            <View style={styles.wellValueRow}>
+              <View
+                style={[
+                  styles.dot,
+                  { backgroundColor: w.ok ? t.colors.success : t.colors.textMuted },
+                ]}
+              />
+              <Txt
+                style={[
+                  styles.wellValue,
+                  { color: w.ok ? t.colors.success : t.colors.textMuted },
+                ]}>
+                {w.value}
+              </Txt>
+            </View>
+          </View>
+        ))}
+      </View>
+
+      {/* ---------------------------------------------------------- today -- */}
+      <View style={styles.todayHead}>
+        <Txt style={[styles.todayTitle, { color: t.colors.textPrimary }]}>Today</Txt>
+        <Pressable
+          hitSlop={8}
+          onPress={() => navigation.getParent()?.navigate('Attendance')}>
+          <Txt style={[styles.detailsLink, { color: t.colors.primaryTint }]}>Details</Txt>
+        </Pressable>
+      </View>
+
+      <View style={styles.cellRow}>
+        {cells.map(c => (
+          <View
+            key={c.label}
+            style={[
+              styles.cell,
+              { backgroundColor: t.colors.surface, borderColor: t.colors.border },
+              t.shadow(1),
+            ]}>
+            <Txt style={[styles.cellLabel, { color: t.colors.textMuted }]}>{c.label}</Txt>
+            <Txt style={[styles.cellValue, numeric, { color: c.tone }]}>{c.value}</Txt>
+          </View>
+        ))}
+      </View>
+
+      <Txt style={[styles.provenance, { color: t.colors.textMuted }]}>
         {report
           ? 'Reported by ' + report.hostId + ' at ' + formatClockTime(report.reportedAt) + ', delivered over Bluetooth.'
-          : 'Times appear when the office Host records you and sends the status to this phone.'}
+          : 'Times appear once the Host records you and sends the receipt back.'}
       </Txt>
 
       {/* --------------------------------------------------------- banners -- */}
       {permissionError ? (
-        <Banner tone="danger" title="Could not start broadcasting" detail={permissionError} />
+        <View style={{ marginTop: t.spacing.lg }}>
+          <Banner tone="danger" title="Could not start broadcasting" detail={permissionError} />
+        </View>
       ) : null}
       {adv.state === 'ERROR' && adv.error ? (
-        <Banner tone="danger" title="Broadcast failed" detail={adv.error} />
+        <View style={{ marginTop: t.spacing.md }}>
+          <Banner tone="danger" title="Broadcast failed" detail={adv.error} />
+        </View>
       ) : null}
       {store.advertisingResumePending && !onAir ? (
-        <Banner
-          tone="warning"
-          title="Attendance is not on air"
-          detail="You asked to be broadcasting, but the radio is not. Nothing is being sent until this is resolved."
-          actionLabel="Try again"
-          onAction={() => void handleStart()}
-        />
+        <View style={{ marginTop: t.spacing.md }}>
+          <Banner
+            tone="warning"
+            title="Attendance is not on air"
+            detail="You asked to be broadcasting, but the radio is not. Nothing is being sent until this is resolved."
+            actionLabel="Try again"
+            onAction={() => void handleStart()}
+          />
+        </View>
       ) : null}
 
       {!configured ? (
-        <Card accent={t.colors.warning}>
-          <Txt variant="heading">Finish setting up your profile</Txt>
-          <Txt variant="caption" color={t.colors.textSecondary} style={{ lineHeight: 19, marginTop: 4 }}>
-            Add your Employee ID so the office system can recognise you. It must
-            match the ID your administrator registered.
-          </Txt>
-          <View style={{ marginTop: t.spacing.md }}>
-            <Button
-              title="Set up profile"
-              onPress={() => navigation.navigate('Profile')}
-              variant="neutral"
-            />
-          </View>
-        </Card>
+        <View style={{ marginTop: t.spacing.lg }}>
+          <Card accent={t.colors.warning}>
+            <Txt variant="heading">Finish setting up your profile</Txt>
+            <Txt variant="caption" color={t.colors.textSecondary} style={{ marginTop: 4 }}>
+              Add your Employee ID so the office system can recognise you. It must match the ID your
+              administrator registered.
+            </Txt>
+            <View style={{ marginTop: t.spacing.md }}>
+              <Button
+                title="Set up profile"
+                onPress={() => navigation.getParent()?.navigate('Profile')}
+                variant="neutral"
+              />
+            </View>
+          </Card>
+        </View>
       ) : null}
-
-      {/* --------------------------------------------------- device status -- */}
-      <SectionHeader
-        title="Device status"
-        style={{ marginTop: t.spacing.md }}
-        right={
-          <Txt variant="caption" color={allSystemsGo ? t.colors.success : t.colors.warning}>
-            {allSystemsGo ? 'All systems normal' : 'Needs attention'}
-          </Txt>
-        }
-      />
-      <SettingGroup>
-        <SettingRow
-          icon="bluetooth"
-          iconTone={readiness?.bluetooth.ready ? 'success' : 'warning'}
-          title="Bluetooth"
-          value={readiness?.bluetooth.ready ? 'On' : 'Off'}
-          valueTone={readiness?.bluetooth.ready ? 'success' : 'warning'}
-          onPress={readiness?.bluetooth.ready ? undefined : () => setSheet('bluetooth')}
-        />
-        <SettingRow
-          icon="radio-tower"
-          iconTone={onAir ? 'success' : 'neutral'}
-          title="Broadcasting"
-          value={onAir ? 'Active' : 'Off'}
-          valueTone={onAir ? 'success' : 'neutral'}
-        />
-        <SettingRow
-          icon="shield-check"
-          iconTone={readiness?.permissionsGranted ? 'success' : 'warning'}
-          title="App permissions"
-          value={readiness?.permissionsGranted ? 'Granted' : 'Needed'}
-          valueTone={readiness?.permissionsGranted ? 'success' : 'warning'}
-          onPress={() => void store.refreshReadiness()}
-        />
-      </SettingGroup>
-
-      {/* Quick actions — restored by request: the tabs reach the same places,
-          but the tiles are the faster, more discoverable path. */}
-      <SectionHeader title="Quick actions" style={{ marginTop: t.spacing.lg }} />
-      <View style={styles.quickRow}>
-        <QuickAction icon="user" label="My Profile" onPress={() => navigation.navigate('Profile')} />
-        <QuickAction icon="history" label="History" onPress={() => goToTab('History')} />
-        <QuickAction icon="settings" label="Settings" onPress={() => goToTab('Settings')} />
-      </View>
 
       <Modal
         visible={celebrate !== null}
@@ -351,85 +362,66 @@ export function EmployeeHomeScreen() {
   );
 }
 
-/* ------------------------------------------------------------ QuickAction -- */
-
-function QuickAction({
-  icon,
-  label,
-  onPress,
-}: {
-  icon: IconName;
-  label: string;
-  onPress: () => void;
-}) {
-  const t = useTheme();
-  return (
-    <Pressable
-      onPress={onPress}
-      accessibilityRole="button"
-      accessibilityLabel={label}
-      style={({ pressed }) => [{ flex: 1 }, pressed ? { opacity: 0.7 } : null]}>
-      <View
-        style={[
-          styles.quick,
-          {
-            backgroundColor: t.colors.surface,
-            borderColor: t.colors.border,
-            borderRadius: t.radius.lg,
-            paddingVertical: t.spacing.lg,
-          },
-        ]}>
-        <View
-          style={[
-            styles.quickIcon,
-            { backgroundColor: t.colors.primarySoft, borderRadius: 20 },
-          ]}>
-          <Icon name={icon} size={18} color={t.colors.primary} />
-        </View>
-        <Txt variant="caption" color={t.colors.textSecondary} align="center" style={{ marginTop: 8 }}>
-          {label}
-        </Txt>
-      </View>
-    </Pressable>
-  );
-}
-
-/* -------------------------------------------------------------- PunchStat -- */
-
-function PunchStat({ icon, value, label }: { icon: IconName; value: string; label: string }) {
-  const t = useTheme();
-  return (
-    <View style={styles.punchStat}>
-      <View
-        style={[
-          styles.punchIcon,
-          { borderColor: t.colors.successBorder, borderRadius: t.radius.md },
-        ]}>
-        <Icon name={icon} size={18} color={t.colors.success} />
-      </View>
-      <Txt variant="bodyStrong" style={{ marginTop: 8 }}>
-        {value}
-      </Txt>
-      <Txt variant="caption" color={t.colors.textMuted} style={{ marginTop: 2 }}>
-        {label}
-      </Txt>
-    </View>
-  );
-}
-
 const styles = StyleSheet.create({
-  clockBlock: { marginTop: 4 },
-  clock: { fontSize: 44, letterSpacing: -1, lineHeight: 52 },
-  punchRow: { flexDirection: 'row', justifyContent: 'space-around' },
-  punchStat: { alignItems: 'center', flex: 1 },
-  punchIcon: {
-    alignItems: 'center',
-    borderWidth: 1.2,
-    height: 44,
-    justifyContent: 'center',
-    width: 44,
+  // The orbit slot is the only flexible row, so the column fills one viewport.
+  // No paddingBottom here: Screen derives its own from the tab bar and the
+  // gesture inset, and overriding it would trap the last row under the bar.
+  root: { flexGrow: 1 },
+
+  greeting: { fontFamily: 'PlusJakartaSans_600SemiBold', fontSize: 13, letterSpacing: 0.1 },
+  headline: {
+    fontFamily: 'PlusJakartaSans_700Bold',
+    fontSize: 23,
+    letterSpacing: -0.5,
+    lineHeight: 30,
+    marginTop: 3,
   },
-  quickRow: { flexDirection: 'row', gap: 10 },
-  quick: { alignItems: 'center', borderWidth: StyleSheet.hairlineWidth },
-  quickIcon: { alignItems: 'center', height: 40, justifyContent: 'center', width: 40 },
+
+  clockRow: {
+    alignItems: 'baseline',
+    flexDirection: 'row',
+    gap: 10,
+    justifyContent: 'center',
+    marginTop: 18,
+  },
+  clock: {
+    fontFamily: 'SpaceGrotesk_600SemiBold',
+    fontSize: 38,
+    letterSpacing: -1.4,
+    lineHeight: 46,
+  },
+  date: { fontFamily: 'PlusJakartaSans_500Medium', fontSize: 12.5 },
+
+  orbitSlot: { alignItems: 'center', flex: 1, justifyContent: 'center', minHeight: 300 },
+
+  wellRow: { flexDirection: 'row', gap: 8, marginTop: 6 },
+  well: { alignItems: 'center', borderRadius: 14, flex: 1, paddingHorizontal: 8, paddingVertical: 10 },
+  wellLabel: { fontFamily: 'PlusJakartaSans_800ExtraBold', fontSize: 9, letterSpacing: 0.8 },
+  wellValueRow: { alignItems: 'center', flexDirection: 'row', gap: 5, marginTop: 6 },
+  dot: { borderRadius: 999, height: 6, width: 6 },
+  wellValue: { fontFamily: 'PlusJakartaSans_700Bold', fontSize: 11.5 },
+
+  todayHead: { alignItems: 'center', flexDirection: 'row', marginTop: 26 },
+  todayTitle: { flex: 1, fontFamily: 'PlusJakartaSans_700Bold', fontSize: 15 },
+  detailsLink: { fontFamily: 'PlusJakartaSans_600SemiBold', fontSize: 12.5 },
+
+  cellRow: { flexDirection: 'row', gap: 9, marginTop: 11 },
+  cell: {
+    alignItems: 'center',
+    borderRadius: 15,
+    borderWidth: StyleSheet.hairlineWidth,
+    flex: 1,
+    paddingHorizontal: 8,
+    paddingVertical: 12,
+  },
+  cellLabel: { fontFamily: 'PlusJakartaSans_800ExtraBold', fontSize: 9.5, letterSpacing: 0.8 },
+  cellValue: { fontFamily: 'SpaceGrotesk_600SemiBold', fontSize: 17, marginTop: 6 },
+
+  provenance: {
+    fontFamily: 'PlusJakartaSans_400Regular',
+    fontSize: 11,
+    lineHeight: 16.5,
+    marginTop: 11,
+    textAlign: 'center',
+  },
 });

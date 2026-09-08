@@ -92,7 +92,7 @@ export function PageHeader({
 }) {
   const t = useTheme();
   return (
-    <View style={[styles.wrap, { marginBottom: t.spacing.lg }]}>
+    <View style={[styles.wrap, { marginBottom: t.spacing.x18 }]}>
       {onBack ? (
         <Pressable
           onPress={onBack}
@@ -104,17 +104,17 @@ export function PageHeader({
             {
               backgroundColor: pressed ? t.colors.surfaceMuted : t.colors.surface,
               borderColor: t.colors.border,
-              borderRadius: t.radius.md,
+              borderRadius: t.radius.pill,
               marginRight: t.spacing.md,
             },
           ]}>
-          <Icon name="arrow-left" size={20} color={t.colors.textPrimary} />
+          <Icon name="chevron-left" size={18} color={t.colors.textPrimary} />
         </Pressable>
       ) : null}
       <View style={{ flex: 1 }}>
         <Txt variant="display">{title}</Txt>
         {subtitle ? (
-          <Txt variant="caption" color={t.colors.textMuted} style={{ marginTop: 2 }}>
+          <Txt variant="subtitle" color={t.colors.textMuted} style={{ marginTop: 3 }}>
             {subtitle}
           </Txt>
         ) : null}
@@ -125,12 +125,12 @@ export function PageHeader({
 }
 
 const styles = StyleSheet.create({
-  wrap: { alignItems: 'center', flexDirection: 'row' },
+  wrap: { alignItems: 'flex-end', flexDirection: 'row' },
   back: {
     alignItems: 'center',
     borderWidth: StyleSheet.hairlineWidth,
-    height: 44,
+    height: 36,
     justifyContent: 'center',
-    width: 44,
+    width: 36,
   },
 });

@@ -35,13 +35,17 @@ export type ValidationResult = { ok: true } | { ok: false; message: string };
  * These fields were previously accepted by the form and then silently discarded
  * here, which is why department never appeared in the registry.
  */
-function optionalFields(input: EmployeeInput): Pick<Employee, 'department' | 'phone' | 'email' | 'photo'> {
+function optionalFields(
+  input: EmployeeInput,
+): Pick<Employee, 'department' | 'title' | 'office' | 'phone' | 'email' | 'photo'> {
   const clean = (v: string | undefined) => {
     const trimmed = (v ?? '').trim();
     return trimmed.length > 0 ? trimmed : undefined;
   };
   return {
     department: clean(input.department),
+    title: clean(input.title),
+    office: clean(input.office),
     phone: clean(input.phone),
     email: clean(input.email),
     // A data URI has no meaningful whitespace to trim, but blank -> undefined

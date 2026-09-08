@@ -13,13 +13,15 @@
  */
 
 import React from 'react';
-import { ActivityIndicator, View } from 'react-native';
+import { ActivityIndicator, StyleSheet, View } from 'react-native';
 import { ThemeProvider as NavigationThemeProvider, type Theme as NavTheme } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { Icon, type IconName } from '../components/Icon';
+import { TAB_BAR_HEIGHT } from '../components/ui';
 import { AttendanceScreen } from '../screens/AttendanceScreen';
+import { DayDetailScreen } from '../screens/DayDetailScreen';
 import { DebugScreen } from '../screens/DebugScreen';
 import { AddEmployeeScreen } from '../screens/AddEmployeeScreen';
 import { EmployeeDetailScreen } from '../screens/EmployeeDetailScreen';
@@ -28,6 +30,7 @@ import { EmployeeInfoScreen } from '../screens/EmployeeInfoScreen';
 import { EmployeesScreen } from '../screens/EmployeesScreen';
 import { HistoryScreen } from '../screens/HistoryScreen';
 import { HostHomeScreen } from '../screens/HostHomeScreen';
+import { EditProfileScreen } from '../screens/EditProfileScreen';
 import { ProfileScreen } from '../screens/ProfileScreen';
 import { ScannerScreen } from '../screens/ScannerScreen';
 import { RoleSelectScreen } from '../screens/RoleSelectScreen';
@@ -66,6 +69,10 @@ function AttendanceStack() {
           back arrow when it can go back). Leaving the native header on would
           render the title twice, one above the other. */}
       <Stack.Screen name="History" component={HistoryScreen} options={{ headerShown: false }} />
+      {/* The day drill-down History pushes, from a calendar cell or a record
+          row. Registered in every stack that can show History, so the push
+          always lands in the stack the user is already in. */}
+      <Stack.Screen name="DayDetail" component={DayDetailScreen} options={{ headerShown: false }} />
       <Stack.Screen name="EmployeeDetail" options={{ headerShown: false }}>
         {() => (
           <HostOnly>
@@ -73,10 +80,20 @@ function AttendanceStack() {
           </HostOnly>
         )}
       </Stack.Screen>
+      {/* The detail screen's Edit button pushes this, so it must exist in every
+          stack that can show a detail — not just the Employees tab. */}
+      <Stack.Screen name="AddEmployee" options={{ headerShown: false }}>
+        {() => (
+          <HostOnly>
+            <AddEmployeeScreen />
+          </HostOnly>
+        )}
+      </Stack.Screen>
     </Stack.Navigator>
   );
 }
 
+/** HOST only: Settings is still a tab root, so it has no back affordance. */
 function SettingsStack() {
   const options = useStackOptions();
   return (
@@ -87,14 +104,44 @@ function SettingsStack() {
         )}
       </Stack.Screen>
       <Stack.Screen name="Debug" component={DebugScreen} options={{ title: 'Debug & Logs' }} />
-      {/* Employee profile is reachable from Settings as well as from Home. */}
-      <Stack.Screen name="Profile" options={{ headerShown: false }}>
+      {/* Reports live here on the Host: its tab bar has no History tab, and the
+          roster header is bare in v3, so Settings > Data is the way in. */}
+      <Stack.Screen name="History" component={HistoryScreen} options={{ headerShown: false }} />
+      <Stack.Screen name="DayDetail" component={DayDetailScreen} options={{ headerShown: false }} />
+    </Stack.Navigator>
+  );
+}
+
+/**
+ * EMPLOYEE tab 4. Profile owns personal info, the attendance overview, the
+ * streak, and the way into Settings — which is why Settings is pushed here
+ * rather than being a tab of its own, and why it draws a back chevron.
+ */
+function ProfileStack() {
+  const options = useStackOptions();
+  return (
+    <Stack.Navigator screenOptions={options}>
+      <Stack.Screen name="ProfileMain" options={{ headerShown: false }}>
         {() => (
           <EmployeeOnly>
             <ProfileScreen />
           </EmployeeOnly>
         )}
       </Stack.Screen>
+      {/* The editor the Profile tab pushes; it keeps its own back chevron. */}
+      <Stack.Screen name="EditProfile" options={{ headerShown: false }}>
+        {() => (
+          <EmployeeOnly>
+            <EditProfileScreen />
+          </EmployeeOnly>
+        )}
+      </Stack.Screen>
+      <Stack.Screen name="Settings" options={{ headerShown: false }}>
+        {({ navigation }) => (
+          <SettingsScreen onOpenDebug={() => navigation.navigate('Debug')} />
+        )}
+      </Stack.Screen>
+      <Stack.Screen name="Debug" component={DebugScreen} options={{ title: 'Debug & Logs' }} />
     </Stack.Navigator>
   );
 }
@@ -127,10 +174,37 @@ function HostHomeStack() {
           </HostOnly>
         )}
       </Stack.Screen>
+      {/* The detail screen's Edit button pushes this, so it must exist in every
+          stack that can show a detail — not just the Employees tab. */}
+      <Stack.Screen name="AddEmployee" options={{ headerShown: false }}>
+        {() => (
+          <HostOnly>
+            <AddEmployeeScreen />
+          </HostOnly>
+        )}
+      </Stack.Screen>
       {/* headerShown:false — HistoryScreen draws its own PageHeader (with a
           back arrow when it can go back). Leaving the native header on would
           render the title twice, one above the other. */}
       <Stack.Screen name="History" component={HistoryScreen} options={{ headerShown: false }} />
+      {/* The day drill-down History pushes, from a calendar cell or a record
+          row. Registered in every stack that can show History, so the push
+          always lands in the stack the user is already in. */}
+      <Stack.Screen name="DayDetail" component={DayDetailScreen} options={{ headerShown: false }} />
+    </Stack.Navigator>
+  );
+}
+
+/**
+ * EMPLOYEE tab 3. History needs a stack of its own now that a day row drills
+ * into the day screen — as a bare tab component it had nowhere to push to.
+ */
+function EmployeeHistoryStack() {
+  const options = useStackOptions();
+  return (
+    <Stack.Navigator screenOptions={options}>
+      <Stack.Screen name="HistoryMain" component={HistoryScreen} options={{ headerShown: false }} />
+      <Stack.Screen name="DayDetail" component={DayDetailScreen} options={{ headerShown: false }} />
     </Stack.Navigator>
   );
 }
@@ -143,15 +217,6 @@ function EmployeeHomeStack() {
         {() => (
           <EmployeeOnly>
             <EmployeeHomeScreen />
-          </EmployeeOnly>
-        )}
-      </Stack.Screen>
-      {/* Profile lives in this stack so the quick action pushes rather than
-          switching tabs — the employee stays where they were. */}
-      <Stack.Screen name="Profile" options={{ headerShown: false }}>
-        {() => (
-          <EmployeeOnly>
-            <ProfileScreen />
           </EmployeeOnly>
         )}
       </Stack.Screen>
@@ -185,15 +250,23 @@ function EmployeesStack() {
           </HostOnly>
         )}
       </Stack.Screen>
+      {/* EmployeeDetail's Full history and Export buttons push these. Every
+          stack that can show the detail screen has to carry everywhere the
+          detail screen can go, or the button throws instead of navigating. */}
+      <Stack.Screen name="History" component={HistoryScreen} options={{ headerShown: false }} />
+      <Stack.Screen name="DayDetail" component={DayDetailScreen} options={{ headerShown: false }} />
     </Stack.Navigator>
   );
 }
 
 /* -------------------------------------------------------------------- tabs -- */
 
+/** The approved bar draws its glyphs at 22, not the navigator's default 24. */
+const TAB_ICON_SIZE = 22;
+
 function tabIcon(name: IconName) {
-  const TabIcon = ({ color, size }: { color: string; size: number }) => (
-    <Icon name={name} size={size} color={color} />
+  const TabIcon = ({ color }: { color: string; size: number }) => (
+    <Icon name={name} size={TAB_ICON_SIZE} color={color} />
   );
   return TabIcon;
 }
@@ -213,7 +286,9 @@ function useTabScreenOptions() {
    * Devices with 3-button navigation report bottom: 0, so this collapses back
    * to the original 62dp there.
    */
-  const bottomInset = insets.bottom;
+  // The design pads 22 below the items; that band IS the gesture area, so a
+  // device reporting a deeper inset gets the device's value instead.
+  const bottomInset = Math.max(insets.bottom, t.spacing.x22);
 
   return {
     headerShown: false,
@@ -221,12 +296,13 @@ function useTabScreenOptions() {
     tabBarInactiveTintColor: t.colors.tabInactive,
     tabBarStyle: {
       backgroundColor: t.colors.tabBar,
+      borderTopWidth: StyleSheet.hairlineWidth,
       borderTopColor: t.colors.tabBarBorder,
-      height: 62 + bottomInset,
-      paddingTop: 6,
-      paddingBottom: 8 + bottomInset,
+      height: TAB_BAR_HEIGHT + bottomInset,
+      paddingTop: t.spacing.sm,
+      paddingBottom: bottomInset,
     },
-    tabBarLabelStyle: { fontSize: 11, fontWeight: '600' as const },
+    tabBarLabelStyle: t.typography.tabLabel,
   };
 }
 
@@ -274,13 +350,13 @@ function EmployeeTabs() {
       />
       <Tab.Screen
         name="History"
-        component={HistoryScreen}
-        options={{ tabBarIcon: tabIcon('history') }}
+        component={EmployeeHistoryStack}
+        options={{ tabBarIcon: tabIcon('chart-column') }}
       />
       <Tab.Screen
-        name="Settings"
-        component={SettingsStack}
-        options={{ tabBarIcon: tabIcon('settings') }}
+        name="Profile"
+        component={ProfileStack}
+        options={{ tabBarIcon: tabIcon('user') }}
       />
     </Tab.Navigator>
   );
