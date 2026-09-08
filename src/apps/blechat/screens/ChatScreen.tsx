@@ -279,18 +279,57 @@ export function ChatScreen({route, navigation}: RootStackScreenProps<'Chat'>) {
     return out;
   }, [messages]);
 
+  /**
+   * Keep the newest message in view.
+   *
+   * `scrollToLocation` asks a virtualised list to jump to an index it may not have
+   * measured yet, and React Native answers that with an invariant — thrown, not
+   * returned. This runs from onContentSizeChange, which is a layout callback rather
+   * than a render, so no error boundary is in the way: on a release build the throw
+   * reached the global handler and ended the process. Opening a conversation with
+   * anything in it closed the app.
+   *
+   * Guarded here for the synchronous throw, and paired with onScrollToIndexFailed on
+   * the list below for the case where the list reports the failure instead.
+   */
   const scrollToEnd = useCallback(() => {
     const lastSection = sections.length - 1;
     if (lastSection < 0) {
       return;
     }
-    listRef.current?.scrollToLocation({
-      sectionIndex: lastSection,
-      itemIndex: Math.max(0, sections[lastSection].data.length - 1),
-      viewPosition: 1,
-      animated: false,
-    });
+    try {
+      listRef.current?.scrollToLocation({
+        sectionIndex: lastSection,
+        itemIndex: Math.max(0, sections[lastSection].data.length - 1),
+        viewPosition: 1,
+        animated: false,
+      });
+    } catch {
+      // Not measured that far yet. The fallback below handles it on the next frame.
+      scrollToBottomSafely();
+    }
   }, [sections]);
+
+  /**
+   * The one scroll that cannot fail: straight to the bottom of what is rendered.
+   *
+   * No index, so nothing to be out of range — which is exactly what makes it the right
+   * answer when an index-based scroll has just been refused.
+   */
+  const scrollToBottomSafely = useCallback(() => {
+    requestAnimationFrame(() => {
+      try {
+        const responder = (
+          listRef.current as unknown as {
+            getScrollResponder?: () => {scrollToEnd?: (o: {animated: boolean}) => void} | null;
+          } | null
+        )?.getScrollResponder?.();
+        responder?.scrollToEnd?.({animated: false});
+      } catch {
+        // The list is gone or has nothing to scroll. Nothing to recover from.
+      }
+    });
+  }, []);
 
   const [showJumpButton, setShowJumpButton] = useState(false);
   const NEAR_BOTTOM_PX = 120;
@@ -662,6 +701,12 @@ export function ChatScreen({route, navigation}: RootStackScreenProps<'Chat'>) {
             </View>
           }
           onContentSizeChange={scrollToEnd}
+          /**
+           * Required whenever scrollToLocation is used without getItemLayout. Without
+           * it React Native throws an invariant instead of reporting the miss, and the
+           * throw comes from a layout callback where nothing can catch it.
+           */
+          onScrollToIndexFailed={scrollToBottomSafely}
         />
 
         {showJumpButton && (

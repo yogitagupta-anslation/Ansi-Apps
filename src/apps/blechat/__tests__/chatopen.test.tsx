@@ -9,6 +9,7 @@ import React from "react";
 import TestRenderer, { act } from "react-test-renderer";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 
+import { SectionList } from "react-native";
 import { ChatScreen } from "../screens/ChatScreen";
 import { ThemeProvider } from "../theme/ThemeProvider";
 import { useAppStore } from "../state/appStore";
@@ -261,5 +262,56 @@ describe("a stale or broken route", () => {
       ],
     } as never);
     await expect(open("peer-a")).resolves.toBeUndefined();
+  });
+});
+
+/**
+ * The scroll that closed the app.
+ *
+ * Every other test here mounts the screen and stops, which is why they all passed while
+ * two phones were dying on this: react-test-renderer performs no layout, so
+ * onContentSizeChange never fires and the scroll it triggers never runs. The crash was
+ * an invariant thrown out of that callback — a layout callback, not a render, so no
+ * error boundary was in the way and the process went down.
+ *
+ * Firing the callback by hand is the difference between a test that mounts the screen
+ * and one that exercises it.
+ */
+it("survives the list reporting its content size", async () => {
+  useAppStore.setState({
+    peers: [peer({ state: "connected", linkId: "c:aa:bb" })],
+    conversations: {
+      "peer-a": [
+        message({ direction: "incoming", text: "hello" }),
+        message({ direction: "outgoing", text: "hi", status: "received" }),
+      ],
+    },
+  } as never);
+
+  let tree!: TestRenderer.ReactTestRenderer;
+  await act(async () => {
+    tree = TestRenderer.create(
+      <SafeAreaProvider initialMetrics={METRICS}>
+        <ThemeProvider mode="dark">
+          <ChatScreen
+            route={
+              { key: "chat", name: "Chat", params: { peerId: "peer-a", displayName: "Jaismeet" } } as never
+            }
+            navigation={NAV}
+          />
+        </ThemeProvider>
+      </SafeAreaProvider>,
+    );
+  });
+  mounted.push(tree);
+
+  const list = tree.root.findByType(SectionList);
+  expect(typeof list.props.onContentSizeChange).toBe("function");
+  // The list must be told how to cope when the index cannot be resolved; without this
+  // React Native throws instead of reporting.
+  expect(typeof list.props.onScrollToIndexFailed).toBe("function");
+
+  await act(async () => {
+    list.props.onContentSizeChange(390, 2000);
   });
 });
