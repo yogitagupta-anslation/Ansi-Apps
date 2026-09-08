@@ -29,6 +29,13 @@ import { gradients } from '../theme/theme';
 import { useTheme } from '../theme/ThemeContext';
 import { Icon, type IconName } from './Icon';
 
+/**
+ * The bar's own height above its gesture padding: 8 top + a 48px item.
+ * Exported so screens and the navigator agree on the clearance rather than each
+ * guessing at it.
+ */
+export const TAB_BAR_HEIGHT = 56;
+
 /* ================================================================= Screen == */
 
 export function Screen({
@@ -55,7 +62,7 @@ export function Screen({
    * collides with the clock and battery icons. Measured, not guessed — the
    * inset differs across notch, punch-hole and edge-to-edge devices.
    */
-  const paddingTop = insets.top + t.spacing.lg;
+  const paddingTop = insets.top + t.spacing.sm;
 
   /**
    * Clearance for the bottom tab bar, which is 62dp plus the gesture inset (see
@@ -63,7 +70,7 @@ export function Screen({
    * bar on gesture-nav devices, so it is derived from the same inset rather
    * than guessed. Harmless on the few screens that have no tab bar.
    */
-  const paddingBottom = 62 + insets.bottom + t.spacing.xl;
+  const paddingBottom = TAB_BAR_HEIGHT + Math.max(insets.bottom, t.spacing.x22) + t.spacing.xl;
 
   if (!scroll) {
     return <View style={[base, { paddingTop }, contentStyle]}>{children}</View>;
@@ -110,11 +117,34 @@ export function Txt({
   numberOfLines?: number;
 }) {
   const t = useTheme();
+
+  /**
+   * A caller that sets its own fontSize must NOT inherit the variant's
+   * lineHeight.
+   *
+   * `variant` defaults to `body`, which carries lineHeight 19.5 for 13px
+   * text. Any style that overrode only fontSize — a 9px eyebrow, a 9.5px tile
+   * label — kept that 19.5 line box, roughly 60% taller than the design called
+   * for, which quietly inflated every small label in the app and squeezed the
+   * layout around them. Dropping it lets RN derive the line box from the font
+   * metrics, which is what the design's unitless CSS resolves to anyway.
+   *
+   * An explicit lineHeight in the caller's own style still wins, so the
+   * deliberate ones on display text (which stop Android clipping these faces)
+   * are untouched.
+   */
+  const own = StyleSheet.flatten(style) as TextStyle | undefined;
+  let base: TextStyle = t.typography[variant];
+  if (own?.fontSize !== undefined && own.lineHeight === undefined) {
+    const { lineHeight: _inherited, ...rest } = base;
+    base = rest;
+  }
+
   return (
     <Text
       numberOfLines={numberOfLines}
       style={[
-        t.typography[variant],
+        base,
         { color: color ?? t.colors.textPrimary },
         mono ? { fontFamily: t.fonts.mono } : null,
         align ? { textAlign: align } : null,

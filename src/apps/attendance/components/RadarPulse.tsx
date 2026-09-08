@@ -61,9 +61,10 @@ export function RadarPulse({
     );
     loops.forEach(l => l.start());
 
+    // Stop only: resetting a native-driven value after the view is gone
+    // throws "Animated node with tag (parent) does not exist".
     return () => {
       loops.forEach(l => l.stop());
-      drivers.forEach(d => d.setValue(0));
     };
   }, [active, drivers]);
 

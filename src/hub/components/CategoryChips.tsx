@@ -1,16 +1,20 @@
 /**
  * The category row.
  *
- * Only the selected chip is filled; the rest sit flat on the background. A row
- * where every chip looks tappable-and-lit has nothing left to say about which one
- * is actually active.
+ * Only the selected chip is filled; the rest sit outlined on the page. A row where
+ * every chip looks tappable-and-lit has nothing left to say about which one is
+ * actually active.
+ *
+ * The row bleeds past the page gutter and re-applies it as content padding, so the
+ * first chip lines up with the text above it while the row still scrolls off the
+ * edge of the screen.
  */
 
 import React from 'react';
 import { ScrollView, StyleSheet, Text } from 'react-native';
 
 import { Press } from './Press';
-import { radius, space, type HubPalette } from '../theme';
+import { layout, radius, space, touch, type, type HubPalette } from '../theme';
 
 interface CategoryChipsProps {
   categories: string[];
@@ -30,8 +34,6 @@ export function CategoryChips({
       horizontal
       showsHorizontalScrollIndicator={false}
       contentContainerStyle={styles.row}
-      // The row is inside a vertical ScrollView; without this the chips clip
-      // against the parent's padding instead of running to the screen edge.
       style={styles.scroller}
     >
       {categories.map((category) => {
@@ -39,10 +41,11 @@ export function CategoryChips({
         return (
           <Press
             key={category}
-            scaleTo={0.93}
+            scaleTo={0.94}
             onPress={() => onSelect(category)}
             accessibilityRole="button"
             accessibilityState={{ selected: active }}
+            accessibilityLabel={category}
             style={[
               styles.chip,
               {
@@ -51,12 +54,7 @@ export function CategoryChips({
               },
             ]}
           >
-            <Text
-              style={[
-                styles.label,
-                { color: active ? '#FFFFFF' : theme.textDim },
-              ]}
-            >
+            <Text style={[type.chip, { color: active ? theme.onAccent : theme.textDim }]}>
               {category}
             </Text>
           </Press>
@@ -67,15 +65,14 @@ export function CategoryChips({
 }
 
 const styles = StyleSheet.create({
-  scroller: { flexGrow: 0, marginHorizontal: -space.xl },
-  row: { gap: space.sm, paddingHorizontal: space.xl },
+  scroller: { flexGrow: 0 },
+  row: { gap: space.sm, paddingHorizontal: layout.gutter },
   chip: {
-    height: 34,
+    height: touch.chip,
     paddingHorizontal: space.lg,
-    borderRadius: radius.sm + 7,
+    borderRadius: radius.chip,
     borderWidth: StyleSheet.hairlineWidth,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  label: { fontSize: 13, fontWeight: '600' },
 });

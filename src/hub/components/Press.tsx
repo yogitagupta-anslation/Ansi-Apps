@@ -15,12 +15,27 @@ import { Animated, Pressable, type PressableProps, type ViewStyle, type StylePro
 
 interface PressProps extends Omit<PressableProps, 'style'> {
   style?: StyleProp<ViewStyle>;
+  /**
+   * Styles for the Pressable itself rather than the animated surface inside it.
+   *
+   * `style` lands on the inner view, which is what carries the transform — so a
+   * `flex` or `width` passed there sizes the wrong node and the Pressable goes on
+   * shrink-wrapping its content. Anything that decides how this element is
+   * measured BY ITS PARENT (flex, alignSelf, a width in a row) belongs here.
+   */
+  containerStyle?: StyleProp<ViewStyle>;
   /** How far to shrink. Big surfaces need less than small ones to read the same. */
   scaleTo?: number;
   children: React.ReactNode;
 }
 
-export function Press({ style, scaleTo = 0.96, children, ...rest }: PressProps): React.ReactElement {
+export function Press({
+  style,
+  containerStyle,
+  scaleTo = 0.96,
+  children,
+  ...rest
+}: PressProps): React.ReactElement {
   const scale = useRef(new Animated.Value(1)).current;
 
   const animate = (to: number): void => {
@@ -35,6 +50,7 @@ export function Press({ style, scaleTo = 0.96, children, ...rest }: PressProps):
   return (
     <Pressable
       {...rest}
+      style={containerStyle}
       onPressIn={(event) => {
         animate(scaleTo);
         rest.onPressIn?.(event);

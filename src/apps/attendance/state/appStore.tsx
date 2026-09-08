@@ -78,7 +78,6 @@ import type { StatusReport } from '../bluetooth/statusReport';
 import { EmployeeManager } from '../employees/EmployeeManager';
 import type { Employee } from '../employees/employeeTypes';
 import { SettingsStorage } from '../storage/SettingsStorage';
-import type { ThemePreference } from '../theme/ThemeContext';
 import { log } from '../utils/logger';
 
 /* =============================================================================
@@ -87,7 +86,6 @@ import { log } from '../utils/logger';
 
 export interface AppSettings {
   role: AppRole | null;
-  themePreference: ThemePreference;
   verboseLogging: boolean;
 
   hostId: string;
@@ -119,7 +117,6 @@ export interface AppSettings {
 
 const defaultSettings: AppSettings = {
   role: null,
-  themePreference: 'dark',
   verboseLogging: false,
   hostId: DEFAULT_HOST_ID,
   hostName: DEFAULT_HOST_NAME,
@@ -183,7 +180,14 @@ interface AppStoreValue {
    * afterwards - see resetDeviceSetup for the developer-only escape hatch.
    */
   setInitialRole: (role: AppRole) => Promise<void>;
-  /** DEVELOPER ONLY: clear the role so first-run setup appears again. */
+  /**
+   * Clear the role so the role gate appears again.
+   *
+   * No longer developer-only: v3 puts "Switch device role" on Profile and in
+   * Settings, because the approved design says the choice is changeable. It
+   * stops both radios and clears the role; employees, attendance records and
+   * settings all survive.
+   */
   resetDeviceSetup: () => Promise<void>;
 
   employees: Employee[];
@@ -308,8 +312,6 @@ export function AppStoreProvider({ children }: { children: React.ReactNode }) {
 
       const loaded: AppSettings = {
         role: (stored[SETTINGS_KEYS.role] as AppRole | undefined) ?? null,
-        themePreference:
-          (stored[SETTINGS_KEYS.theme] as ThemePreference | undefined) ?? 'dark',
         verboseLogging: stored[SETTINGS_KEYS.verboseLogging] === 'true',
         hostId: stored[SETTINGS_KEYS.hostId] || DEFAULT_HOST_ID,
         hostName: stored[SETTINGS_KEYS.hostName] || DEFAULT_HOST_NAME,
@@ -665,7 +667,6 @@ export function AppStoreProvider({ children }: { children: React.ReactNode }) {
 
       const entries: Record<string, string> = {};
       if (patch.role !== undefined && patch.role !== null) entries[SETTINGS_KEYS.role] = patch.role;
-      if (patch.themePreference !== undefined) entries[SETTINGS_KEYS.theme] = patch.themePreference;
       if (patch.verboseLogging !== undefined) entries[SETTINGS_KEYS.verboseLogging] = String(patch.verboseLogging);
       if (patch.hostId !== undefined) entries[SETTINGS_KEYS.hostId] = patch.hostId;
       if (patch.hostName !== undefined) entries[SETTINGS_KEYS.hostName] = patch.hostName;
@@ -798,7 +799,7 @@ export function AppStoreProvider({ children }: { children: React.ReactNode }) {
    * this resets device SETUP, not the data.
    */
   const resetDeviceSetup = useCallback(async () => {
-    log.warn('BLE', 'DEV: resetting device setup (role cleared)');
+    log.warn('BLE', 'Switching device role (role cleared, radios stopped)');
     HostAttendanceService.teardown();
     await EmployeePresenceService.teardown();
     await updateSettings({ scanningEnabled: false, advertisingEnabled: false });

@@ -4,26 +4,34 @@
  * The Host's employee registry.
  *
  * REGISTERED IS NOT PRESENT. Registration is an admin fact — "the Host will
- * listen for this ID". Attendance comes only from real detection. The card
- * shows them on separate rows so a glance cannot conflate them.
+ * listen for this ID". Attendance comes only from real detection. The row shows
+ * the person and their id; the trailing word is today's real status, so a
+ * glance cannot conflate "on the list" with "here".
+ *
+ * The approved layout groups people by department into one card per group. Edit
+ * and Remove moved to the employee detail page that these rows open — the row
+ * is now too compact to carry two more controls, and the detail page is where
+ * you already are when you have decided to change something about a person.
  * -----------------------------------------------------------------------------
  */
 
 import React, { useCallback, useMemo, useState } from 'react';
 import { useNavigation } from '@react-navigation/native';
-import { Alert, Pressable, StyleSheet, View } from 'react-native';
+import { Pressable, StyleSheet, View } from 'react-native';
+import { LinearGradient } from 'expo-linear-gradient';
 import { deriveStatus } from '../attendance/attendanceTypes';
-import { PageHeader } from '../components/AppHeader';
 import { EmployeeAvatar } from '../components/EmployeeAvatar';
 import { Icon } from '../components/Icon';
 import { SearchBar } from '../components/SearchBar';
-import { AttendanceBadge, StatusBadge } from '../components/StatusBadge';
 import { EmptyState } from '../components/states';
-import { Button, Card, Screen, Txt } from '../components/ui';
-import { formatClockTime } from '../constants/appConfig';
+import { Card, Screen, Txt } from '../components/ui';
 import type { Employee } from '../employees/employeeTypes';
 import { useAppStore } from '../state/appStore';
+import { gradients } from '../theme/theme';
 import { useTheme } from '../theme/ThemeContext';
+
+/** Employees with no department still need a home in a grouped list. */
+const UNASSIGNED = 'Unassigned';
 
 export function EmployeesScreen() {
   const navigation = useNavigation<{ navigate: (s: string, p?: object) => void }>();
@@ -56,186 +64,194 @@ export function EmployeesScreen() {
     );
   }, [store.employees, query]);
 
+  /** One card per department, departments alphabetical, people alphabetical. */
+  const groups = useMemo(() => {
+    const byDept = new Map<string, Employee[]>();
+    for (const employee of visible) {
+      const dept = employee.department?.trim() || UNASSIGNED;
+      const list = byDept.get(dept);
+      if (list) list.push(employee);
+      else byDept.set(dept, [employee]);
+    }
+    return Array.from(byDept.entries())
+      .sort(([a], [b]) =>
+        // Unassigned sorts last however it compares alphabetically.
+        a === UNASSIGNED ? 1 : b === UNASSIGNED ? -1 : a.localeCompare(b),
+      )
+      .map(([dept, people]) => ({
+        dept,
+        people: people.sort((x, y) => x.displayName.localeCompare(y.displayName)),
+      }));
+  }, [visible]);
+
+  const departmentCount = useMemo(
+    () => new Set(store.employees.map(e => e.department?.trim()).filter(Boolean)).size,
+    [store.employees],
+  );
+
   /**
    * Add and edit both push AddEmployeeScreen rather than opening a sheet here.
    * There used to be a second copy of this form inline, which is how the two
    * drifted apart — one of them silently dropped the department field.
    */
-  const openAdd = useCallback(
-    () => navigation.navigate('AddEmployee'),
-    [navigation],
-  );
-
-  const openEdit = useCallback(
-    (employee: Employee) => navigation.navigate('AddEmployee', { employeeId: employee.employeeId }),
-    [navigation],
-  );
-
-  const confirmDelete = useCallback(
-    (employee: Employee) => {
-      Alert.alert(
-        'Remove ' + employee.displayName + '?',
-        'They will no longer be detected. Past attendance records are kept — removing someone does not rewrite history.',
-        [
-          { text: 'Cancel', style: 'cancel' },
-          {
-            text: 'Remove',
-            style: 'destructive',
-            onPress: () => void store.employeeManager.removeEmployee(employee.employeeId),
-          },
-        ],
-      );
-    },
-    [store.employeeManager],
-  );
+  const openAdd = useCallback(() => navigation.navigate('AddEmployee'), [navigation]);
 
   return (
     <Screen>
-      <PageHeader
-        title="Employees"
-        subtitle={store.employees.length + ' registered'}
-        right={
-          <Button title="Add" onPress={openAdd} icon="plus" size="sm" fullWidth={false} />
-        }
-      />
+      {/* --------------------------------------------------------- header -- */}
+      <View style={styles.header}>
+        <View style={{ flex: 1 }}>
+          <Txt variant="display">Employees</Txt>
+          <Txt variant="subtitle" color={t.colors.textMuted} style={{ marginTop: 3 }}>
+            {store.employees.length +
+              ' registered' +
+              (departmentCount > 0
+                ? ' · ' + departmentCount + (departmentCount === 1 ? ' department' : ' departments')
+                : '')}
+          </Txt>
+        </View>
+
+        <Pressable
+          onPress={openAdd}
+          accessibilityRole="button"
+          accessibilityLabel="Add employee"
+          style={({ pressed }) => [styles.fabSlot, { transform: [{ scale: pressed ? 0.94 : 1 }] }]}>
+          <LinearGradient
+            colors={[...gradients.primary]}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
+            style={[styles.fab, styles.fabGlow]}>
+            <Icon name="plus" size={19} color="#FFFFFF" />
+          </LinearGradient>
+        </Pressable>
+      </View>
 
       {store.employees.length > 0 ? (
-        <SearchBar value={query} onChange={setQuery} placeholder="Search name, ID or department…" />
+        <View style={{ marginTop: 18 }}>
+          <SearchBar value={query} onChange={setQuery} placeholder="Search the registry" />
+        </View>
       ) : null}
 
+      {/* ---------------------------------------------------------- lists -- */}
       {store.employees.length === 0 ? (
-        <Card>
+        <View style={styles.empty}>
           <EmptyState
             art="noEmployeesRegistered"
             icon="users"
             title="No employees registered"
-            message="You haven't added any employees yet. Add your first employee to start attendance tracking."
-            actionLabel="Add employee"
+            message="Add someone with the ID their phone will broadcast, and the Host will start listening for them."
+            actionLabel="Add first employee"
             onAction={openAdd}
           />
-        </Card>
+        </View>
       ) : visible.length === 0 ? (
-        <Card>
-          <EmptyState
-            icon="search-x"
-            title="No employees found"
-            message={'No employee matches "' + query + '". Try a different name, ID or department.'}
-            actionLabel="Clear search"
-            onAction={() => setQuery('')}
-          />
-        </Card>
+        <EmptyState
+          icon="search-x"
+          title="No employees found"
+          message={'No employee matches "' + query + '". Try a different name, ID or department.'}
+          actionLabel="Clear search"
+          onAction={() => setQuery('')}
+        />
       ) : (
-        visible.map(employee => {
-          const record = recordById.get(employee.employeeId) ?? null;
-          const status = deriveStatus(record, now, grace);
-          return (
-            <Card
-              key={employee.employeeId}
-              onPress={() =>
-                navigation.navigate('EmployeeDetail', { employeeId: employee.employeeId })
-              }
-              style={!employee.enabled ? { opacity: 0.62 } : undefined}>
-              <View style={styles.row}>
-                <EmployeeAvatar
-                  name={employee.displayName}
-                  employeeId={employee.employeeId}
-                  size={46}
-                  dimmed={!employee.enabled}
-                  photo={employee.photo}
-                />
-                <View style={{ flex: 1, marginHorizontal: t.spacing.md }}>
-                  <Txt variant="bodyStrong" numberOfLines={1}>
-                    {employee.displayName}
-                  </Txt>
-                  <Txt variant="caption" color={t.colors.textMuted} numberOfLines={1}>
-                    {employee.employeeId}
-                    {employee.department ? '  ·  ' + employee.department : ''}
-                  </Txt>
-                </View>
-                <StatusBadge
-                  label={employee.enabled ? 'Registered' : 'Disabled'}
-                  tone={employee.enabled ? 'accent' : 'neutral'}
-                  size="sm"
-                />
-              </View>
+        groups.map(group => (
+          <View key={group.dept}>
+            <Txt variant="groupLabel" color={t.colors.textMuted} style={styles.groupLabel}>
+              {group.dept.toUpperCase()}
+            </Txt>
 
-              {/* Attendance shown separately from registration, on its own row. */}
-              <View
-                style={[
-                  styles.statusRow,
-                  { borderTopColor: t.colors.border, marginTop: t.spacing.md, paddingTop: t.spacing.md },
-                ]}>
-                <View style={styles.rowCenter}>
-                  <AttendanceBadge status={status} size="sm" />
-                  {record?.checkInTime ? (
-                    <Txt variant="caption" color={t.colors.textMuted} style={{ marginLeft: t.spacing.sm }}>
-                      {formatClockTime(record.checkInTime)}
-                    </Txt>
-                  ) : null}
-                </View>
+            <View
+              style={[
+                styles.groupCard,
+                {
+                  backgroundColor: t.colors.surface,
+                  borderColor: t.colors.border,
+                  borderRadius: t.radius.card,
+                },
+                t.shadow(1),
+              ]}>
+              {group.people.map((employee, index) => {
+                const record = recordById.get(employee.employeeId) ?? null;
+                const status = deriveStatus(record, now, grace);
+                const trailing = !employee.enabled
+                  ? 'Disabled'
+                  : status.charAt(0) + status.slice(1).toLowerCase();
 
-                {detectedIds.has(employee.employeeId) ? (
-                  <View style={styles.rowCenter}>
-                    <Icon name="circle-dot" size={11} color={t.colors.success} />
-                    <Txt variant="caption" color={t.colors.success} style={{ marginLeft: 4 }}>
-                      Nearby
-                    </Txt>
-                  </View>
-                ) : null}
-              </View>
+                return (
+                  <Pressable
+                    key={employee.employeeId}
+                    onPress={() =>
+                      navigation.navigate('EmployeeDetail', { employeeId: employee.employeeId })
+                    }
+                    accessibilityRole="button"
+                    accessibilityLabel={employee.displayName + '. ' + trailing}
+                    style={({ pressed }) => [
+                      styles.row,
+                      index > 0
+                        ? { borderTopColor: t.colors.border, borderTopWidth: StyleSheet.hairlineWidth }
+                        : null,
+                      pressed ? { backgroundColor: t.colors.surfaceMuted } : null,
+                      !employee.enabled ? { opacity: 0.62 } : null,
+                    ]}>
+                    <EmployeeAvatar
+                      name={employee.displayName}
+                      employeeId={employee.employeeId}
+                      size={38}
+                      dimmed={!employee.enabled}
+                      photo={employee.photo}
+                      badge={
+                        detectedIds.has(employee.employeeId) ? t.colors.success : undefined
+                      }
+                    />
 
-              <View style={[styles.actions, { borderTopColor: t.colors.border, marginTop: t.spacing.md, paddingTop: t.spacing.sm }]}>
-                <Pressable
-                  onPress={() => openEdit(employee)}
-                  accessibilityRole="button"
-                  accessibilityLabel={'Edit ' + employee.displayName}
-                  style={({ pressed }) => [styles.action, { opacity: pressed ? 0.6 : 1 }]}>
-                  <Icon name="pencil" size={15} color={t.colors.textSecondary} />
-                  <Txt variant="captionMedium" color={t.colors.textSecondary} style={{ marginLeft: 6 }}>
-                    Edit
-                  </Txt>
-                </Pressable>
+                    <View style={styles.identity}>
+                      <Txt variant="heading" numberOfLines={1}>
+                        {employee.displayName}
+                      </Txt>
+                      <Txt
+                        variant="caption"
+                        color={t.colors.textMuted}
+                        mono
+                        numberOfLines={1}
+                        style={{ marginTop: 2 }}>
+                        {employee.employeeId}
+                      </Txt>
+                    </View>
 
-                <Pressable
-                  onPress={() => confirmDelete(employee)}
-                  accessibilityRole="button"
-                  accessibilityLabel={'Remove ' + employee.displayName}
-                  style={({ pressed }) => [styles.action, { opacity: pressed ? 0.6 : 1 }]}>
-                  <Icon name="trash-2" size={15} color={t.colors.error} />
-                  <Txt variant="captionMedium" color={t.colors.error} style={{ marginLeft: 6 }}>
-                    Remove
-                  </Txt>
-                </Pressable>
-              </View>
-            </Card>
-          );
-        })
+                    <Txt style={[styles.trailing, { color: t.colors.textMuted }]}>{trailing}</Txt>
+                    <Icon name="chevron-right" size={16} color={t.colors.textMuted} />
+                  </Pressable>
+                );
+              })}
+            </View>
+          </View>
+        ))
       )}
     </Screen>
   );
 }
 
 const styles = StyleSheet.create({
-  row: { alignItems: 'center', flexDirection: 'row' },
-  rowCenter: { alignItems: 'center', flexDirection: 'row' },
-  statusRow: {
+  header: { alignItems: 'flex-end', flexDirection: 'row', gap: 12 },
+  fabSlot: { flexShrink: 0 },
+  fab: { alignItems: 'center', borderRadius: 999, height: 40, justifyContent: 'center', width: 40 },
+  fabGlow: {
+    elevation: 8,
+    shadowColor: '#4F46E5',
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.55,
+    shadowRadius: 11,
+  },
+
+  empty: { marginTop: 18 },
+  groupLabel: { marginBottom: 10, marginTop: 22 },
+  groupCard: { borderWidth: StyleSheet.hairlineWidth, overflow: 'hidden' },
+  row: {
     alignItems: 'center',
-    borderTopWidth: StyleSheet.hairlineWidth,
     flexDirection: 'row',
-    justifyContent: 'space-between',
-  },
-  actions: { borderTopWidth: StyleSheet.hairlineWidth, flexDirection: 'row' },
-  action: { alignItems: 'center', flexDirection: 'row', marginRight: 20, paddingVertical: 8 },
-  backdrop: { flex: 1, justifyContent: 'flex-end' },
-  sheet: { maxHeight: '92%' },
-  handleWrap: { alignItems: 'center', paddingBottom: 4, paddingTop: 10 },
-  handle: { borderRadius: 3, height: 4, width: 40 },
-  toggleRow: { alignItems: 'center', borderWidth: StyleSheet.hairlineWidth, flexDirection: 'row' },
-  input: {
-    borderWidth: StyleSheet.hairlineWidth,
-    marginTop: 6,
-    minHeight: 50,
+    gap: 12,
     paddingHorizontal: 14,
-    paddingVertical: 12,
+    paddingVertical: 13,
   },
+  identity: { flex: 1, minWidth: 0 },
+  trailing: { fontFamily: 'PlusJakartaSans_600SemiBold', fontSize: 11.5 },
 });

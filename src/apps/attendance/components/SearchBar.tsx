@@ -24,16 +24,7 @@ export function SearchBar({
 
   return (
     <View
-      style={[
-        styles.wrap,
-        {
-          backgroundColor: t.colors.surfaceRaised,
-          borderColor: t.colors.border,
-          borderRadius: t.radius.md,
-          marginBottom: t.spacing.md,
-          paddingHorizontal: t.spacing.md,
-        },
-      ]}>
+      style={[styles.wrap, t.neuIn(t.colors), { marginBottom: t.spacing.md }]}>
       <Icon name="search" size={t.iconSize.sm} color={t.colors.textMuted} />
       <TextInput
         value={value}
@@ -46,7 +37,13 @@ export function SearchBar({
         accessibilityLabel={placeholder}
         style={[
           t.typography.body,
-          { color: t.colors.textPrimary, flex: 1, marginLeft: t.spacing.sm, paddingVertical: 0 },
+          {
+            color: t.colors.textPrimary,
+            flex: 1,
+            fontSize: 14,
+            marginLeft: t.spacing.x9,
+            paddingVertical: 0,
+          },
         ]}
       />
       {value.length > 0 ? (
@@ -65,9 +62,9 @@ export function SearchBar({
 const styles = StyleSheet.create({
   wrap: {
     alignItems: 'center',
-    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 15,
     flexDirection: 'row',
-    // 46 keeps the tap target comfortable without dominating the screen.
-    minHeight: 46,
+    height: 46,
+    paddingHorizontal: 15,
   },
 });

@@ -1,241 +1,423 @@
 /**
- * ProfileScreen.tsx
+ * ProfileScreen.tsx — v3 "Orbit", employee tab 4
  * -----------------------------------------------------------------------------
- * The employee's own profile on their own device.
+ * Who this device says you are, how the month has actually gone, and the way
+ * into Settings. Read-only: every value here is either a stored setting or a
+ * figure derived from days a Host delivered. Editing lives one push away in
+ * EditProfileScreen, which is the old Profile screen unchanged.
  *
- * Only `employeeId` ever reaches the radio. Name, department, phone and email
- * are local display metadata — they are stored on this device and are never
- * placed in an advertisement, which is both a payload-size fact (31 bytes) and
- * a privacy one.
+ * WHERE THE DESIGN'S PLACEHOLDERS MET REAL DATA
+ * ---------------------------------------------------------------------------
+ * The mock hard-codes an identity (AS · EMP-1043 · Engineering), a contact card
+ * (aarav.s@company.in), an overview (19 of 24 days, 91%) and a personal best
+ * (27 days, Apr – May 2026). Those are mock furniture, not the design's intent
+ * — reproducing them literally would put a stranger's email on the user's own
+ * profile. Every one is bound to what this phone genuinely holds, and anything
+ * unset renders as a dash rather than as an invented value.
  *
- * Editing the employee ID while broadcasting is blocked rather than silently
- * applied: the id in the air is captured at start time, so changing it here
- * mid-broadcast would leave the UI disagreeing with the radio.
+ * The LATE tile is the one place the layout could not be filled honestly; see
+ * employeeStats.ts for why it shows the average arrival instead.
  * -----------------------------------------------------------------------------
  */
 
-import React, { useCallback, useEffect, useState } from 'react';
-import { Pressable, StyleSheet, View } from 'react-native';
-import { PhotoActionSheet } from '../components/PhotoPicker';
-import { EmployeeAvatar } from '../components/EmployeeAvatar';
-import { Field } from '../components/Field';
-import { Icon } from '../components/Icon';
-import { PageHeader } from '../components/AppHeader';
-import { StatusBadge } from '../components/StatusBadge';
-import { Banner, Button, Card, Screen, Txt } from '../components/ui';
-import { EMPLOYEE_ID_PATTERN } from '../constants/appConfig';
+import React, { useMemo } from 'react';
+import { Image, Pressable, StyleSheet, View } from 'react-native';
+import { LinearGradient } from 'expo-linear-gradient';
 import { useNavigation } from '@react-navigation/native';
+import { Icon, type IconName } from '../components/Icon';
+import { Screen, Txt } from '../components/ui';
+import { APP_VERSION } from '../constants/appConfig';
 import { useAppStore } from '../state/appStore';
+import {
+  formatMinutesOfDay,
+  monthKeyOfDate,
+  summariseMonth,
+  summariseStreaks,
+} from '../state/employeeStats';
+import { numeric } from '../theme/theme';
 import { useTheme } from '../theme/ThemeContext';
+
+const MONTHS = [
+  'January', 'February', 'March', 'April', 'May', 'June',
+  'July', 'August', 'September', 'October', 'November', 'December',
+];
+const SHORT_MONTHS = [
+  'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+  'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+];
+
+/** "AS" from "Aarav Sharma"; "A" from one word; "?" from nothing. */
+function initialsOf(name: string): string {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return '?';
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+}
+
+/** "Apr 3" from "2026-04-03", for the longest-streak range. */
+function shortDay(dateKey: string): string {
+  const [, m, d] = dateKey.split('-');
+  return SHORT_MONTHS[Number(m) - 1] + ' ' + Number(d);
+}
 
 export function ProfileScreen() {
   const t = useTheme();
   const store = useAppStore();
-  const navigation = useNavigation<{ goBack: () => void }>();
+  const navigation = useNavigation<{ navigate: (screen: string) => void }>();
   const s = store.settings;
 
-  const onAir = store.advertiser.state === 'ACTIVE';
+  const now = useMemo(() => new Date(), []);
+  const monthKey = monthKeyOfDate(now);
 
-  const [name, setName] = useState(s.employeeName);
-  const [id, setId] = useState(s.employeeId);
-  const [department, setDepartment] = useState(s.employeeDepartment);
-  const [phone, setPhone] = useState(s.employeePhone);
-  const [email, setEmail] = useState(s.employeeEmail);
-  const [photo, setPhoto] = useState(s.employeePhoto);
-  const [photoSheet, setPhotoSheet] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [saved, setSaved] = useState(false);
+  const overview = useMemo(
+    () => summariseMonth(store.employeeHistory, monthKey),
+    [store.employeeHistory, monthKey],
+  );
+  const streaks = useMemo(() => summariseStreaks(store.employeeHistory), [store.employeeHistory]);
 
-  // Re-sync if the stored settings change underneath us (e.g. after a reset).
-  useEffect(() => {
-    setName(s.employeeName);
-    setId(s.employeeId);
-    setDepartment(s.employeeDepartment);
-    setPhone(s.employeePhone);
-    setEmail(s.employeeEmail);
-    setPhoto(s.employeePhoto);
-  }, [s.employeeName, s.employeeId, s.employeeDepartment, s.employeePhone, s.employeeEmail, s.employeePhoto]);
+  const c = t.colors;
 
-  const idChanged = id.trim() !== s.employeeId;
+  /* -------------------------------------------------------------- contact -- */
 
-  const dirty =
-    name !== s.employeeName ||
-    idChanged ||
-    department !== s.employeeDepartment ||
-    phone !== s.employeePhone ||
-    email !== s.employeeEmail ||
-    photo !== s.employeePhoto;
+  const contactRows: { icon: IconName; label: string; value: string; set: boolean }[] = [
+    { icon: 'mail', label: 'Email', value: s.employeeEmail, set: s.employeeEmail.length > 0 },
+    { icon: 'phone', label: 'Phone', value: s.employeePhone, set: s.employeePhone.length > 0 },
+    {
+      icon: 'building-2',
+      label: 'Office',
+      value: s.employeeDepartment,
+      set: s.employeeDepartment.length > 0,
+    },
+  ];
 
-  const handleSave = useCallback(async () => {
-    setError(null);
-    setSaved(false);
+  /* ------------------------------------------------------------- overview -- */
 
-    const trimmedId = id.trim();
-    if (trimmedId.length === 0) {
-      setError('Employee ID is required — it is the only thing the office system can recognise you by.');
-      return;
-    }
-    if (!EMPLOYEE_ID_PATTERN.test(trimmedId)) {
-      setError('Employee ID can only contain letters, numbers, hyphens and underscores.');
-      return;
-    }
-    if (idChanged && onAir) {
-      setError('Turn off attendance before changing your Employee ID. The ID currently on air was set when broadcasting started.');
-      return;
-    }
+  const tiles = [
+    {
+      label: 'PRESENT',
+      value: overview.recorded === 0 ? '—' : String(overview.present),
+      sub: overview.recorded === 0 ? 'nothing delivered' : 'of ' + overview.recorded + ' days',
+      fg: overview.present > 0 ? c.success : c.textMuted,
+    },
+    {
+      label: 'ABSENT',
+      value: overview.recorded === 0 ? '—' : String(overview.absent),
+      sub: 'as reported',
+      fg: c.textMuted,
+    },
+    {
+      // Stands in for the mock's LATE tile — see employeeStats.ts.
+      label: 'AVG IN',
+      value:
+        overview.avgCheckInMinutes === null
+          ? '—'
+          : formatMinutesOfDay(overview.avgCheckInMinutes),
+      sub: 'check-in time',
+      fg: c.textMuted,
+    },
+    {
+      label: 'RATE',
+      value: overview.ratePct === null ? '—' : overview.ratePct + '%',
+      sub: 'this month',
+      fg: overview.ratePct === null ? c.textMuted : c.success,
+    },
+  ];
 
-    await store.updateSettings({
-      employeeName: name.trim(),
-      employeeId: trimmedId,
-      employeeDepartment: department.trim(),
-      employeePhone: phone.trim(),
-      employeeEmail: email.trim(),
-      employeePhoto: photo,
-    });
-    setSaved(true);
-  }, [id, idChanged, onAir, name, department, phone, email, photo, store]);
+  /* ------------------------------------------------------------- settings -- */
+
+  const settingsRows: {
+    icon: IconName;
+    title: string;
+    sub: string;
+    fg: string;
+    soft: string;
+    to: string;
+  }[] = [
+    {
+      icon: 'user',
+      title: 'Personal details',
+      sub: 'Name, ID, department, photo',
+      fg: c.primaryTint,
+      soft: c.primarySoft,
+      to: 'EditProfile',
+    },
+    {
+      icon: 'radio',
+      title: 'Connectivity',
+      sub: 'Bluetooth, location, permissions',
+      fg: c.primaryTint,
+      soft: c.primarySoft,
+      to: 'Settings',
+    },
+    {
+      icon: 'shield',
+      title: 'Privacy',
+      sub: 'Only your ID is ever broadcast',
+      fg: c.success,
+      soft: c.successSoft,
+      to: 'Settings',
+    },
+    {
+      icon: 'sliders-horizontal',
+      title: 'Data',
+      sub: 'Local storage and history',
+      fg: c.primaryTint,
+      soft: c.primarySoft,
+      to: 'Settings',
+    },
+    {
+      icon: 'info',
+      title: 'About',
+      sub: 'Version ' + APP_VERSION,
+      fg: c.primaryTint,
+      soft: c.primarySoft,
+      to: 'Settings',
+    },
+  ];
+
+  const card = {
+    backgroundColor: c.surface,
+    borderColor: c.border,
+  };
 
   return (
     <Screen>
-      <PageHeader title="Profile" subtitle="Stored on this device only" onBack={() => navigation.goBack()} />
+      <Txt style={[styles.title, { color: c.textPrimary }]}>Profile</Txt>
 
       {/* ------------------------------------------------------- identity -- */}
-      <Card>
-        <View style={styles.hero}>
-          <Pressable
-            onPress={() => setPhotoSheet(true)}
-            accessibilityRole="button"
-            accessibilityLabel={photo ? 'Change profile photo' : 'Add profile photo'}
-            style={({ pressed }) => ({ opacity: pressed ? 0.8 : 1 })}>
-            <EmployeeAvatar
-              name={name || '?'}
-              employeeId={id || 'unset'}
-              size={92}
-              photo={photo || undefined}
-              badge={onAir ? t.colors.success : undefined}
-            />
-            {/* Camera affordance so the avatar reads as editable, not static. */}
-            <View
-              style={[
-                styles.editBadge,
-                { backgroundColor: t.colors.primary, borderColor: t.colors.surface },
-              ]}>
-              <Icon name="camera" size={13} color={t.colors.textOnAccent} />
-            </View>
-          </Pressable>
-          <Pressable onPress={() => setPhotoSheet(true)} hitSlop={8} accessibilityRole="button">
-            <Txt variant="captionMedium" color={t.colors.primary} style={{ marginTop: 8 }}>
-              {photo ? 'Change photo' : 'Add photo'}
-            </Txt>
-          </Pressable>
-          <Txt variant="title" style={{ marginTop: t.spacing.md }}>
-            {name.trim() || 'Unnamed'}
-          </Txt>
-          <View style={styles.idRow}>
-            <Txt variant="caption" color={t.colors.textMuted} mono>
-              {id.trim() || 'no ID set'}
-            </Txt>
-            {onAir ? (
-              <View style={{ marginLeft: 8 }}>
-                <StatusBadge label="On air" tone="success" size="sm" />
-              </View>
-            ) : null}
-          </View>
-        </View>
-      </Card>
+      <View style={styles.identity}>
+        {s.employeePhoto ? (
+          <Image source={{ uri: s.employeePhoto }} style={styles.avatar} />
+        ) : (
+          <LinearGradient
+            colors={['#6366F1', '#8B5CF6']}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
+            style={[styles.avatar, styles.avatarInk]}>
+            <Txt style={styles.initials}>{initialsOf(s.employeeName)}</Txt>
+          </LinearGradient>
+        )}
 
-      {saved && !dirty ? (
-        <Banner tone="success" title="Profile saved" detail="Stored locally on this device." />
-      ) : null}
-      {error ? <Banner tone="danger" title="Could not save" detail={error} /> : null}
-
-      {/* --------------------------------------------------------- fields -- */}
-      <Card>
-        <Field label="Full name" value={name} onChange={setName} placeholder="Enter full name" />
-        <Field
-          label="Employee ID"
-          value={id}
-          onChange={setId}
-          placeholder="e.g. EMP001"
-          autoCapitalize="characters"
-          mono
-          hint={
-            onAir && idChanged
-              ? 'Turn off attendance before changing this.'
-              : 'Must match the ID your administrator registered. This is the only field that is broadcast.'
-          }
-        />
-        <Field
-          label="Department"
-          value={department}
-          onChange={setDepartment}
-          placeholder="e.g. HR"
-        />
-        <Field
-          label="Phone"
-          value={phone}
-          onChange={setPhone}
-          placeholder="Optional"
-          keyboardType="phone-pad"
-        />
-        <Field
-          label="Email"
-          value={email}
-          onChange={setEmail}
-          placeholder="Optional"
-          keyboardType="email-address"
-          autoCapitalize="none"
-        />
-      </Card>
-
-      <Button
-        title="UPDATE PROFILE"
-        onPress={handleSave}
-        disabled={!dirty}
-        gradient
-        size="lg"
-      />
-
-      {/* -------------------------------------------------- privacy note -- */}
-      <Card style={{ marginTop: t.spacing.md }}>
-        <View style={styles.rowCenter}>
-          <Icon name="shield" size={t.iconSize.sm} color={t.colors.primary} />
-          <Txt variant="heading" style={{ marginLeft: t.spacing.sm }}>
-            What leaves this phone
-          </Txt>
-        </View>
-        <Txt
-          variant="caption"
-          color={t.colors.textSecondary}
-          style={{ lineHeight: 20, marginTop: 8 }}>
-          Only your Employee ID is transmitted — not your name, department, phone
-          or email. The broadcast is one-way and non-connectable, so no device can
-          connect to this phone through it and no pairing is involved.
+        <Txt style={[styles.name, { color: c.textPrimary }]}>
+          {s.employeeName || 'Name not set'}
         </Txt>
-      </Card>
-      <PhotoActionSheet
-        visible={photoSheet}
-        hasPhoto={photo.length > 0}
-        onClose={() => setPhotoSheet(false)}
-        onPicked={next => setPhoto(next ?? '')}
-      />
+        <Txt mono style={[styles.meta, { color: c.textMuted }]}>
+          {s.employeeId
+            ? s.employeeDepartment
+              ? s.employeeId + ' · ' + s.employeeDepartment
+              : s.employeeId
+            : 'No employee ID'}
+        </Txt>
+      </View>
+
+      {/* -------------------------------------------------------- contact -- */}
+      <View style={[styles.listCard, card, t.shadow(2)]}>
+        {contactRows.map(r => (
+          <View key={r.label} style={[styles.row, { borderTopColor: c.border }]}>
+            <Icon name={r.icon} size={16} color={c.textMuted} />
+            <Txt style={[styles.rowLabel, { color: c.textMuted }]}>{r.label}</Txt>
+            <Txt
+              numberOfLines={1}
+              style={[styles.rowValue, { color: r.set ? c.textSecondary : c.textMuted }]}>
+              {r.set ? r.value : 'Not set'}
+            </Txt>
+          </View>
+        ))}
+      </View>
+
+      {/* ------------------------------------------------------- overview -- */}
+      <Txt style={[styles.heading, { color: c.textPrimary }]}>Attendance overview</Txt>
+      <Txt style={[styles.subheading, { color: c.textMuted }]}>
+        {MONTHS[now.getMonth()] + ' ' + now.getFullYear()}
+      </Txt>
+
+{/* Two rows of two rather than a wrapping grid: RN cannot express
+          "half the width minus half the gap" as a percentage, so a wrap would
+          leave the second column short by a few pixels on every device. */}
+      {[tiles.slice(0, 2), tiles.slice(2)].map((pair, i) => (
+        <View key={i} style={i === 0 ? styles.grid : styles.gridNext}>
+          {pair.map(tile => (
+            <View key={tile.label} style={[styles.tile, styles.gridTile, card, t.neu]}>
+              <Txt style={[styles.tileLabel, { color: c.textMuted }]}>{tile.label}</Txt>
+              <Txt style={[styles.tileValue, numeric, { color: tile.fg }]}>{tile.value}</Txt>
+              <Txt style={[styles.tileSub, { color: c.textMuted }]}>{tile.sub}</Txt>
+            </View>
+          ))}
+        </View>
+      ))}
+
+      {/* --------------------------------------------------------- streak -- */}
+      <Txt style={[styles.heading, { color: c.textPrimary }]}>Streak</Txt>
+      <View style={styles.streakRow}>
+        <View style={[styles.tile, styles.streakCard, card, t.neu]}>
+          <View style={styles.streakHead}>
+            <Icon name="flame" size={15} color={c.warning} />
+            <Txt style={[styles.tileLabel, { color: c.textMuted }]}>CURRENT</Txt>
+          </View>
+          <Txt style={[styles.tileValue, numeric, { color: c.textPrimary }]}>{streaks.current}</Txt>
+          <Txt style={[styles.tileSub, { color: c.textMuted }]}>work days</Txt>
+        </View>
+
+        <View style={[styles.tile, styles.streakCard, card, t.neu]}>
+          <View style={styles.streakHead}>
+            <Icon name="trophy" size={15} color={c.textMuted} />
+            <Txt style={[styles.tileLabel, { color: c.textMuted }]}>LONGEST</Txt>
+          </View>
+          <Txt style={[styles.tileValue, numeric, { color: c.textPrimary }]}>{streaks.longest}</Txt>
+          <Txt style={[styles.tileSub, { color: c.textMuted }]}>
+            {streaks.longestFrom && streaks.longestTo
+              ? streaks.longestFrom === streaks.longestTo
+                ? shortDay(streaks.longestFrom)
+                : shortDay(streaks.longestFrom) + ' – ' + shortDay(streaks.longestTo)
+              : 'no days yet'}
+          </Txt>
+        </View>
+      </View>
+
+      {/* ------------------------------------------------------- settings -- */}
+      <Txt style={[styles.heading, { color: c.textPrimary }]}>Settings</Txt>
+      <View style={[styles.listCard, styles.settingsCard, card, t.shadow(2)]}>
+        {settingsRows.map(r => (
+          <Pressable
+            key={r.title}
+            onPress={() => navigation.navigate(r.to)}
+            style={({ pressed }) => [
+              styles.row,
+              { borderTopColor: c.border },
+              pressed ? { backgroundColor: c.surfaceMuted } : null,
+            ]}>
+            <View style={[styles.iconTile, { backgroundColor: r.soft }]}>
+              <Icon name={r.icon} size={17} color={r.fg} />
+            </View>
+            <View style={styles.rowText}>
+              <Txt style={[styles.rowTitle, { color: c.textPrimary }]}>{r.title}</Txt>
+              <Txt style={[styles.rowSub, { color: c.textMuted }]}>{r.sub}</Txt>
+            </View>
+            <Icon name="chevron-right" size={15} color={c.textMuted} />
+          </Pressable>
+        ))}
+      </View>
+
+      {/* ---------------------------------------------------- switch role -- */}
+      <Pressable
+        onPress={() => void store.resetDeviceSetup()}
+        style={({ pressed }) => [
+          styles.switchRole,
+          { backgroundColor: c.errorSoft, borderColor: c.error },
+          pressed ? { transform: [{ scale: 0.98 }] } : null,
+        ]}>
+        <Icon name="log-out" size={16} color={c.errorTint} />
+        <Txt style={[styles.switchLabel, { color: c.errorTint }]}>Switch device role</Txt>
+      </Pressable>
     </Screen>
   );
 }
 
 const styles = StyleSheet.create({
-  hero: { alignItems: 'center', paddingVertical: 6 },
-  editBadge: {
-    alignItems: 'center',
-    borderRadius: 14,
-    borderWidth: 2,
-    bottom: 0,
-    height: 28,
-    justifyContent: 'center',
-    position: 'absolute',
-    right: -2,
-    width: 28,
+  title: {
+    fontFamily: 'PlusJakartaSans_700Bold',
+    fontSize: 26,
+    letterSpacing: -0.7,
+    lineHeight: 34,
   },
-  idRow: { alignItems: 'center', flexDirection: 'row', marginTop: 4 },
-  rowCenter: { alignItems: 'center', flexDirection: 'row' },
+
+  identity: { alignItems: 'center', marginTop: 22 },
+  avatar: { borderRadius: 999, height: 88, width: 88 },
+  avatarInk: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    // The design's indigo cast under the avatar. Android takes the colour from
+    // elevation, so this reads as a plain lift there rather than a tinted one.
+    elevation: 10,
+    shadowColor: '#6366F1',
+    shadowOffset: { width: 0, height: 14 },
+    shadowOpacity: 0.6,
+    shadowRadius: 18,
+  },
+  initials: {
+    color: '#FFFFFF',
+    fontFamily: 'PlusJakartaSans_700Bold',
+    fontSize: 28,
+    letterSpacing: 0.5,
+    lineHeight: 36,
+  },
+  name: {
+    fontFamily: 'PlusJakartaSans_700Bold',
+    fontSize: 22,
+    letterSpacing: -0.5,
+    lineHeight: 29,
+    marginTop: 16,
+  },
+  meta: { fontSize: 12, marginTop: 5 },
+
+  listCard: {
+    borderRadius: 20,
+    borderWidth: StyleSheet.hairlineWidth,
+    marginTop: 22,
+    overflow: 'hidden',
+  },
+  settingsCard: { marginTop: 13 },
+  row: {
+    alignItems: 'center',
+    borderTopWidth: StyleSheet.hairlineWidth,
+    flexDirection: 'row',
+    gap: 13,
+    paddingHorizontal: 15,
+    paddingVertical: 14,
+  },
+  rowLabel: { flex: 1, fontFamily: 'PlusJakartaSans_400Regular', fontSize: 12.5 },
+  rowValue: {
+    flexShrink: 1,
+    fontFamily: 'PlusJakartaSans_600SemiBold',
+    fontSize: 13,
+    textAlign: 'right',
+  },
+
+  heading: { fontFamily: 'PlusJakartaSans_700Bold', fontSize: 15, marginTop: 26 },
+  subheading: { fontFamily: 'PlusJakartaSans_400Regular', fontSize: 12, marginTop: 2 },
+
+  grid: { flexDirection: 'row', gap: 9, marginTop: 13 },
+  gridNext: { flexDirection: 'row', gap: 9, marginTop: 9 },
+  gridTile: { flex: 1 },
+  tile: {
+    borderRadius: 18,
+    borderWidth: StyleSheet.hairlineWidth,
+    padding: 16,
+  },
+  tileLabel: { fontFamily: 'PlusJakartaSans_800ExtraBold', fontSize: 9.5, letterSpacing: 0.9 },
+  tileValue: {
+    fontFamily: 'SpaceGrotesk_700Bold',
+    fontSize: 28,
+    letterSpacing: -1,
+    lineHeight: 35,
+    marginTop: 8,
+  },
+  tileSub: { fontFamily: 'PlusJakartaSans_400Regular', fontSize: 11, marginTop: 2 },
+
+  streakRow: { flexDirection: 'row', gap: 9, marginTop: 13 },
+  streakCard: { flex: 1 },
+  streakHead: { alignItems: 'center', flexDirection: 'row', gap: 8 },
+
+  iconTile: {
+    alignItems: 'center',
+    borderRadius: 11,
+    height: 34,
+    justifyContent: 'center',
+    width: 34,
+  },
+  rowText: { flex: 1, minWidth: 0 },
+  rowTitle: { fontFamily: 'PlusJakartaSans_600SemiBold', fontSize: 14.5 },
+  rowSub: { fontFamily: 'PlusJakartaSans_400Regular', fontSize: 11.5, marginTop: 2 },
+
+  switchRole: {
+    alignItems: 'center',
+    borderRadius: 16,
+    borderWidth: StyleSheet.hairlineWidth,
+    flexDirection: 'row',
+    gap: 9,
+    height: 48,
+    justifyContent: 'center',
+    marginTop: 22,
+  },
+  switchLabel: { fontFamily: 'PlusJakartaSans_700Bold', fontSize: 14.5 },
 });

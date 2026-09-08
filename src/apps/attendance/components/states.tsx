@@ -12,7 +12,8 @@
  */
 
 import React, { useEffect, useRef } from 'react';
-import { Animated, Image, StyleSheet, View } from 'react-native';
+import { Animated, Image, Pressable, StyleSheet, View } from 'react-native';
+import { LinearGradient } from 'expo-linear-gradient';
 import { useTheme } from '../theme/ThemeContext';
 import { Icon, type IconName } from './Icon';
 import { Button, Card, Txt } from './ui';
@@ -46,6 +47,8 @@ export function EmptyState({
   message,
   actionLabel,
   onAction,
+  actionIcon,
+  actionTone = 'gradient',
   compact = false,
   art,
 }: {
@@ -54,6 +57,10 @@ export function EmptyState({
   message: string;
   actionLabel?: string;
   onAction?: () => void;
+  /** Leading glyph inside the CTA pill. */
+  actionIcon?: IconName;
+  /** Which of the design's two CTA pills to draw. */
+  actionTone?: 'gradient' | 'soft';
   compact?: boolean;
   /**
    * Scene to draw instead of the icon disc. Each situation gets its own
@@ -80,21 +87,56 @@ export function EmptyState({
         </View>
       )}
 
-      <Txt variant="heading" style={{ marginTop: t.spacing.lg }} align="center">
+      <Txt variant="emptyTitle" style={{ marginTop: t.spacing.lg }} align="center">
         {title}
       </Txt>
       <Txt
-        variant="caption"
+        variant="emptyBody"
         color={t.colors.textMuted}
         align="center"
-        style={{ marginTop: 6, maxWidth: 300 }}>
+        style={{ marginTop: 8, maxWidth: 258 }}>
         {message}
       </Txt>
 
       {actionLabel && onAction ? (
-        <View style={{ marginTop: t.spacing.lg }}>
-          <Button title={actionLabel} onPress={onAction} fullWidth={false} />
-        </View>
+        <Pressable
+          onPress={onAction}
+          accessibilityRole="button"
+          style={({ pressed }) => [
+            styles.cta,
+            actionTone === 'soft'
+              ? {
+                  backgroundColor: t.colors.primarySoft,
+                  borderColor: t.colors.primaryBorderSoft,
+                  height: 42,
+                  paddingHorizontal: 18,
+                }
+              : { borderColor: 'transparent', height: 46, paddingHorizontal: 20 },
+            pressed ? { transform: [{ scale: 0.97 }] } : null,
+          ]}>
+          {actionTone === 'gradient' ? (
+            <LinearGradient
+              colors={['#4F46E5', '#7C3AED']}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 1 }}
+              style={StyleSheet.absoluteFill}
+            />
+          ) : null}
+          {actionIcon ? (
+            <Icon
+              name={actionIcon}
+              size={actionTone === 'soft' ? 15 : 16}
+              color={actionTone === 'soft' ? t.colors.primaryTint : '#FFFFFF'}
+            />
+          ) : null}
+          <Txt
+            style={[
+              actionTone === 'soft' ? styles.ctaLabelSoft : styles.ctaLabel,
+              { color: actionTone === 'soft' ? t.colors.primaryTint : '#FFFFFF' },
+            ]}>
+            {actionLabel}
+          </Txt>
+        </Pressable>
       ) : null}
     </View>
   );
@@ -207,15 +249,46 @@ export function DetectedEmptyState({
       ) : null}
 
       {filtersActive && onClearFilters ? (
-        <View style={{ marginTop: t.spacing.lg, minWidth: 200 }}>
-          <Button title="Clear filters" onPress={onClearFilters} variant="success" />
-        </View>
+        <SoftPill label="Clear filters" icon="x" onPress={onClearFilters} />
       ) : onCheckAgain ? (
-        <View style={{ marginTop: t.spacing.lg, minWidth: 200 }}>
-          <Button title="Check again" onPress={onCheckAgain} variant="neutral" icon="refresh-cw" />
-        </View>
+        <SoftPill label="Check again" icon="refresh-cw" onPress={onCheckAgain} />
       ) : null}
     </View>
+  );
+}
+
+/**
+ * The approved secondary CTA: a 42px primarySoft capsule with a primaryTint
+ * label. The design uses it wherever an empty state suggests a next step
+ * without demanding it; the saturated gradient is reserved for first-run.
+ */
+function SoftPill({
+  label,
+  icon,
+  onPress,
+}: {
+  label: string;
+  icon: IconName;
+  onPress: () => void;
+}) {
+  const t = useTheme();
+  return (
+    <Pressable
+      onPress={onPress}
+      accessibilityRole="button"
+      style={({ pressed }) => [
+        styles.cta,
+        {
+          backgroundColor: t.colors.primarySoft,
+          borderColor: t.colors.primaryBorderSoft,
+          height: 42,
+          paddingHorizontal: 18,
+        },
+        pressed ? { transform: [{ scale: 0.97 }] } : null,
+      ]}>
+      <Icon name={icon} size={15} color={t.colors.primaryTint} />
+      <Txt style={[styles.ctaLabelSoft, { color: t.colors.primaryTint }]}>{label}</Txt>
+    </Pressable>
   );
 }
 
@@ -311,6 +384,18 @@ export function SummarySkeleton() {
 }
 
 const styles = StyleSheet.create({
+  cta: {
+    alignItems: 'center',
+    borderRadius: 999,
+    borderWidth: StyleSheet.hairlineWidth,
+    flexDirection: 'row',
+    gap: 9,
+    justifyContent: 'center',
+    marginTop: 22,
+    overflow: 'hidden',
+  },
+  ctaLabel: { fontFamily: 'PlusJakartaSans_700Bold', fontSize: 14.5 },
+  ctaLabelSoft: { fontFamily: 'PlusJakartaSans_700Bold', fontSize: 13.5 },
   illustration: { height: 168, width: 168 },
   centered: { alignItems: 'center', justifyContent: 'center' },
   iconCircle: { alignItems: 'center', justifyContent: 'center' },

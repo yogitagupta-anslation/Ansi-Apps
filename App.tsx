@@ -26,7 +26,6 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { HubScreen } from './src/hub/HubScreen';
 import { APPS, type AppId } from './src/hub/registry';
-import { recordLaunch } from './src/hub/recents';
 import { useHubTheme } from './src/hub/theme';
 import { AppFrame } from './src/shell/AppFrame';
 
@@ -68,14 +67,10 @@ export default function App(): React.ReactElement {
         >
           <Stack.Screen name="Hub">
             {({ navigation }) => (
-              <HubScreen
-                onOpen={(app) => {
-                  // Recorded before the push, not after: the launch is the event,
-                  // and the hub re-reads the list when it regains focus anyway.
-                  void recordLaunch(app.id);
-                  navigation.navigate(app.id);
-                }}
-              />
+              // The launch is recorded inside the store, which owns the usage
+              // history and re-renders from it. Recording it here as well would
+              // count every open twice.
+              <HubScreen onOpen={(app) => navigation.navigate(app.id)} />
             )}
           </Stack.Screen>
 

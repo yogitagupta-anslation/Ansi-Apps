@@ -1,78 +1,54 @@
 /**
  * ThemeContext.tsx
  * -----------------------------------------------------------------------------
- * Provides the active theme and the light/dark toggle used by Settings.
+ * Provides the active theme.
  *
- * The chosen mode is persisted through the settings repository, so it survives
- * an app restart like every other setting.
+ * THE APP STORES NO THEME. v3 follows the system appearance and nothing else —
+ * there is no preference, no toggle and no persisted mode. `useColorScheme`
+ * re-renders on a system appearance change by itself, so the whole app tracks
+ * the device with no listener and no bootstrap read.
+ *
+ * The previous version read a saved preference before mounting the subtree so
+ * the choice would survive a restart without a flash of the wrong colours. With
+ * no choice to restore, that whole dance is gone: the system value is known
+ * synchronously on the first render.
  * -----------------------------------------------------------------------------
  */
 
-import React, { createContext, useCallback, useContext, useMemo, useState } from 'react';
+import React, { createContext, useContext, useMemo } from 'react';
 import { useColorScheme } from 'react-native';
 import { buildTheme, type Theme, type ThemeMode } from './theme';
 
-/** 'system' follows the OS setting; the others pin the choice. */
-export type ThemePreference = 'system' | 'dark' | 'light';
-
 interface ThemeContextValue {
   theme: Theme;
-  preference: ThemePreference;
-  setPreference: (preference: ThemePreference) => void;
-  /** The mode actually in effect after resolving 'system'. */
+  /** The mode actually in effect, resolved from the system. */
   mode: ThemeMode;
 }
 
 const ThemeContext = createContext<ThemeContextValue | null>(null);
 
-export function ThemeProvider({
-  children,
-  initialPreference = 'dark',
-  onPreferenceChange,
-}: {
-  children: React.ReactNode;
-  initialPreference?: ThemePreference;
-  /** Called so the caller can persist the choice. */
-  onPreferenceChange?: (preference: ThemePreference) => void;
-}) {
+export function ThemeProvider({ children }: { children: React.ReactNode }) {
   const systemScheme = useColorScheme();
-  const [preference, setPreferenceState] = useState<ThemePreference>(initialPreference);
+  const mode: ThemeMode = systemScheme === 'light' ? 'light' : 'dark';
 
-  const mode: ThemeMode =
-    preference === 'system' ? (systemScheme === 'light' ? 'light' : 'dark') : preference;
-
-  const setPreference = useCallback(
-    (next: ThemePreference) => {
-      setPreferenceState(next);
-      onPreferenceChange?.(next);
-    },
-    [onPreferenceChange],
-  );
-
-  const value = useMemo<ThemeContextValue>(
-    () => ({ theme: buildTheme(mode), preference, setPreference, mode }),
-    [mode, preference, setPreference],
-  );
+  const value = useMemo<ThemeContextValue>(() => ({ theme: buildTheme(mode), mode }), [mode]);
 
   return <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>;
 }
 
 export function useTheme(): Theme {
-  const ctx = useContext(ThemeContext);
-  if (!ctx) {
+  const value = useContext(ThemeContext);
+  if (!value) {
     throw new Error('useTheme must be used inside a ThemeProvider');
   }
-  return ctx.theme;
+  return value.theme;
 }
 
-export function useThemePreference() {
-  const ctx = useContext(ThemeContext);
-  if (!ctx) {
-    throw new Error('useThemePreference must be used inside a ThemeProvider');
+/** The resolved mode, for the few places that branch on light vs dark. */
+export function useThemeMode(): ThemeMode {
+  const value = useContext(ThemeContext);
+  if (!value) {
+    throw new Error('useThemeMode must be used inside a ThemeProvider');
   }
-  return {
-    preference: ctx.preference,
-    setPreference: ctx.setPreference,
-    mode: ctx.mode,
-  };
+  return value.mode;
 }
