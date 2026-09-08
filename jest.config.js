@@ -7,8 +7,10 @@
  * and folding those into BLE Chat's setup would quietly weaken the file that says it has
  * only the mocks it does.
  *
- * The other two apps' suites are still not wired in here. Merging three more sets of
- * assumptions into one config is how a green run stops meaning anything.
+ * Higher or Lower is wired in the same way and for the same reason: its own project, its
+ * own setup file, and a setup file that stubs nothing at all, because what it tests is the
+ * bytes on the wire. The remaining app's suite is still not wired in here. Merging another
+ * set of assumptions into one shared setup is how a green run stops meaning anything.
  */
 
 const shared = {
@@ -33,6 +35,13 @@ module.exports = {
       setupFiles: ['<rootDir>/jest.setup.js'],
       // Shared harness code, not test suites.
       testPathIgnorePatterns: ['/node_modules/', '/__tests__/support/'],
+    },
+    {
+      ...shared,
+      displayName: 'higherlower',
+      roots: ['<rootDir>/src/apps/higherlower'],
+      setupFiles: ['<rootDir>/jest.higherlower.setup.js'],
+      testPathIgnorePatterns: ['/node_modules/'],
     },
     {
       ...shared,

@@ -25,6 +25,13 @@ import type {
   LinkState,
 } from '../types/BLE';
 import {BleLinkError, classifyBleError, isGattBusy} from './LinkErrors';
+import {
+  isNativeGattAvailable,
+  nativeConnect,
+  nativeDisconnect,
+  nativeGattBus,
+  nativeWrite,
+} from './NativeGattClient';
 import {withConnectRetry} from './ConnectRetry';
 import {
   CONNECT_TEARDOWN_SETTLE_MS,
@@ -102,6 +109,14 @@ export class BLECentral {
   private manager: BleManager | null = null;
   private stateSub: Subscription | null = null;
   private links = new Map<string, CentralLink>();
+  /**
+   * Links carried by our own Kotlin GATT client rather than by ble-plx.
+   *
+   * Kept apart because a native link has no ble-plx Device or Characteristic behind it —
+   * the address IS the handle. Scanning still comes from ble-plx, which works.
+   */
+  private nativeLinks = new Map<string, {mtu: number; writeWithResponse: boolean}>();
+  private nativeSubscribed = false;
   /** Attempts the user has abandoned, so the retry loop stops rather than pressing on. */
   private cancelling = new Set<string>();
   private scanning = false;
@@ -150,6 +165,19 @@ export class BLECentral {
     }
     // On iOS this instantiation is what triggers the system Bluetooth prompt.
     this.manager = new BleManager();
+
+    if (isNativeGattAvailable && !this.nativeSubscribed) {
+      this.nativeSubscribed = true;
+      nativeGattBus.on('data', ({address, base64}) => {
+        this.bus.emit('data', {linkId: address, base64});
+      });
+      nativeGattBus.on('disconnected', ({address, status}) => {
+        if (this.nativeLinks.delete(address)) {
+          this.handleDisconnected(address, `remote disconnected (status ${status})`);
+        }
+      });
+      logger.info(TAG, 'native GATT client available; links will use it');
+    }
 
     this.stateSub = this.manager.onStateChange(state => {
       this.currentState = mapState(state);
@@ -479,6 +507,44 @@ export class BLECentral {
       logger.info(TAG, `${linkId}: ${next}`);
     };
 
+    if (isNativeGattAvailable) {
+      /**
+       * Our own client owns this link.
+       *
+       * It reaches the same place — connected, services discovered, MTU settled,
+       * notifications subscribed — and reports the framework's real status when
+       * something is refused, which the library's pre-Android-13 call cannot.
+       */
+      try {
+        enter('connecting');
+        const link = await nativeConnect(linkId);
+        enter('discoveringServices');
+        gatt.serviceFound = true;
+        gatt.rxCharacteristicFound = true;
+        gatt.txCharacteristicFound = true;
+        enter('negotiatingMtu');
+        gatt.mtu = link.mtu;
+        logger.info(TAG, `${linkId}: negotiated MTU ${gatt.mtu}`);
+        enter('enablingNotifications');
+        gatt.notificationsEnabled = true;
+        // Bit 0x08 is WRITE, 0x04 is WRITE_NO_RESPONSE, as the framework reports them.
+        const writeWithResponse = (link.rxProperties & 0x08) !== 0;
+        this.nativeLinks.set(linkId, {mtu: link.mtu, writeWithResponse});
+        logger.info(
+          TAG,
+          `${linkId}: ready via the native client ` +
+            `(write ${writeWithResponse ? 'with' : 'without'} response)`,
+        );
+        this.bus.emit('connected', {linkId, gatt});
+        return gatt;
+      } catch (err) {
+        const linkError = classifyBleError(err, phase);
+        logger.error(TAG, `${linkId}: native attempt ${attempt} failed — ${linkError.message}`);
+        await nativeDisconnect(linkId);
+        throw linkError;
+      }
+    }
+
     try {
       enter('connecting');
       let device = await this.manager.connectToDevice(linkId, {
@@ -625,6 +691,11 @@ export class BLECentral {
   }
 
   async disconnect(linkId: string): Promise<void> {
+    if (this.nativeLinks.delete(linkId)) {
+      await nativeDisconnect(linkId);
+      this.handleDisconnected(linkId, 'local disconnect');
+      return;
+    }
     const link = this.links.get(linkId);
     if (!link) {
       return;
@@ -656,6 +727,14 @@ export class BLECentral {
 
   /** Write one MTU-sized frame to the remote RX characteristic. */
   async sendFrame(linkId: string, base64: string): Promise<void> {
+    const nativeLink = this.nativeLinks.get(linkId);
+    if (nativeLink) {
+      // The native side serialises operations itself and rejects with the framework's
+      // own status, so there is nothing to re-offer or reinterpret here.
+      await nativeWrite(linkId, base64, nativeLink.writeWithResponse);
+      return;
+    }
+
     const link = this.links.get(linkId);
     if (!link) {
       throw new Error(`No central link ${linkId}`);
@@ -718,7 +797,11 @@ export class BLECentral {
   }
 
   getMtu(linkId: string): number {
-    return this.links.get(linkId)?.mtu ?? DEFAULT_ATT_MTU;
+    return (
+      this.nativeLinks.get(linkId)?.mtu ??
+      this.links.get(linkId)?.mtu ??
+      DEFAULT_ATT_MTU
+    );
   }
 
   isConnected(linkId: string): boolean {
