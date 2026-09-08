@@ -51,7 +51,7 @@ import {EventBus} from '../utils/EventBus';
 import {logger} from '../utils/logger';
 import {sanitiseInterests} from '../config/interests';
 import {sanitiseLanguages} from '../config/languages';
-import {shortId} from '../utils/id';
+import {peerIdPrefix, shortId, shouldDial} from '../utils/id';
 import {makeFailure, toLinkFailure} from '../utils/linkFailure';
 
 const TAG = 'PeerManager';
@@ -373,11 +373,15 @@ export class PeerManager implements PeerRouteResolver {
    * answers is "is the other side already dealing with this peer?", and a link halfway up
    * is a yes — dialling on top of it is what creates the collision in the first place.
    */
-  hasLiveLinkToPrefix(prefix: string | null): boolean {
+  hasLiveLinkToPrefix(prefix: string | null, exceptLinkId?: LinkId): boolean {
     if (!prefix) {
       return false;
     }
     for (const peer of [...this.peers.values(), ...this.unidentified.values()]) {
+      // The link being asked about is not evidence about itself.
+      if (exceptLinkId && peer.linkId === exceptLinkId) {
+        continue;
+      }
       const matches =
         peer.peerIdPrefix === prefix || (peer.peerId?.startsWith(prefix) ?? false);
       if (matches && peer.state !== 'disconnected' && peer.state !== 'failed') {
@@ -888,6 +892,27 @@ export class PeerManager implements PeerRouteResolver {
     if (this.hasBetterRoute(linkId)) {
       return;
     }
+    /**
+     * A reconnect is still a dial, and the same side should place it.
+     *
+     * The tie-break was applied when a peer was first discovered but not here, so after
+     * the first failure both phones went back to dialling each other on a timer —
+     * rebuilding the very collision the tie-break exists to prevent. Standing down is
+     * safe: the peer keeps advertising, and the discovery path re-arms with its own
+     * grace period if they never call.
+     */
+    const theirPrefix =
+      this.linkToPrefix.get(linkId) ?? this.unidentified.get(linkId)?.peerIdPrefix ?? null;
+    const myPrefix = this.identity ? peerIdPrefix(this.identity.peerId) : null;
+    if (theirPrefix && myPrefix && !shouldDial(myPrefix, theirPrefix)) {
+      logger.info(
+        TAG,
+        `not redialling ${linkId}; their identity places the call`,
+      );
+      this.reconnectAttempts.delete(linkId);
+      return;
+    }
+
     const attempt = (this.reconnectAttempts.get(linkId) ?? 0) + 1;
     if (attempt > RECONNECT_MAX_ATTEMPTS) {
       // Stop rather than retrying forever. The peer is left alone until it advertises
@@ -1550,10 +1575,23 @@ export class PeerManager implements PeerRouteResolver {
       this.unidentified.get(linkId)?.peerIdPrefix ?? this.linkToPrefix.get(linkId);
     if (prefix) {
       const existing = this.findPeerByPrefix(prefix);
-      if (existing?.peerId && existing.state === 'connected') {
+      /**
+       * A link that is still coming up counts.
+       *
+       * This used to require `connected`, so a peer whose link was mid-handshake did not
+       * stop a second dial — and the handshake is exactly when the collision does its
+       * damage. Two phones running this app reach each other in BOTH directions: each
+       * has a client connection out and a server connection in, to the same peer. On
+       * hardware that is when the GATT client starts refusing writes.
+       */
+      const reachable =
+        (existing?.peerId && existing.state === 'connected') ||
+        this.hasLiveLinkToPrefix(prefix, linkId);
+      if (reachable) {
         logger.info(
           TAG,
-          `already connected to ${shortId(existing.peerId)} on ${existing.linkId}; ` +
+          `already reachable on ${existing?.linkId ?? 'another link'}` +
+            `${existing?.peerId ? ` (${shortId(existing.peerId)})` : ''}; ` +
             `not dialling ${linkId}`,
         );
         this.unidentified.delete(linkId);
