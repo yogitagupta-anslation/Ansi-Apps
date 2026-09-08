@@ -1,8 +1,8 @@
 /**
  * theme.ts
  * -----------------------------------------------------------------------------
- * Design tokens. Nothing outside this file hard-codes a colour, radius, font
- * size or spacing value.
+ * Design tokens for v3 "Orbit". Nothing outside this file hard-codes a colour,
+ * radius, font size or spacing value.
  *
  * SEMANTIC COLOUR RULES (deliberate, not decorative)
  *
@@ -15,6 +15,14 @@
  * ABSENT uses slate, never red: an employee who has not arrived yet has done
  * nothing wrong, and colouring it red would misrepresent the data. LEFT uses
  * amber rather than red for the same reason - they attended.
+ *
+ * THE APP STORES NO THEME. v3 follows the system appearance and nothing else,
+ * so there is no preference, no toggle and no persisted mode — see ThemeContext.
+ *
+ * TINTS. Dark mode needs a lighter primary/accent for text and strokes than the
+ * fill colour that reads well on a light ground, so `primaryTint`, `accentTint`
+ * and `errorTint` exist alongside the base. In light mode several of them
+ * collapse onto a single value; that is the design's intent, not a mistake.
  * -----------------------------------------------------------------------------
  */
 
@@ -29,7 +37,7 @@ export interface ThemeColors {
   surface: string;
   /** One step further raised: nested cards, inputs, chips. */
   surfaceRaised: string;
-  /** Subtle fill for inactive chips and skeletons. */
+  /** Recessed fill: inactive chips, wells, skeletons. */
   surfaceMuted: string;
   /** Header / hero band behind the greeting. */
   surfaceHeader: string;
@@ -44,6 +52,8 @@ export interface ThemeColors {
   textOnAccent: string;
 
   primary: string;
+  /** The readable primary for strokes and text, especially on dark. */
+  primaryTint: string;
   primaryPressed: string;
   primarySoft: string;
   primaryBorderSoft: string;
@@ -57,6 +67,7 @@ export interface ThemeColors {
   warningBorder: string;
 
   error: string;
+  errorTint: string;
   errorPressed: string;
   errorSoft: string;
 
@@ -64,7 +75,11 @@ export interface ThemeColors {
   infoSoft: string;
 
   accent: string;
+  accentTint: string;
   accentSoft: string;
+
+  /** Plate behind an illustration. */
+  illustration: string;
 
   /** Bottom tab bar. */
   tabBar: string;
@@ -78,31 +93,30 @@ export interface ThemeColors {
 }
 
 /**
- * Dark palette: near-black slate rather than pure black, so elevation reads as
- * surface contrast. Indigo primary keeps it enterprise rather than consumer.
+ * Dark palette: soft dual-tone depth over near-black, so elevation reads as
+ * surface contrast plus the neumorphic pair rather than a drop shadow.
  */
 const darkColors: ThemeColors = {
   background: '#0A0E14',
   surface: '#131A23',
   surfaceRaised: '#1B2430',
-  surfaceMuted: '#232E3C',
+  surfaceMuted: '#1A2331',
   surfaceHeader: '#0F141B',
 
   border: '#212C39',
   borderStrong: '#33414F',
 
   textPrimary: '#F8FAFC',
-  textSecondary: '#94A3B8',
-  textMuted: '#64748B',
+  textSecondary: '#AFBBCC',
+  textMuted: '#7E8CA1',
   textOnAccent: '#FFFFFF',
 
-  primary: '#5B6CFF',
-  primaryPressed: '#4A59E0',
+  primary: '#4A5AE8',
+  primaryTint: '#8592FF',
+  primaryPressed: '#3E4CC9',
   primarySoft: '#161C3A',
   primaryBorderSoft: '#2E3A75',
 
-  // Brighter, more saturated green than a muted teal — the mockup uses green as
-  // the hero colour for PRESENT and it has to read as confident, not tentative.
   success: '#22C55E',
   successSoft: '#0D2818',
   successBorder: '#15803D',
@@ -112,28 +126,84 @@ const darkColors: ThemeColors = {
   warningBorder: '#B45309',
 
   error: '#EF4444',
+  errorTint: '#F87171',
   errorPressed: '#C62F2F',
   errorSoft: '#2C1214',
 
-  info: '#5B6CFF',
+  info: '#4A5AE8',
   infoSoft: '#161C3A',
 
   accent: '#8B5CF6',
-  accentSoft: '#1C1533',
+  accentTint: '#A78BFA',
+  accentSoft: '#1D1533',
+
+  illustration: '#101821',
 
   tabBar: '#0F141B',
   tabBarBorder: '#1C2431',
-  tabActive: '#22C55E',
-  tabInactive: '#64748B',
+  tabActive: '#8592FF',
+  tabInactive: '#7E8CA1',
 
   skeleton: '#1B2430',
   scrim: 'rgba(0,0,0,0.66)',
 };
 
+/** Light palette: cool grey ground so the near-white cards can lift off it. */
+const lightColors: ThemeColors = {
+  background: '#EFF2F7',
+  surface: '#FBFCFE',
+  surfaceRaised: '#FFFFFF',
+  surfaceMuted: '#E7ECF3',
+  surfaceHeader: '#FBFCFE',
+
+  border: '#E2E7EF',
+  borderStrong: '#C7D0DD',
+
+  textPrimary: '#0F1729',
+  textSecondary: '#3A4658',
+  textMuted: '#5B6879',
+  textOnAccent: '#FFFFFF',
+
+  primary: '#3349D8',
+  primaryTint: '#3349D8',
+  primaryPressed: '#2A3CB4',
+  primarySoft: '#EBEFFE',
+  primaryBorderSoft: '#C3CEFB',
+
+  success: '#07734F',
+  successSoft: '#E3F8F0',
+  successBorder: '#9BE0C8',
+
+  warning: '#8F5602',
+  warningSoft: '#FDF6E3',
+  warningBorder: '#EBCF8A',
+
+  error: '#E02424',
+  errorTint: '#C81E1E',
+  errorPressed: '#B91C1C',
+  errorSoft: '#FDECEC',
+
+  info: '#3349D8',
+  infoSoft: '#EBEFFE',
+
+  accent: '#7C5CE0',
+  accentTint: '#6742C8',
+  accentSoft: '#F0EBFC',
+
+  illustration: '#FBFCFE',
+
+  tabBar: '#FBFCFE',
+  tabBarBorder: '#E4E9F0',
+  tabActive: '#3349D8',
+  tabInactive: '#5B6879',
+
+  skeleton: '#E7ECF3',
+  scrim: 'rgba(15,23,41,0.45)',
+};
+
 /**
- * Gradient stops for primary call-to-action buttons: indigo into violet.
- * Rendered by <Gradient/> as interpolated slices, so no native module and no
- * extra dependency is involved.
+ * Gradient stops. Kept for the few surfaces that still ramp; v3 leans on
+ * neumorphic depth rather than gradient fills.
  */
 export const gradients = {
   primary: ['#4F46E5', '#7C3AED'] as const,
@@ -141,56 +211,8 @@ export const gradients = {
   avatar: ['#6366F1', '#8B5CF6'] as const,
 };
 
-/** Light palette: cool grey ground so white cards lift off it. */
-const lightColors: ThemeColors = {
-  background: '#F4F6FA',
-  surface: '#FFFFFF',
-  surfaceRaised: '#FFFFFF',
-  surfaceMuted: '#EEF1F6',
-  surfaceHeader: '#FFFFFF',
-
-  border: '#E2E7EF',
-  borderStrong: '#C7D0DD',
-
-  textPrimary: '#0F1729',
-  textSecondary: '#4B5768',
-  textMuted: '#7A8698',
-  textOnAccent: '#FFFFFF',
-
-  primary: '#3D5AF1',
-  primaryPressed: '#2F49CC',
-  primarySoft: '#EBEFFE',
-  primaryBorderSoft: '#C3CEFB',
-
-  success: '#0E9F6E',
-  successSoft: '#E3F8F0',
-  successBorder: '#9BE0C8',
-
-  warning: '#C27803',
-  warningSoft: '#FDF6E3',
-  warningBorder: '#EBCF8A',
-
-  error: '#E02424',
-  errorPressed: '#B91C1C',
-  errorSoft: '#FDECEC',
-
-  info: '#3D5AF1',
-  infoSoft: '#EBEFFE',
-
-  accent: '#7C5CE0',
-  accentSoft: '#F0EBFC',
-
-  tabBar: '#FFFFFF',
-  tabBarBorder: '#E4E9F0',
-  tabActive: '#3D5AF1',
-  tabInactive: '#8494A8',
-
-  skeleton: '#E7ECF3',
-  scrim: 'rgba(15,23,41,0.45)',
-};
-
 /* =============================================================================
- * SPACING — a 4pt scale. Only these values are used anywhere.
+ * SPACING
  * ========================================================================== */
 
 export const spacing = {
@@ -201,6 +223,20 @@ export const spacing = {
   xl: 20,
   xxl: 24,
   xxxl: 32,
+  x3: 3,
+  x5: 5,
+  x6: 6,
+  x7: 7,
+  x9: 9,
+  x10: 10,
+  x13: 13,
+  x14: 14,
+  x18: 18,
+  x22: 22,
+  x26: 26,
+  x28: 28,
+  x30: 30,
+  x34: 34,
 } as const;
 
 /** Horizontal gutter for every screen. One value, used everywhere. */
@@ -212,10 +248,15 @@ export const radius = {
   lg: 16,
   xl: 20,
   pill: 999,
+  tile: 11,
+  control: 14,
+  card: 18,
+  hero: 20,
+  radar: 22,
 } as const;
 
-export const CARD_RADIUS = radius.lg;
-export const BUTTON_RADIUS = radius.md;
+export const CARD_RADIUS = radius.card;
+export const BUTTON_RADIUS = radius.control;
 
 export const iconSize = {
   sm: 16,
@@ -227,48 +268,88 @@ export const iconSize = {
 /* =============================================================================
  * TYPOGRAPHY
  * -----------------------------------------------------------------------------
- * Weights are used sparingly: bold is reserved for numbers and page titles, so
- * it still means something when it appears.
+ * Three real families, loaded at startup by AttendanceApp. Android ignores
+ * numeric fontWeight on a custom family, so weight is selected by FAMILY NAME
+ * and `fontWeight` is never set alongside one.
  * ========================================================================== */
 
+export const fontFamily = {
+  regular: 'PlusJakartaSans_400Regular',
+  medium: 'PlusJakartaSans_500Medium',
+  semibold: 'PlusJakartaSans_600SemiBold',
+  bold: 'PlusJakartaSans_700Bold',
+  extrabold: 'PlusJakartaSans_800ExtraBold',
+  /** Figures: clocks, counts, rates, RSSI. */
+  numMedium: 'SpaceGrotesk_500Medium',
+  numSemibold: 'SpaceGrotesk_600SemiBold',
+  numBold: 'SpaceGrotesk_700Bold',
+  /** Identifiers and diagnostics. Never body copy. */
+  mono: 'IBMPlexMono_400Regular',
+} as const;
+
+/** The font asset map handed to `useFonts`. */
+export { FONT_ASSETS } from './fonts';
+
 export const fonts = {
-  /** Diagnostics only - RSSI, UUIDs, IDs, log lines. Never body copy. */
+  /** Kept for callers that ask for a monospace face by name. */
   mono: Platform.select({
-    android: 'monospace',
-    ios: 'Menlo',
-    default: 'monospace',
+    android: fontFamily.mono,
+    ios: fontFamily.mono,
+    default: fontFamily.mono,
   }) as string,
 };
 
+/**
+ * Every text role in the approved design, measured from it.
+ *
+ * lineHeight is set ONLY where the design declares one — imposing one on the
+ * ~80% of text that leaves it at browser-normal would grow every vertical
+ * rhythm the layout was measured against.
+ */
 export const typography = {
-  /** Page title, e.g. "Attendance". */
-  display: { fontSize: 28, fontWeight: '700' as const, letterSpacing: -0.5, lineHeight: 34 },
-  /** Big metric numbers. */
-  metric: { fontSize: 30, fontWeight: '700' as const, letterSpacing: -0.8, lineHeight: 36 },
-  /**
-   * The count inside a StatTile. Tabular-width digits are not available without
-   * a custom font, so counts are zero-padded at the call site instead to stop
-   * the tiles shifting as values cross 9/10.
-   */
-  statNumber: { fontSize: 32, fontWeight: '700' as const, letterSpacing: -1, lineHeight: 38 },
-  /** The hero PRESENT/ABSENT word on the employee home card. */
-  hero: { fontSize: 30, fontWeight: '800' as const, letterSpacing: -0.6, lineHeight: 36 },
-  /** Section title. */
-  title: { fontSize: 19, fontWeight: '700' as const, letterSpacing: -0.2, lineHeight: 25 },
-  /** Card title. */
-  heading: { fontSize: 16, fontWeight: '600' as const, lineHeight: 22 },
+  /** Page title: "History", "Employees". */
+  display: { fontFamily: fontFamily.bold, fontSize: 26, letterSpacing: -0.7, lineHeight: 34 },
+  /** The line under a page title. */
+  subtitle: { fontFamily: fontFamily.regular, fontSize: 13 },
+  /** Identity name on a hero header. */
+  identity: { fontFamily: fontFamily.bold, fontSize: 21, letterSpacing: -0.4, lineHeight: 28 },
+  /** The one hero word per screen. */
+  hero: { fontFamily: fontFamily.extrabold, fontSize: 30, letterSpacing: -0.9, lineHeight: 34.5 },
+  /** A big figure. */
+  metric: { fontFamily: fontFamily.numBold, fontSize: 30, letterSpacing: -1, lineHeight: 38 },
+  /** The count inside a StatTile. */
+  statNumber: { fontFamily: fontFamily.numBold, fontSize: 27, letterSpacing: -1, lineHeight: 34 },
+  /** Section title: "Today", "In range now". */
+  title: { fontFamily: fontFamily.bold, fontSize: 16 },
+  /** Card title and list-row name. */
+  heading: { fontFamily: fontFamily.semibold, fontSize: 14.5 },
   /** Default body. */
-  body: { fontSize: 15, fontWeight: '400' as const, lineHeight: 21 },
-  bodyMedium: { fontSize: 15, fontWeight: '500' as const, lineHeight: 21 },
-  bodyStrong: { fontSize: 15, fontWeight: '600' as const, lineHeight: 21 },
+  body: { fontFamily: fontFamily.regular, fontSize: 13, lineHeight: 19.5 },
+  bodyMedium: { fontFamily: fontFamily.medium, fontSize: 13, lineHeight: 19.5 },
+  bodyStrong: { fontFamily: fontFamily.bold, fontSize: 13.5 },
+  /** The explanatory paragraph under a heading. */
+  paragraph: { fontFamily: fontFamily.regular, fontSize: 14.5, lineHeight: 21.75 },
   /** Secondary text under a title. */
-  caption: { fontSize: 13, fontWeight: '400' as const, lineHeight: 18 },
-  captionMedium: { fontSize: 13, fontWeight: '500' as const, lineHeight: 18 },
-  /** Status labels and eyebrow headings. */
-  label: { fontSize: 12, fontWeight: '600' as const, letterSpacing: 0.4, lineHeight: 16 },
-  /** ALL-CAPS eyebrow. */
-  overline: { fontSize: 11, fontWeight: '700' as const, letterSpacing: 0.9, lineHeight: 14 },
+  caption: { fontFamily: fontFamily.regular, fontSize: 12.5, lineHeight: 18.75 },
+  captionMedium: { fontFamily: fontFamily.medium, fontSize: 12.5 },
+  /** Status labels. */
+  label: { fontFamily: fontFamily.bold, fontSize: 11, letterSpacing: 0.3 },
+  /** ALL-CAPS eyebrow above a value. */
+  overline: { fontFamily: fontFamily.bold, fontSize: 10.5, letterSpacing: 0.8 },
+  /** The label above a grouped card. */
+  groupLabel: { fontFamily: fontFamily.extrabold, fontSize: 10, letterSpacing: 1 },
+  /** Bottom tab bar. */
+  tabLabel: { fontFamily: fontFamily.bold, fontSize: 10.5, letterSpacing: 0.2 },
+  /** Empty-state title. */
+  emptyTitle: { fontFamily: fontFamily.bold, fontSize: 17, letterSpacing: -0.3, lineHeight: 23 },
+  /** Empty-state body. */
+  emptyBody: { fontFamily: fontFamily.regular, fontSize: 13, lineHeight: 20.15 },
+  /** The orbit node captions. */
+  orbitNode: { fontFamily: fontFamily.extrabold, fontSize: 10, letterSpacing: 0.9 },
 };
+
+/** Space Grotesk carries tabular figures, which is why the design chose it. */
+export const numeric = { fontVariant: ['tabular-nums' as const] };
 
 export interface Theme {
   mode: ThemeMode;
@@ -276,19 +357,35 @@ export interface Theme {
   spacing: typeof spacing;
   radius: typeof radius;
   typography: typeof typography;
+  fontFamily: typeof fontFamily;
   fonts: typeof fonts;
   iconSize: typeof iconSize;
   screenPadding: number;
   cardRadius: number;
   buttonRadius: number;
   shadow: (level: 1 | 2 | 3) => object;
+  /**
+   * The raised half of the neumorphic pair.
+   *
+   * The design casts two shadows — a dark one down-right and a light one
+   * up-left. React Native gives a view exactly one shadow, so this renders the
+   * dark side; the light side is carried by the surface being lighter than the
+   * ground, which both palettes already arrange.
+   */
+  neu: object;
+  /**
+   * The recessed well. React Native has no inset shadow at all, so a well is
+   * expressed the way the design's own level-0 node already does it: the muted
+   * fill with a hairline border, one step darker than the surface around it.
+   */
+  neuIn: (colors: ThemeColors) => object;
 }
 
 function makeShadow(mode: ThemeMode) {
   return (level: 1 | 2 | 3) => {
-    // Shadows read as muddy smears on dark backgrounds, so dark mode uses
-    // surface contrast and hairline borders for depth instead.
     if (mode === 'dark') {
+      // Shadows read as muddy smears on dark grounds; depth comes from surface
+      // contrast and hairlines instead.
       return { elevation: level };
     }
     const map = {
@@ -300,19 +397,49 @@ function makeShadow(mode: ThemeMode) {
   };
 }
 
+function makeNeu(mode: ThemeMode) {
+  return mode === 'dark'
+    ? {
+        shadowColor: '#000000',
+        shadowOffset: { width: 7, height: 7 },
+        shadowOpacity: 0.55,
+        shadowRadius: 18,
+        elevation: 8,
+      }
+    : {
+        shadowColor: '#0F1729',
+        shadowOffset: { width: 7, height: 7 },
+        shadowOpacity: 0.08,
+        shadowRadius: 18,
+        elevation: 4,
+      };
+}
+
+function makeNeuIn(colors: ThemeColors) {
+  return {
+    backgroundColor: colors.surfaceMuted,
+    borderWidth: 1,
+    borderColor: colors.border,
+  };
+}
+
 export function buildTheme(mode: ThemeMode): Theme {
+  const colors = mode === 'dark' ? darkColors : lightColors;
   return {
     mode,
-    colors: mode === 'dark' ? darkColors : lightColors,
+    colors,
     spacing,
     radius,
     typography,
+    fontFamily,
     fonts,
     iconSize,
     screenPadding: SCREEN_PADDING,
     cardRadius: CARD_RADIUS,
     buttonRadius: BUTTON_RADIUS,
     shadow: makeShadow(mode),
+    neu: makeNeu(mode),
+    neuIn: makeNeuIn,
   };
 }
 

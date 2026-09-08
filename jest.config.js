@@ -1,26 +1,29 @@
 /**
- * Two suites, kept apart on purpose.
+ * Test suites, one Jest project per app.
  *
- * BLE Chat brought its own suite and its own set of stubs, built around a rule worth
- * preserving: nothing in that app ever substitutes a fake for a real radio operation. The
- * hub's tests need mocks of a completely different kind — an icon font, a font loader —
- * and folding those into BLE Chat's setup would quietly weaken the file that says it has
- * only the mocks it does.
+ * The apps brought their own suites and their own assumptions, and merging those into a
+ * single flat config is how a green run stops meaning anything. Projects keep them
+ * isolated — a failure names the app it belongs to — while `npm test` still runs
+ * everything in one pass.
  *
- * Higher or Lower is wired in the same way and for the same reason: its own project, its
- * own setup file, and a setup file that stubs nothing at all, because what it tests is the
- * bytes on the wire. The remaining app's suite is still not wired in here. Merging another
- * set of assumptions into one shared setup is how a green run stops meaning anything.
+ * Both projects share jest.setup.js. Its stubs (AsyncStorage, the BLE adapter-state
+ * callback, a real CSPRNG) are environment plumbing, not behaviour: nothing in src/ ever
+ * substitutes a fake for a real radio operation, and neither project tests one.
+ *
+ * The hub has no project here. Its suite tested the previous hub implementation, which
+ * this merge replaced; rather than leave a suite pointing at deleted screens, it went with
+ * them. The hub is untested until something covers the current one.
  */
 
 const shared = {
   preset: 'react-native',
   rootDir: __dirname,
+  setupFiles: ['<rootDir>/jest.setup.js'],
+  // Shared harness code, not test suites.
+  testPathIgnorePatterns: ['/node_modules/', '/__tests__/support/'],
   // `expo(nent)?` alone matches the `expo` package and nothing else, since the trailing
-  // slash ends the alternative — so no `expo-*` module was ever on this allowlist. Widened
-  // to cover them. Note that it is not sufficient on its own: ESM packages under
-  // node_modules are still reaching Jest untransformed in this checkout, which is why the
-  // hub's setup stubs the native ones outright.
+  // slash ends the alternative — so no `expo-*` module was ever on this allowlist. The
+  // `(-[\w-]+)?` group widens it to cover them.
   transformIgnorePatterns: [
     'node_modules/(?!((jest-)?react-native|@react-native(-community)?|expo(nent)?(-[\\w-]+)?|@expo(nent)?/.*|@expo-google-fonts/.*|@react-navigation/.*|@react-native-vector-icons/.*|@noble)/)',
   ],
@@ -32,23 +35,11 @@ module.exports = {
       ...shared,
       displayName: 'blechat',
       roots: ['<rootDir>/src/apps/blechat'],
-      setupFiles: ['<rootDir>/jest.setup.js'],
-      // Shared harness code, not test suites.
-      testPathIgnorePatterns: ['/node_modules/', '/__tests__/support/'],
     },
     {
       ...shared,
-      displayName: 'higherlower',
-      roots: ['<rootDir>/src/apps/higherlower'],
-      setupFiles: ['<rootDir>/jest.higherlower.setup.js'],
-      testPathIgnorePatterns: ['/node_modules/'],
-    },
-    {
-      ...shared,
-      displayName: 'hub',
-      roots: ['<rootDir>/src/hub'],
-      setupFiles: ['<rootDir>/jest.hub.setup.js'],
-      testPathIgnorePatterns: ['/node_modules/'],
+      displayName: 'attendance',
+      roots: ['<rootDir>/src/apps/attendance'],
     },
   ],
 };

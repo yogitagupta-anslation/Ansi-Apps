@@ -30,9 +30,9 @@ export function SettingGroup({
     <View style={{ marginBottom: t.spacing.lg }}>
       {title ? (
         <Txt
-          variant="overline"
+          variant="groupLabel"
           color={t.colors.textMuted}
-          style={{ marginBottom: t.spacing.sm, marginLeft: 2 }}>
+          style={{ marginBottom: 10, marginTop: 24 }}>
           {title.toUpperCase()}
         </Txt>
       ) : null}
@@ -41,7 +41,9 @@ export function SettingGroup({
         style={[
           {
             backgroundColor: t.colors.surface,
-            borderRadius: t.cardRadius,
+            // The approved settings card radius, a step softer than a
+            // content card.
+            borderRadius: 20,
             borderWidth: StyleSheet.hairlineWidth,
             borderColor: t.colors.border,
             overflow: 'hidden',
@@ -55,8 +57,6 @@ export function SettingGroup({
                 style={{
                   height: StyleSheet.hairlineWidth,
                   backgroundColor: t.colors.border,
-                  // Inset so the separator starts past the icon, as in iOS/Material lists.
-                  marginLeft: 56,
                 }}
               />
             ) : null}
@@ -107,33 +107,29 @@ export function SettingRow({
   const chevron = showChevron ?? (!!onPress && !toggle);
 
   const body = (
-    <View style={[styles.row, { paddingHorizontal: t.spacing.lg, paddingVertical: t.spacing.md }]}>
+    <View style={[styles.row, { gap: 13, padding: t.spacing.x14 }]}>
       {icon ? (
         <View
-          style={[
-            styles.iconWrap,
-            { backgroundColor: tone.bg, borderRadius: t.radius.sm },
-          ]}>
-          <Icon name={icon} size={16} color={tone.fg} />
+          style={[styles.iconWrap, { backgroundColor: tone.bg, borderRadius: t.radius.tile }]}>
+          <Icon name={icon} size={17} color={tone.fg} />
         </View>
       ) : null}
 
-      <View style={{ flex: 1, marginLeft: icon ? t.spacing.md : 0 }}>
-        <Txt variant="bodyMedium" color={titleColor}>
+      <View style={{ flex: 1, minWidth: 0 }}>
+        <Txt variant="heading" color={titleColor}>
           {title}
         </Txt>
         {subtitle ? (
-          <Txt variant="caption" color={t.colors.textMuted} style={{ marginTop: 1 }}>
-            {subtitle}
-          </Txt>
+          <Txt style={[styles.subtitle, { color: t.colors.textMuted }]}>{subtitle}</Txt>
         ) : null}
       </View>
 
       {value ? (
         <Txt
-          variant="captionMedium"
-          color={valueTone ? toneColors(valueTone, t).fg : t.colors.textSecondary}
-          style={{ marginLeft: t.spacing.sm }}>
+          style={[
+            styles.value,
+            { color: valueTone ? toneColors(valueTone, t).fg : t.colors.textMuted },
+          ]}>
           {value}
         </Txt>
       ) : null}
@@ -149,12 +145,7 @@ export function SettingRow({
       ) : null}
 
       {chevron ? (
-        <Icon
-          name="chevron-right"
-          size={18}
-          color={t.colors.textMuted}
-          style={{ marginLeft: 6 } as object}
-        />
+        <Icon name="chevron-right" size={15} color={t.colors.textMuted} />
       ) : null}
     </View>
   );
@@ -178,5 +169,9 @@ export function SettingRow({
 const styles = StyleSheet.create({
   // 52 keeps every row above the 44dp accessibility floor.
   row: { alignItems: 'center', flexDirection: 'row', minHeight: 52 },
-  iconWrap: { alignItems: 'center', height: 30, justifyContent: 'center', width: 30 },
+  iconWrap: { alignItems: 'center', flexShrink: 0, height: 34, justifyContent: 'center', width: 34 },
+  subtitle: { fontSize: 11.5, marginTop: 2 },
+  // Named family, not a numeric weight: Android does not synthesise weights
+  // for a custom font, so fontWeight '600' would silently render Regular.
+  value: { fontFamily: 'PlusJakartaSans_600SemiBold', fontSize: 12.5 },
 });

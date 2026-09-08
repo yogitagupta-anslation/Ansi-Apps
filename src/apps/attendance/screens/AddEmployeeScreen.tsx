@@ -8,8 +8,8 @@
  * against the same pattern the BLE payload encoder allows, rather than being
  * accepted now and failing silently later at the radio.
  *
- * Everything else — name, department, phone, email — is local display metadata
- * and is never broadcast.
+ * Everything else — name, department, title, office, phone, email — is local
+ * display metadata and is never broadcast.
  * -----------------------------------------------------------------------------
  */
 
@@ -43,6 +43,8 @@ export function AddEmployeeScreen() {
   const [displayName, setDisplayName] = useState(existing?.displayName ?? '');
   const [employeeId, setEmployeeId] = useState(existing?.employeeId ?? '');
   const [department, setDepartment] = useState(existing?.department ?? '');
+  const [title, setTitle] = useState(existing?.title ?? '');
+  const [office, setOffice] = useState(existing?.office ?? '');
   const [phone, setPhone] = useState(existing?.phone ?? '');
   const [email, setEmail] = useState(existing?.email ?? '');
   const [photo, setPhoto] = useState(existing?.photo ?? '');
@@ -77,6 +79,8 @@ export function AddEmployeeScreen() {
         employeeId: employeeId.trim(),
         displayName: displayName.trim(),
         department: department.trim(),
+        title: title.trim(),
+        office: office.trim(),
         phone: phone.trim(),
         email: email.trim(),
         photo,
@@ -176,6 +180,19 @@ export function AddEmployeeScreen() {
           onChange={setDepartment}
           placeholder="Select department"
           hint="Optional. Used for filtering only."
+        />
+        <Field
+          label="Job title"
+          value={title}
+          onChange={setTitle}
+          placeholder="Optional"
+        />
+        <Field
+          label="Office"
+          value={office}
+          onChange={setOffice}
+          placeholder="Optional"
+          hint="Where they normally sit, e.g. HQ · Floor 4."
         />
         <Field
           label="Phone"

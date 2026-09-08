@@ -16,25 +16,37 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { Alert, Linking, Modal, Pressable, StyleSheet, TextInput, View } from 'react-native';
 import { openLocationSettings, requestEnableBluetooth } from '../bluetooth/BleAdvertiser';
-import { PageHeader } from '../components/AppHeader';
 import { Icon } from '../components/Icon';
 import { SettingGroup, SettingRow } from '../components/SettingRow';
 import { Button, Screen, Txt } from '../components/ui';
 import { APP_VERSION } from '../constants/appConfig';
 import { CONFIG_BOUNDS } from '../constants/proximityConfig';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useRoute } from '@react-navigation/native';
 import { useAppStore } from '../state/appStore';
 import { clearAllLocalData } from '../storage/AppStorage';
 import { AttendanceStorage } from '../storage/AttendanceStorage';
 import { EmployeeStorage } from '../storage/EmployeeStorage';
 import { useTheme } from '../theme/ThemeContext';
-import { useThemePreference, type ThemePreference } from '../theme/ThemeContext';
 
 export function SettingsScreen({ onOpenDebug }: { onOpenDebug: () => void }) {
-  const navigation = useNavigation<{ navigate: (s: string) => void }>();
+  const navigation = useNavigation<{
+    navigate: (s: string) => void;
+    canGoBack: () => boolean;
+    goBack: () => void;
+  }>();
+  const t = useTheme();
+  /**
+   * The employee reaches Settings by a push from Profile, so it needs a back
+   * chevron. The Host's Settings is a TAB ROOT and has nowhere to go.
+   *
+   * canGoBack() cannot tell them apart: it walks the whole navigation tree and
+   * answers true on the Host tab too, because the hub sits behind the app. The
+   * route name is the honest signal — 'SettingsMain' is the Host's tab root,
+   * 'Settings' is the copy ProfileStack pushes.
+   */
+  const canGoBack = useRoute().name === 'Settings' && navigation.canGoBack();
 
   const store = useAppStore();
-  const { preference, setPreference } = useThemePreference();
   const role = store.settings.role ?? 'HOST';
   const isHost = role === 'HOST';
   const readiness = store.readiness;
@@ -102,12 +114,53 @@ export function SettingsScreen({ onOpenDebug }: { onOpenDebug: () => void }) {
     );
   }, [store]);
 
-  const themeLabel =
-    preference === 'system' ? 'System' : preference === 'dark' ? 'Dark' : 'Light';
+  /**
+   * Switching role tears down both radios and returns to the role gate.
+   * Employees, attendance and settings all survive it — see resetDeviceSetup —
+   * so this asks for confirmation without claiming anything will be lost.
+   */
+  const confirmRoleSwitch = useCallback(() => {
+    Alert.alert(
+      'Switch device role?',
+      'This device will stop ' +
+        (store.settings.role === 'HOST' ? 'scanning' : 'broadcasting') +
+        ' and go back to role setup. Employees, attendance and settings are kept.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Switch role', onPress: () => void store.resetDeviceSetup() },
+      ],
+    );
+  }, [store]);
 
   return (
     <Screen>
-      <PageHeader title="Settings" />
+      {canGoBack ? (
+        <Pressable
+          onPress={() => navigation.goBack()}
+          hitSlop={10}
+          accessibilityRole="button"
+          accessibilityLabel="Back"
+          style={({ pressed }) => [
+            styles.backBtn,
+            {
+              backgroundColor: t.colors.surface,
+              borderColor: t.colors.border,
+              transform: [{ scale: pressed ? 0.93 : 1 }],
+            },
+            t.neu,
+          ]}>
+          <Icon name="chevron-left" size={18} color={t.colors.textPrimary} />
+        </Pressable>
+      ) : null}
+
+      <Txt variant="display" style={canGoBack ? { marginTop: 18 } : undefined}>
+        Settings
+      </Txt>
+      <Txt variant="subtitle" color={t.colors.textMuted} style={{ marginTop: 3 }}>
+        {isHost
+          ? 'Host device · ' + store.settings.hostId
+          : (store.settings.employeeId || 'No ID') + ' · this device'}
+      </Txt>
 
       {/* ================================ account ================================ */}
       <SettingGroup title="Account">
@@ -126,24 +179,19 @@ export function SettingsScreen({ onOpenDebug }: { onOpenDebug: () => void }) {
            */
           onPress={isHost ? () => setProfileOpen(true) : () => navigation.navigate('Profile')}
         />
+        {/*
+          * Switching the role is a real action now, so this row is a button
+          * rather than a read-only line. It stops both radios and clears the
+          * role; nothing recorded is deleted, which is why it asks first but
+          * does not warn about data loss.
+          */}
         <SettingRow
           icon="shield"
           iconTone="accent"
           title="Device role"
-          subtitle="Set during installation and cannot be changed"
+          subtitle="Tap to set this device up as the other side"
           value={isHost ? 'Host' : 'Employee'}
-        />
-      </SettingGroup>
-
-      {/* ============================== appearance =============================== */}
-      <SettingGroup title="Appearance">
-        <SettingRow
-          icon="palette"
-          iconTone="accent"
-          title="Theme"
-          subtitle="Applies immediately and is remembered"
-          value={themeLabel}
-          onPress={() => setThemeOpen(true)}
+          onPress={confirmRoleSwitch}
         />
       </SettingGroup>
 
@@ -241,6 +289,18 @@ export function SettingsScreen({ onOpenDebug }: { onOpenDebug: () => void }) {
               : 'Calculating…'
           }
         />
+        {/*
+          * The Host's only route to the monthly workbook now that the roster
+          * header is bare. HistoryScreen IS the reports screen on this side —
+          * ring, trend, totals, calendar and the export panel.
+          */}
+        <SettingRow
+          icon="file-spreadsheet"
+          iconTone="info"
+          title="Attendance reports"
+          subtitle="Monthly summary, calendar and export"
+          onPress={() => navigation.navigate('History')}
+        />
         <SettingRow
           icon="eraser"
           iconTone="warning"
@@ -298,24 +358,14 @@ export function SettingsScreen({ onOpenDebug }: { onOpenDebug: () => void }) {
         </SettingGroup>
       ) : null}
 
-      {/* ============================== theme sheet ============================== */}
-      <PickerSheet
-        visible={themeOpen}
-        title="Theme"
-        onClose={() => setThemeOpen(false)}
-        options={[
-          { key: 'light', label: 'Light', icon: 'circle-dot' },
-          { key: 'dark', label: 'Dark', icon: 'circle' },
-          { key: 'system', label: 'Follow system', icon: 'settings' },
-        ]}
-        selected={preference}
-        onSelect={key => {
-          const next = key as ThemePreference;
-          setPreference(next);
-          void store.updateSettings({ themePreference: next });
-          setThemeOpen(false);
-        }}
-      />
+      <Txt
+        variant="caption"
+        color={t.colors.textMuted}
+        align="center"
+        style={{ marginTop: 22, fontSize: 11.5, lineHeight: 17.25 }}>
+        Appearance follows your device's light or dark setting. The app stores no theme of its
+        own.
+      </Txt>
 
       {/* ============================= profile sheet ============================= */}
       {isHost ? (
@@ -377,7 +427,7 @@ function PickerSheet({
 /* =========================================================== ProfileSheet == */
 
 /**
- * HOST-only profile editor. The employee equivalent is ProfileScreen, which
+ * HOST-only profile editor. The employee equivalent is EditProfileScreen, which
  * additionally blocks an ID change while the radio is on air.
  */
 function ProfileSheet({ visible, onClose }: { visible: boolean; onClose: () => void }) {
@@ -631,6 +681,15 @@ function SheetField({
 }
 
 const styles = StyleSheet.create({
+  backBtn: {
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    borderRadius: 999,
+    borderWidth: StyleSheet.hairlineWidth,
+    height: 38,
+    justifyContent: 'center',
+    width: 38,
+  },
   backdrop: { flex: 1, justifyContent: 'flex-end' },
   sheet: { maxHeight: '88%' },
   handleWrap: { alignItems: 'center', paddingBottom: 12 },

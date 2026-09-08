@@ -22,6 +22,14 @@ export interface Employee {
   department?: string;
 
   /**
+   * Job title and office, e.g. "Engineer" and "HQ · Floor 4". Local directory
+   * metadata only — like every field but employeeId, neither is ever broadcast
+   * and neither takes any part in matching an advertisement.
+   */
+  title?: string;
+  office?: string;
+
+  /**
    * Contact details. Local metadata only, never broadcast and never used for
    * matching - an advertisement carries the employeeId and nothing else. Kept
    * so the Host can show a directory entry without needing a backend.
@@ -51,6 +59,8 @@ export interface EmployeeInput {
   employeeId: string;
   displayName: string;
   department?: string;
+  title?: string;
+  office?: string;
   phone?: string;
   email?: string;
   photo?: string;

@@ -819,7 +819,16 @@ export class BLECentral {
     }
     this.stateSub?.remove();
     this.stateSub = null;
-    this.manager?.destroy();
+    // NOT manager.destroy(). react-native-ble-plx's BleManager is a process-wide
+    // singleton: its constructor returns BleManager.sharedInstance, so the object
+    // held here is the very same one Attendance and Treasure Hunt hold. destroy() calls
+    // BleModule.destroyClient(), which tears down the one native client for every
+    // app in the hub and leaves their cached handles throwing
+    // BluetoothManagerDestroyed until the process restarts.
+    //
+    // Releasing our reference is the whole of this app's teardown: the scan is
+    // stopped and the links are gone above, and the next init() reattaches to the
+    // live shared instance.
     this.manager = null;
   }
 }

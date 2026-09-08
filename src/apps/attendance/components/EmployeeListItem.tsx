@@ -1,132 +1,132 @@
 /**
  * EmployeeListItem.tsx
  * -----------------------------------------------------------------------------
- * The attendance row used on the Host dashboard and the Attendance screen.
+ * The attendance row used by the Attendance register.
  *
  * Deliberately free of BLE jargon. A manager scanning this list wants to know
  * who is here and when they arrived — not RSSI, UUIDs or advertisement counts.
  * Those live on the Debug screen.
  *
- * "Nearby" is shown as a plain-language live indicator, and is kept visually
- * subordinate to the attendance status, because the two are different things:
- * PRESENT is a stored fact, nearby is a momentary observation.
+ * The pill on the right names the recorded status and carries its colour.
+ * "Currently nearby" is a momentary observation rather than a stored fact, so
+ * it rides on the avatar as a live dot instead of competing with it.
+ *
+ * ABSENT is slate, never red: an employee who has not arrived has done nothing
+ * wrong, and colouring it as an error would misrepresent the record.
  * -----------------------------------------------------------------------------
  */
 
 import React from 'react';
-import { StyleSheet, View } from 'react-native';
+import { Pressable, StyleSheet, View } from 'react-native';
 import type { AttendanceRow } from '../attendance/attendanceTypes';
 import { formatClockTime } from '../constants/appConfig';
+import { numeric } from '../theme/theme';
 import { useTheme } from '../theme/ThemeContext';
-import { AttendanceBadge } from './StatusBadge';
 import { EmployeeAvatar } from './EmployeeAvatar';
-import { Icon } from './Icon';
-import { Card, Txt } from './ui';
+import { Txt } from './ui';
 
 export function EmployeeListItem({
   row,
   onPress,
   photo,
+  department,
 }: {
   row: AttendanceRow;
   onPress?: () => void;
   /** Registry photo, resolved by the caller. Initials remain the fallback. */
   photo?: string;
+  /** Registry department, resolved by the caller. Omitted when unknown. */
+  department?: string;
 }) {
   const t = useTheme();
   const record = row.record;
   const isAbsent = row.status === 'ABSENT';
 
-  return (
-    <Card onPress={onPress} style={{ marginBottom: t.spacing.sm }}>
-      <View style={styles.top}>
-        <EmployeeAvatar
-          name={row.employeeName}
-          employeeId={row.employeeId}
-          size={44}
-          dimmed={isAbsent}
-          photo={photo}
-        />
+  const tone =
+    row.status === 'PRESENT'
+      ? { fg: t.colors.success, soft: t.colors.successSoft }
+      : row.status === 'LEFT'
+      ? { fg: t.colors.warning, soft: t.colors.warningSoft }
+      : { fg: t.colors.textMuted, soft: t.colors.surfaceMuted };
 
-        <View style={{ flex: 1, marginHorizontal: t.spacing.md }}>
-          <Txt variant="bodyStrong" numberOfLines={1}>
-            {row.employeeName}
-          </Txt>
-          <Txt variant="caption" color={t.colors.textMuted} numberOfLines={1}>
-            {row.employeeId}
-          </Txt>
-        </View>
+  /** "09:02 → now" while still present, "09:02 → 17:30" once settled. */
+  const span = record?.checkInTime
+    ? formatClockTime(record.checkInTime) +
+      ' → ' +
+      (record.leftTime ? formatClockTime(record.leftTime) : 'now')
+    : '—';
 
-        <AttendanceBadge status={row.status} />
+  const body = (
+    <View
+      style={[
+        styles.row,
+        { backgroundColor: t.colors.surface, borderColor: t.colors.border },
+        t.shadow(1),
+      ]}>
+      <EmployeeAvatar
+        name={row.employeeName}
+        employeeId={row.employeeId}
+        size={40}
+        dimmed={isAbsent}
+        photo={photo}
+        badge={row.currentlyNearby ? t.colors.success : undefined}
+      />
+
+      <View style={styles.identity}>
+        <Txt variant="heading" numberOfLines={1}>
+          {row.employeeName}
+        </Txt>
+        <Txt
+          color={t.colors.textMuted}
+          mono
+          numberOfLines={1}
+          style={styles.identityLine}>
+          {department ? row.employeeId + ' · ' + department : row.employeeId}
+        </Txt>
       </View>
 
-      {/* Times only appear once there is something to show, so an absent row
-          stays clean rather than filled with em dashes. */}
-      {record?.checkInTime ? (
-        <View style={[styles.times, { borderTopColor: t.colors.border, marginTop: t.spacing.md, paddingTop: t.spacing.md }]}>
-          <TimeItem label="Check-in" value={formatClockTime(record.checkInTime)} />
-          <TimeItem
-            label="Last seen"
-            value={record.lastSeenTime ? formatClockTime(record.lastSeenTime) : '—'}
-          />
-          {record.leftTime ? (
-            <TimeItem
-              label="Left"
-              value={formatClockTime(record.leftTime)}
-              color={t.colors.warning}
-            />
-          ) : (
-            <View style={styles.timeItem}>
-              <Txt variant="overline" color={t.colors.textMuted}>
-                NOW
-              </Txt>
-              <View style={styles.nowRow}>
-                {row.currentlyNearby ? (
-                  <>
-                    <Icon name="circle-dot" size={11} color={t.colors.success} />
-                    <Txt variant="captionMedium" color={t.colors.success} style={{ marginLeft: 4 }}>
-                      Nearby
-                    </Txt>
-                  </>
-                ) : (
-                  <Txt variant="caption" color={t.colors.textMuted}>
-                    Not detected
-                  </Txt>
-                )}
-              </View>
-            </View>
-          )}
+      <View style={styles.right}>
+        <View style={[styles.pill, { backgroundColor: tone.soft, borderRadius: t.radius.pill }]}>
+          <Txt style={[styles.pillLabel, { color: tone.fg }]}>{row.status}</Txt>
         </View>
-      ) : null}
-    </Card>
-  );
-}
-
-function TimeItem({
-  label,
-  value,
-  color,
-}: {
-  label: string;
-  value: string;
-  color?: string;
-}) {
-  const t = useTheme();
-  return (
-    <View style={styles.timeItem}>
-      <Txt variant="overline" color={t.colors.textMuted}>
-        {label.toUpperCase()}
-      </Txt>
-      <Txt variant="captionMedium" color={color ?? t.colors.textPrimary} style={{ marginTop: 2 }}>
-        {value}
-      </Txt>
+        <Txt style={[styles.span, numeric, { color: t.colors.textMuted }]}>{span}</Txt>
+      </View>
     </View>
+  );
+
+  if (!onPress) return body;
+  return (
+    <Pressable
+      onPress={onPress}
+      accessibilityRole="button"
+      accessibilityLabel={row.employeeName + '. ' + row.status.toLowerCase() + '. ' + span}
+      style={({ pressed }) => [{ transform: [{ scale: pressed ? 0.98 : 1 }] }]}>
+      {body}
+    </Pressable>
   );
 }
 
 const styles = StyleSheet.create({
-  top: { alignItems: 'center', flexDirection: 'row' },
-  times: { borderTopWidth: StyleSheet.hairlineWidth, flexDirection: 'row' },
-  timeItem: { flex: 1 },
-  nowRow: { alignItems: 'center', flexDirection: 'row', marginTop: 2 },
+  row: {
+    alignItems: 'center',
+    borderRadius: 16,
+    borderWidth: StyleSheet.hairlineWidth,
+    flexDirection: 'row',
+    gap: 12,
+    overflow: 'hidden',
+    paddingHorizontal: 14,
+    paddingVertical: 13,
+  },
+  identity: { flex: 1, minWidth: 0 },
+  identityLine: { fontSize: 11, marginTop: 3 },
+  right: { alignItems: 'flex-end' },
+  pill: { alignItems: 'center', height: 22, justifyContent: 'center', paddingHorizontal: 9 },
+  // Named family, not a numeric weight — Android does not synthesise weights
+  // for a custom font, so fontWeight '800' would render Regular.
+  pillLabel: {
+    fontFamily: 'PlusJakartaSans_800ExtraBold',
+    fontSize: 10,
+    letterSpacing: 0.7,
+  },
+  span: { fontFamily: 'SpaceGrotesk_500Medium', fontSize: 11.5, marginTop: 5 },
 });

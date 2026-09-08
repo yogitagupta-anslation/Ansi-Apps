@@ -123,6 +123,6 @@ const styles = StyleSheet.create({
   headerActions: { flexDirection: 'row' },
   line: { flexDirection: 'row', flexWrap: 'wrap', marginBottom: 3 },
   time: { fontSize: 9, marginRight: 4 },
-  tag: { fontSize: 9, fontWeight: '700', marginRight: 4 },
+  tag: { fontFamily: 'PlusJakartaSans_700Bold', fontSize: 9, marginRight: 4 },
   message: { flex: 1, fontSize: 9, lineHeight: 13, minWidth: 180 },
 });
