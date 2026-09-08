@@ -39,7 +39,7 @@ import {useAppStore, useMessages} from '../state/appStore';
 import type {ChatMessage} from '../types/Message';
 import type {Peer} from '../types/Peer';
 import type {Group} from '../messaging/Groups';
-import type {RootStackScreenProps} from '../navigation/types';
+import type {RootStackParamList, RootStackScreenProps} from '../navigation/types';
 
 /**
  * A short confirmation tick, not a buzz — kept to the few moments an action genuinely
@@ -145,7 +145,18 @@ function dayLabel(timestamp: number): string {
 export function ChatScreen({route, navigation}: RootStackScreenProps<'Chat'>) {
   const styles = useStyles();
   const theme = useTheme();
-  const {peerId, groupId, displayName} = route.params;
+  /**
+   * Read defensively, because this screen is opened from a list that can go stale.
+   *
+   * A peer can drop out of range, be forgotten, or lose its identity between the tap
+   * that opened this screen and the moment it mounts. None of that is a reason to fail:
+   * the thread is stored locally and is worth showing on its own, with the composer
+   * reporting that there is nobody to send to. Destructuring `route.params` directly
+   * threw when a route arrived without them at all.
+   */
+  const params = route.params ?? ({displayName: 'Chat'} as RootStackParamList['Chat']);
+  const {peerId, groupId} = params;
+  const displayName = params.displayName ?? 'Chat';
 
   // Exactly one of the two is set; everything below branches on which.
   const conversationId = groupId ?? peerId ?? null;
@@ -295,7 +306,9 @@ export function ChatScreen({route, navigation}: RootStackScreenProps<'Chat'>) {
       tick();
       const send = groupId
         ? bleChat.messages.sendToGroup(groupId, text)
-        : bleChat.messages.send(peerId!, text);
+        : peerId
+        ? bleChat.messages.send(peerId, text)
+        : Promise.reject(new Error('This conversation has no peer to send to'));
       send.catch(err => {
         Alert.alert(
           'Send failed',
@@ -348,7 +361,9 @@ export function ChatScreen({route, navigation}: RootStackScreenProps<'Chat'>) {
           text: 'Block',
           style: 'destructive',
           onPress: () => {
-            bleChat.peerManager.blockPeer(peer.peerId!);
+            if (peer?.peerId) {
+              bleChat.peerManager.blockPeer(peer.peerId);
+            }
             navigation.goBack();
           },
         },
@@ -710,7 +725,11 @@ export function ChatScreen({route, navigation}: RootStackScreenProps<'Chat'>) {
         onClose={() => setActionsFor(null)}
         onCopy={() => {
           if (actionsFor) {
-            Clipboard.setString(actionsFor.text);
+            try {
+              Clipboard.setString(actionsFor.text);
+            } catch (err) {
+              Alert.alert('Could not copy', 'This phone would not let the app use the clipboard.');
+            }
           }
           setActionsFor(null);
         }}
@@ -749,7 +768,11 @@ export function ChatScreen({route, navigation}: RootStackScreenProps<'Chat'>) {
             setProfileVisible(false);
             onBlockPeer();
           }}
-          onUnblock={() => bleChat.peerManager.unblockPeer(peer.peerId!)}
+          onUnblock={() => {
+            if (peer.peerId) {
+              bleChat.peerManager.unblockPeer(peer.peerId);
+            }
+          }}
         />
       )}
       </View>

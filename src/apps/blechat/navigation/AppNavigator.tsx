@@ -15,6 +15,7 @@ import {useReduceMotion} from '../components/Motion';
 import {makeStyles, useTheme} from '../theme/ThemeProvider';
 import {useMemo} from 'react';
 import {ChatScreen} from '../screens/ChatScreen';
+import {ErrorBoundary} from '../components/ErrorBoundary';
 import {ChatsScreen} from '../screens/ChatsScreen';
 import {DebugScreen} from '../screens/DebugScreen';
 import {NearbyScreen} from '../screens/NearbyScreen';
@@ -24,7 +25,7 @@ import {ProfileScreen} from '../screens/ProfileScreen';
 import {ChipPickerScreen} from '../screens/ChipPickerScreen';
 import {BeingFoundScreen} from '../screens/BeingFoundScreen';
 import {PrivacyScreen} from '../screens/PrivacyScreen';
-import type {RootStackParamList, TabParamList} from './types';
+import type {RootStackParamList, RootStackScreenProps, TabParamList} from './types';
 import {useAppStore} from '../state/appStore';
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
@@ -255,13 +256,33 @@ export function AppNavigator() {
         />
         <Stack.Screen
           name="Chat"
-          component={ChatScreen}
+          component={ChatRoute}
           // ChatScreen renders its own header (avatar, name, MTU/role), so the stack
           // header would just duplicate it.
           options={{headerShown: false}}
         />
       </Stack.Navigator>
     </NavigationThemeProvider>
+  );
+}
+
+/**
+ * The conversation, behind its own boundary.
+ *
+ * The app-level boundary catches the same faults, but it replaces the WHOLE navigator —
+ * so a bad conversation took the tab bar and every other screen with it, and the only
+ * way out was "try again" on the thing that just failed. Guarding this one route keeps
+ * the failure where it happened and leaves a door back to Nearby.
+ */
+function ChatRoute(props: RootStackScreenProps<'Chat'>) {
+  const {navigation} = props;
+  return (
+    <ErrorBoundary
+      onBack={() =>
+        navigation.canGoBack() ? navigation.goBack() : navigation.navigate('Tabs')
+      }>
+      <ChatScreen {...props} />
+    </ErrorBoundary>
   );
 }
 
