@@ -1,5 +1,5 @@
 import React, {useCallback, useEffect, useMemo, useState} from 'react';
-import {Alert, FlatList, LayoutAnimation, Linking, Platform, RefreshControl, UIManager, View} from 'react-native';
+import {Alert, FlatList, InteractionManager, LayoutAnimation, Linking, Platform, RefreshControl, UIManager, View} from 'react-native';
 import {useFocusEffect} from '@react-navigation/native';
 import {avatarHue, radius, spacing, typography} from '../config/theme';
 import {makeStyles, useTheme} from '../theme/ThemeProvider';
@@ -713,8 +713,17 @@ export function NearbyScreen({navigation}: RootTabScreenProps<'Nearby'>) {
             ? () => {
                 const p = peers.find(x => x.peerId === profilePeerId);
                 if (p) {
+                  /**
+                   * Close the sheet, THEN navigate — never both in the same frame.
+                   *
+                   * A Modal is a real window on Android, and pushing a screen while that
+                   * window is still being torn down is a native crash rather than a
+                   * warning: nothing in JavaScript is left to catch it, so the app simply
+                   * closes with no error anywhere. Waiting for the dismissal to finish
+                   * also stops the push animation from fighting it.
+                   */
                   setProfilePeerId(null);
-                  onOpenChat(p);
+                  InteractionManager.runAfterInteractions(() => onOpenChat(p));
                 }
               }
             : undefined

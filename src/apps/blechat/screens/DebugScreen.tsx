@@ -13,6 +13,7 @@ import {useAppStore} from '../state/appStore';
 import {formatTime, logger, type LogLevel} from '../utils/logger';
 import {shortId} from '../utils/id';
 import {clearCrash, loadCrash, type CrashRecord} from '../utils/crashLog';
+import {getLastExitReason, type LastExit} from '../services/Presence';
 import {describeFailure} from '../ble/LinkErrors';
 import {AppText, DenseText} from '../components/AppText';
 import {FadeIn, Touchable} from '../components/Motion';
@@ -74,8 +75,17 @@ export function DebugScreen({navigation}: RootStackScreenProps<'Debug'>) {
    * event the user has already lived through and could not otherwise report.
    */
   const [crash, setCrash] = useState<CrashRecord | null>(null);
+  /**
+   * Android's own record of how the process died last time.
+   *
+   * Shown next to the crash above because they answer different halves of the same
+   * question: the record above exists only if JavaScript was alive long enough to write
+   * it, and this one exists whether or not it was.
+   */
+  const [lastExit, setLastExit] = useState<LastExit | null>(null);
   useEffect(() => {
     void loadCrash().then(setCrash);
+    void getLastExitReason().then(setLastExit);
   }, []);
   const tints = tintsFor(theme);
   const bluetoothState = useAppStore(s => s.bluetoothState);
@@ -595,6 +605,30 @@ export function DebugScreen({navigation}: RootStackScreenProps<'Debug'>) {
                   </View>
                 ))}
               </Section>
+          </FadeIn>
+        ) : null}
+
+        {tab === 'logs' && lastExit?.wasCrash ? (
+          <FadeIn key={tab + '-exit'} index={0}>
+            <Section title="How it closed last time" icon="alert">
+              <LeaderRow label="Android says" value={lastExit.reason} />
+              <LeaderRow
+                label="When"
+                value={new Date(lastExit.at).toLocaleString()}
+              />
+              {lastExit.description ? (
+                <DenseText style={styles.crashStack} selectable>
+                  {lastExit.description}
+                </DenseText>
+              ) : null}
+              {/* A native crash leaves nothing for JavaScript to catch, so the absence
+                  of a record below is itself the finding rather than a gap. */}
+              {!crash ? (
+                <DenseText style={styles.crashStack}>
+                  No JavaScript error was recorded, which points at the native side.
+                </DenseText>
+              ) : null}
+            </Section>
           </FadeIn>
         ) : null}
 

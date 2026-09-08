@@ -721,11 +721,35 @@ export class PeerManager implements PeerRouteResolver {
       );
       logger.info(TAG, `sending HELLO on ${linkId}`);
       this.router?.sendOnLink(linkId, hello).catch(err => {
+        /**
+         * We could not even send the greeting.
+         *
+         * This used to emit an event nothing listened to and then wait for the handshake
+         * timeout to notice — fifteen seconds later, and under the wrong heading:
+         * "Peer did not answer HELLO" when the truth is that no HELLO ever left this
+         * phone. Two costs, both real. The row spun on "Saying hello..." for the whole
+         * wait and then quietly redialled into the same wall, which is what "it never
+         * connects and never says why" looks like from the outside. And the recorded
+         * reason blamed the other side for our own failed write, which is the kind of
+         * wrong diagnosis that sends you looking at the wrong phone.
+         */
+        const message = err instanceof Error ? err.message : String(err);
         logger.error(TAG, `HELLO failed on ${linkId}`, err);
-        this.bus.emit('handshakeFailed', {
+        const session = this.sessions.get(linkId);
+        if (session?.handshakeTimer) {
+          clearTimeout(session.handshakeTimer);
+          session.handshakeTimer = null;
+        }
+        this.recordFailure(
           linkId,
-          reason: err instanceof Error ? err.message : String(err),
-        });
+          makeFailure(
+            'HandshakeFailed',
+            'handshaking',
+            `Could not send the greeting: ${message}`,
+          ),
+        );
+        this.bus.emit('handshakeFailed', {linkId, reason: message});
+        void this.transport.disconnect(linkId).catch(() => undefined);
       });
     } else {
       logger.info(TAG, `awaiting HELLO on ${linkId} (peripheral role)`);
