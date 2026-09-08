@@ -42,6 +42,7 @@ import {
   DEFAULT_ATT_MTU,
   LINK_ROTATE_INTERVAL_MS,
   SEQ_PERSIST_RESERVE,
+  SIMULTANEOUS_DIAL_GRACE_MS,
 } from '../config/constants';
 import {
   storage,
@@ -52,7 +53,7 @@ import type {BluetoothState, PermissionState} from '../types/BLE';
 import type {PeerIdentity} from '../types/Peer';
 import {EventBus} from '../utils/EventBus';
 import {logger} from '../utils/logger';
-import {peerIdPrefix} from '../utils/id';
+import {peerIdPrefix, shortId, shouldDial} from '../utils/id';
 import {interestsToBitmask} from '../config/interests';
 
 const TAG = 'App';
@@ -130,6 +131,11 @@ class BleChatService {
    */
   readonly scheduler: ConnectionScheduler;
   private rotateTimer: ReturnType<typeof setInterval> | null = null;
+  /**
+   * Peers we are deliberately NOT dialling yet, because their identity says they should
+   * dial us. Cleared on shutdown so a stopped service leaves no timer behind.
+   */
+  private dialGraceTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
   private initialised = false;
   private seenPersistTimer: ReturnType<typeof setInterval> | null = null;
@@ -441,6 +447,9 @@ class BleChatService {
       // out every time it comes back into range.
       const knownPeerId = this.peerManager.peerIdForPrefix(adv.peerIdPrefix);
       if (knownPeerId && this.peerManager.isBlocked(knownPeerId)) {
+        return;
+      }
+      if (this.shouldWaitToBeDialled(adv.peerIdPrefix, adv.linkId)) {
         return;
       }
       this.scheduler.want(adv.linkId);
@@ -793,6 +802,47 @@ class BleChatService {
    * They are queued, not dialled at once: the scheduler serialises the attempts, which is
    * slower and far more likely to actually finish.
    */
+  /**
+   * Decide whether to dial this peer, or let them dial us.
+   *
+   * Two phones running this app see each other at the same instant and, before this,
+   * both dialled. That is the collision behind "it connects and immediately drops":
+   * Android brings the second link up and the stack tears one down a millisecond later,
+   * so the greeting is written to a connection that no longer exists and comes back
+   * "Operation was rejected" — a local refusal that reads like the peer's fault. Both
+   * sides then retry together and collide again, forever.
+   *
+   * The rule is a comparison of the two identities, so both phones reach the same answer
+   * with nothing exchanged: the lower identity dials, the higher one waits. Nobody
+   * negotiates, and there is no state to get out of step.
+   *
+   * The wait is not indefinite. If the other side never dials — an older build, or a
+   * phone whose radio cannot advertise — we dial after the grace period, so the worst
+   * case is a slower connection rather than none.
+   */
+  private shouldWaitToBeDialled(theirPrefix: string | null, linkId: string): boolean {
+    const myPrefix = this.identity ? peerIdPrefix(this.identity.peerId) : null;
+    if (shouldDial(myPrefix, theirPrefix)) {
+      return false;
+    }
+    if (this.dialGraceTimers.has(linkId)) {
+      return true;
+    }
+    const timer = setTimeout(() => {
+      this.dialGraceTimers.delete(linkId);
+      if (this.peerManager.hasLiveLinkToPrefix(theirPrefix)) {
+        return;
+      }
+      logger.info(
+        TAG,
+        `${shortId(linkId)} never dialled us within the grace period; dialling it`,
+      );
+      this.scheduler.want(linkId);
+    }, SIMULTANEOUS_DIAL_GRACE_MS);
+    this.dialGraceTimers.set(linkId, timer);
+    return true;
+  }
+
   connectToEveryone(): number {
     let wanted = 0;
     for (const peer of this.peerManager.getPeers()) {
@@ -838,6 +888,10 @@ class BleChatService {
       this.rotateTimer = null;
     }
     this.scheduler.clear();
+    for (const timer of this.dialGraceTimers.values()) {
+      clearTimeout(timer);
+    }
+    this.dialGraceTimers.clear();
     if (this.seenPersistTimer) {
       clearInterval(this.seenPersistTimer);
       this.seenPersistTimer = null;

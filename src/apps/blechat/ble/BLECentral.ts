@@ -61,6 +61,13 @@ interface CentralLink {
   mtu: number;
   monitor: Subscription | null;
   disconnectSub: Subscription | null;
+  /**
+   * Which write the REMOTE characteristic actually accepts, read from what was
+   * discovered rather than assumed. Android refuses a write whose mode the
+   * characteristic does not declare before it reaches the radio, and reports that as
+   * "Operation was rejected" — a local refusal that looks exactly like a peer problem.
+   */
+  writeMode: 'withResponse' | 'withoutResponse';
 }
 
 /**
@@ -404,7 +411,23 @@ export class BLECentral {
         );
       }
       gatt.txCharacteristicFound = true;
-      logger.info(TAG, `${linkId}: RX and TX characteristics found`);
+      const writeMode: 'withResponse' | 'withoutResponse' = rx.isWritableWithResponse
+        ? 'withResponse'
+        : 'withoutResponse';
+      logger.info(
+        TAG,
+        `${linkId}: RX and TX characteristics found ` +
+          `(rx write: response=${rx.isWritableWithResponse} ` +
+          `noResponse=${rx.isWritableWithoutResponse}, using ${writeMode}; ` +
+          `tx notify=${tx.isNotifiable})`,
+      );
+      if (!rx.isWritableWithResponse && !rx.isWritableWithoutResponse) {
+        throw new BleLinkError(
+          'CharacteristicNotFound',
+          'discoveringServices',
+          'The RX characteristic on the peer accepts no writes at all',
+        );
+      }
 
       enter('enablingNotifications');
 
@@ -415,6 +438,7 @@ export class BLECentral {
         mtu: gatt.mtu,
         monitor: null,
         disconnectSub: null,
+        writeMode,
       };
 
       // Subscribing writes the CCCD on the remote peripheral, which is what makes the
@@ -498,8 +522,13 @@ export class BLECentral {
     }
     // Write-with-response gives per-frame flow control from the peripheral, which keeps
     // fragment ordering intact. Write-without-response is faster but can outrun the
-    // remote stack and silently drop frames.
-    await link.rx.writeWithResponse(base64);
+    // remote stack and silently drop frames — so it is used only when the remote
+    // characteristic does not accept the safer one.
+    if (link.writeMode === 'withResponse') {
+      await link.rx.writeWithResponse(base64);
+    } else {
+      await link.rx.writeWithoutResponse(base64);
+    }
   }
 
   async readRssi(linkId: string): Promise<number | null> {

@@ -366,6 +366,27 @@ export class PeerManager implements PeerRouteResolver {
   }
 
   /** A peerId this advertised prefix belongs to, if we have ever identified it. */
+  /**
+   * Whether any link to this advertised prefix is currently alive or coming up.
+   *
+   * Deliberately counts a link that is still connecting or handshaking. The question it
+   * answers is "is the other side already dealing with this peer?", and a link halfway up
+   * is a yes — dialling on top of it is what creates the collision in the first place.
+   */
+  hasLiveLinkToPrefix(prefix: string | null): boolean {
+    if (!prefix) {
+      return false;
+    }
+    for (const peer of [...this.peers.values(), ...this.unidentified.values()]) {
+      const matches =
+        peer.peerIdPrefix === prefix || (peer.peerId?.startsWith(prefix) ?? false);
+      if (matches && peer.state !== 'disconnected' && peer.state !== 'failed') {
+        return true;
+      }
+    }
+    return false;
+  }
+
   peerIdForPrefix(prefix: string | null): string | null {
     if (!prefix) {
       return null;

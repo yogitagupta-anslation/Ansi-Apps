@@ -65,3 +65,24 @@ export function peerIdPrefix(peerId: string): string {
 export function shortId(id: string): string {
   return id.replace(/-/g, '').slice(0, 6).toUpperCase();
 }
+
+/**
+ * Of two phones that can see each other, which one places the call.
+ *
+ * Both discover each other in the same instant, and if both dial, Android brings up two
+ * connections between the same pair and the stack tears one down under the other — the
+ * link comes up and dies a millisecond later, so the greeting is written to a connection
+ * that no longer exists. One side has to hold back.
+ *
+ * Comparing the two identities decides it with nothing exchanged and no state to get out
+ * of step: both phones run the same comparison on the same two values and always reach
+ * opposite answers. Lower identity dials. Equal prefixes (which would mean the same
+ * identity) fall through to dialling, because a stalemate would be worse than a collision.
+ */
+export function shouldDial(myPrefix: string | null, theirPrefix: string | null): boolean {
+  if (!myPrefix || !theirPrefix) {
+    // Not enough to decide with. Dialling is the behaviour that at least tries.
+    return true;
+  }
+  return myPrefix <= theirPrefix;
+}

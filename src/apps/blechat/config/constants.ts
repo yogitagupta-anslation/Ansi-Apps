@@ -107,6 +107,21 @@ export const REASSEMBLY_TIMEOUT_MS = 30_000;
 /** Handshake must complete within this window or the link is torn down. */
 export const HANDSHAKE_TIMEOUT_MS = 15_000;
 
+/**
+ * How long the higher-numbered identity waits before dialling anyway.
+ *
+ * Both phones see each other at the same moment and both dial, which on Android's stack
+ * collapses into one ACL link being torn down under the other — the link comes up, the
+ * stack drops it a millisecond later, and the greeting is refused because the connection
+ * it was written to no longer exists. Only one side should dial. Which side is decided by
+ * comparing identities, so the two phones always agree without exchanging anything.
+ *
+ * This is the fallback for when the other side never dials — an older build, or a phone
+ * that cannot advertise. Long enough for a real connection to have got going, short
+ * enough not to read as the app doing nothing.
+ */
+export const SIMULTANEOUS_DIAL_GRACE_MS = 3_000;
+
 /** How long we wait for an application-level ACK before marking a message failed. */
 export const ACK_TIMEOUT_MS = 20_000;
 
