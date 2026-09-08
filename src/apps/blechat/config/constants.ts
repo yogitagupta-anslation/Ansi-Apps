@@ -176,6 +176,20 @@ export const CONNECT_RETRY_MAX_DELAY_MS = 4_000;
 export const CONNECT_TEARDOWN_SETTLE_MS = 250;
 
 /**
+ * How long the radio stays off scanning after a link comes up.
+ *
+ * The handshake's first write happens in the moment right after a connection is
+ * established, and a scan running across that write is what Android refuses — the code
+ * already paused scanning for the connect itself for exactly this reason, then restarted
+ * it one line too early, in the `finally`, so the quiet window ended just before the
+ * operation that needed it most.
+ *
+ * Long enough to cover a handshake that goes normally, short enough that discovery is
+ * not noticeably held up when it does.
+ */
+export const POST_CONNECT_SCAN_QUIET_MS = 4_000;
+
+/**
  * How far ahead the outbound sequence number is persisted.
  *
  * Saving on every packet would be a write per message; saving on a timer would lose the

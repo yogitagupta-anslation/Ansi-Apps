@@ -26,7 +26,10 @@ import type {
 } from '../types/BLE';
 import {BleLinkError, classifyBleError} from './LinkErrors';
 import {withConnectRetry} from './ConnectRetry';
-import {CONNECT_TEARDOWN_SETTLE_MS} from '../config/constants';
+import {
+  CONNECT_TEARDOWN_SETTLE_MS,
+  POST_CONNECT_SCAN_QUIET_MS,
+} from '../config/constants';
 import {base64ToBytes, bytesToHex} from '../utils/bytes';
 import {
   bitmaskToInterests,
@@ -86,6 +89,14 @@ export class BLECentral {
   /** Attempts the user has abandoned, so the retry loop stops rather than pressing on. */
   private cancelling = new Set<string>();
   private scanning = false;
+  /**
+   * Links that are asking for radio silence, and the timers that end it.
+   *
+   * A set rather than a flag: with several peers being dialled at once, the scan must
+   * stay off until the LAST of them is past its handshake, not until the first one
+   * finishes.
+   */
+  private scanHolds = new Map<string, ReturnType<typeof setTimeout> | null>();
   private intensity: ScanIntensity = 'balanced';
   /**
    * Paces the radio. Without it the scan ran continuously in the most power-hungry mode
@@ -262,8 +273,10 @@ export class BLECentral {
     }
 
     // A scan running during connection makes GATT operations flaky on many Android
-    // stacks, so pause it for the duration.
+    // stacks, so pause it for the duration — and for the handshake immediately after,
+    // which is the write that was being refused. See holdScan.
     const wasScanning = this.scanning;
+    this.holdScan(linkId);
     if (wasScanning) {
       this.stopScan();
     }
@@ -298,13 +311,57 @@ export class BLECentral {
       throw err;
     } finally {
       this.cancelling.delete(linkId);
-      if (wasScanning && this.currentState === 'PoweredOn') {
-        try {
-          this.startScan();
-        } catch {
-          // Scanning is best-effort here; the connection is what matters.
-        }
-      }
+      // NOT resumed here. The link is up but the handshake has not happened yet, and
+      // restarting the scan across it is what made the first write fail.
+      this.scheduleScanRelease(linkId, wasScanning);
+    }
+  }
+
+  /** Ask for radio silence on this link's behalf. */
+  private holdScan(linkId: string): void {
+    const existing = this.scanHolds.get(linkId);
+    if (existing) {
+      clearTimeout(existing);
+    }
+    // No timer yet — the hold lasts until the connect settles and schedules its end.
+    this.scanHolds.set(linkId, null);
+  }
+
+  /**
+   * End the silence once the handshake has had its moment.
+   *
+   * Bounded by a timer rather than waiting for the handshake to report back, so this
+   * layer needs to know nothing about handshakes — and so a peer that never answers
+   * cannot leave scanning switched off for good.
+   */
+  private scheduleScanRelease(linkId: string, resume: boolean): void {
+    const existing = this.scanHolds.get(linkId);
+    if (existing) {
+      clearTimeout(existing);
+    }
+    this.scanHolds.set(
+      linkId,
+      setTimeout(() => this.releaseScan(linkId, resume), POST_CONNECT_SCAN_QUIET_MS),
+    );
+  }
+
+  /** Drop this link's claim on the radio, and scan again if nothing else holds it. */
+  releaseScan(linkId: string, resume = true): void {
+    const timer = this.scanHolds.get(linkId);
+    if (timer) {
+      clearTimeout(timer);
+    }
+    this.scanHolds.delete(linkId);
+    if (!resume || this.scanHolds.size > 0 || this.scanning) {
+      return;
+    }
+    if (this.currentState !== 'PoweredOn') {
+      return;
+    }
+    try {
+      this.startScan();
+    } catch {
+      // Scanning is best-effort here; the connection is what matters.
     }
   }
 
