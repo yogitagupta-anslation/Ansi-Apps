@@ -49,11 +49,33 @@ export function EmployeeListItem({
       ? { fg: t.colors.warning, soft: t.colors.warningSoft }
       : { fg: t.colors.textMuted, soft: t.colors.surfaceMuted };
 
-  /** "09:02 → now" while still present, "09:02 → 17:30" once settled. */
+  /**
+   * "09:02 → now" while still present, "09:02 → 17:30" once settled — and
+   * "09:02 → 17:00 declared" when the employee said so themselves.
+   *
+   * The word goes on the line carrying the NUMBER, not beside it, because this
+   * is the line a Host actually reads. Two departures can put a time here and
+   * they do not mean the same thing:
+   *
+   *   inferred  the grace period elapsed in silence. The Host stopped hearing
+   *             them, which is why the time is the last thing it observed.
+   *   declared  they pressed Check out on their own phone and this Host read
+   *             it off the air. The radio may still hear them perfectly well.
+   *
+   * That second case is exactly why the label is not optional. `deriveStatus`
+   * reads radio silence alone, so for up to one grace period the pill can say
+   * PRESENT in green, the avatar can carry its live "currently nearby" dot,
+   * and this line can carry a departure time — all three true at once. Without
+   * the word, that reads as a contradiction or a bug. With it, it reads as
+   * what it is: they told us they were leaving, and we can still hear them.
+   */
+  const declared = record?.leftTimeSource === 'DECLARED';
+
   const span = record?.checkInTime
     ? formatClockTime(record.checkInTime) +
       ' → ' +
-      (record.leftTime ? formatClockTime(record.leftTime) : 'now')
+      (record.leftTime ? formatClockTime(record.leftTime) : 'now') +
+      (declared ? ' declared' : '')
     : '—';
 
   const body = (

@@ -97,13 +97,32 @@ async function buildHistoryFor(employeeId: string, monthKey: string): Promise<Hi
 
   return mine.days
     .filter(d => d.status !== 'NOT_APPLICABLE')
-    .map(d => ({
-      date: d.date,
-      status: d.status as HistoryDay['status'],
-      checkInMinutes: d.record?.checkInTime != null ? minutesOfDay(d.record.checkInTime) : null,
-      // Check-out is the last OBSERVED detection, matching the Excel report.
-      checkOutMinutes: d.record?.lastSeenTime != null ? minutesOfDay(d.record.lastSeenTime) : null,
-    }));
+    .map(d => {
+      /**
+       * A declared departure is reported as itself.
+       *
+       * The default below is the last OBSERVED detection, which matches the
+       * Excel report. But when the employee STATED a departure, that statement
+       * is the number their phone already showed them as confirmed, and
+       * replacing it here with a later last-seen reading would silently
+       * rewrite it on the following day's sync. Two real observations exist;
+       * this picks the one the employee was told about, and labels it.
+       */
+      const declared = d.record?.leftTimeSource === 'DECLARED' && d.record.leftTime != null;
+
+      return {
+        date: d.date,
+        status: d.status as HistoryDay['status'],
+        checkInMinutes:
+          d.record?.checkInTime != null ? minutesOfDay(d.record.checkInTime) : null,
+        checkOutMinutes: declared
+          ? minutesOfDay(d.record!.leftTime!)
+          : d.record?.lastSeenTime != null
+          ? minutesOfDay(d.record.lastSeenTime)
+          : null,
+        ...(declared ? { checkOutDeclared: true } : {}),
+      };
+    });
 }
 
 export const StatusDeliveryService = {
@@ -185,12 +204,29 @@ export const StatusDeliveryService = {
          * Today's status is never sacrificed: if even the bare report will not
          * fit there is nothing useful to send.
          */
+        /**
+         * The declared-day list travels beside the packed history, because
+         * unpackHistory's four-part tuple cannot carry an extra field without
+         * older employee builds dropping every entry. It is trimmed in step
+         * with the history so the two never disagree about which days exist.
+         */
+        const declaredFor = (ds: HistoryDay[]): { dc?: string } => {
+          const marked = ds.filter(d => d.checkOutDeclared).map(d => d.date.slice(8, 10));
+          return marked.length > 0 ? { dc: marked.join(',') } : {};
+        };
+
         let days = history;
-        let payload = encodeStatusReport({ ...report, h: packHistory(days) });
+        let payload = encodeStatusReport({
+          ...report,
+          ...declaredFor(days),
+          h: packHistory(days),
+        });
         while (payload.length > budget && days.length > 0) {
           days = days.slice(1);
           payload = encodeStatusReport(
-            days.length > 0 ? { ...report, h: packHistory(days) } : report,
+            days.length > 0
+              ? { ...report, ...declaredFor(days), h: packHistory(days) }
+              : report,
           );
         }
         if (payload.length > budget) {

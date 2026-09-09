@@ -18,9 +18,9 @@
  * -----------------------------------------------------------------------------
  */
 
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useRef, useState } from 'react';
 import { useNavigation } from '@react-navigation/native';
-import { Image, Modal, Pressable, StyleSheet, View } from 'react-native';
+import { Image, Pressable, StyleSheet, View } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { requestScanPermissions } from '../bluetooth/permissions';
 import { openLocationSettings } from '../bluetooth/BleAdvertiser';
@@ -30,7 +30,6 @@ import { EmptyState, ErrorState } from '../components/states';
 import { EmployeeAvatar } from '../components/EmployeeAvatar';
 import { Icon } from '../components/Icon';
 import { Orbit, type OrbitState } from '../components/Orbit';
-import { CheckInSuccessScreen } from './CheckInSuccessScreen';
 import { Screen, Txt } from '../components/ui';
 import { SERVICE_UUID_16 } from '../constants/bluetoothConfig';
 import { formatClockTime } from '../constants/appConfig';
@@ -60,40 +59,19 @@ export function HostHomeScreen({ onSeeAll }: { onSeeAll: () => void }) {
   const summary = store.todaySummary;
 
   /**
-   * Celebrate a check-in only when one is genuinely NEW.
+   * NO CHECK-IN MODAL ON THE HOST.
    *
-   * `seenCheckIns` is seeded on the first render from whatever is already
-   * recorded, so opening the app to a day of existing records does not fire a
-   * burst of confetti for check-ins that happened hours ago. Only ids that
-   * appear after that first pass are treated as new.
+   * The employee side keeps it, and should: on that phone it is the single
+   * moment a person learns their own attendance was recorded, and it happens
+   * once a day to an otherwise idle screen.
+   *
+   * The Host is the opposite case. It fires once per ARRIVAL, so a room
+   * filling up throws a full-screen modal over the dashboard repeatedly, each
+   * one covering the live counters and the in-range list while the operator is
+   * trying to watch exactly that. Nothing is lost by dropping it: the
+   * PRESENT counter, the register and the "In range now" row all carry the
+   * same fact already, in place, without taking the screen away.
    */
-  const seenCheckIns = useRef<Set<string> | null>(null);
-  const [celebrate, setCelebrate] = useState<{
-    employeeName: string;
-    employeeId: string;
-    checkInTime: number;
-  } | null>(null);
-
-  useEffect(() => {
-    const checkedIn = store.todayRecords.filter(r => r.checkInTime !== null);
-
-    if (seenCheckIns.current === null) {
-      seenCheckIns.current = new Set(checkedIn.map(r => r.employeeId));
-      return;
-    }
-
-    const fresh = checkedIn.find(r => !seenCheckIns.current?.has(r.employeeId));
-    if (fresh && fresh.checkInTime !== null) {
-      seenCheckIns.current.add(fresh.employeeId);
-      setCelebrate({
-        employeeName: fresh.employeeName,
-        employeeId: fresh.employeeId,
-        // Read from the written record, never stamped at render time.
-        checkInTime: fresh.checkInTime,
-      });
-    }
-  }, [store.todayRecords]);
-
   const hasEmployees = store.employees.length > 0;
 
   /** Which blocker sheet is open, if any. */
@@ -182,6 +160,16 @@ export function HostHomeScreen({ onSeeAll }: { onSeeAll: () => void }) {
   /** Registered employees the scanner can hear RIGHT NOW. Live proximity. */
   const detectedNow = store.scan.detected.filter(d => d.employee !== null);
 
+  /**
+   * Of the employees we can hear, how many clear the recording threshold.
+   *
+   * These are two DIFFERENT numbers and the gap between them matters: it is
+   * exactly the population the app hears but will not record. `isNearby` is
+   * the smoothed signal tested against store.settings.proximity.minimumRssi —
+   * the same threshold the rule line under the scan button quotes.
+   */
+  const nearbyNow = detectedNow.filter(d => d.isNearby).length;
+
   const live = visual.state === 'ACTIVE';
 
   /**
@@ -212,6 +200,37 @@ export function HostHomeScreen({ onSeeAll }: { onSeeAll: () => void }) {
       : detectedNow.length > 0
       ? 'found'
       : 'looking';
+
+  /**
+   * What the orbit core says while scanning.
+   *
+   * The core used to read "Employee found · -62 dBm", which was wrong twice
+   * over. It named a singular employee, as though the host had been looking for
+   * one particular person — it scans for anyone on the registry. And the dBm
+   * was one arbitrary employee's reading (the strongest, since the snapshot is
+   * sorted) presented as if it described the scan.
+   *
+   * A count is the honest headline, and it is the one live fact no other
+   * element on this screen states: the pill says only scanning/idle, the
+   * counters are whole-day attendance rather than who is in the room, and the
+   * list below shows each person separately without totalling them.
+   *
+   * The sub-line carries the part that decides whether anything is actually
+   * being recorded. 'found' fires on ANY detection with no threshold check, so
+   * without it the core could sit in accent colour reading like a success while
+   * AttendanceManager rejects every one of them as TOO_FAR and writes nothing.
+   */
+  const orbitTitle =
+    orbitState === 'found' ? detectedNow.length + ' in range' : undefined;
+
+  const orbitSub =
+    orbitState !== 'found'
+      ? undefined
+      : nearbyNow === 0
+      ? 'Too far to record'
+      : nearbyNow === detectedNow.length
+      ? 'Recording attendance'
+      : nearbyNow + ' of ' + detectedNow.length + ' near enough';
 
   /* ----------------------------------------------------------- scan rule -- */
 
@@ -286,7 +305,8 @@ export function HostHomeScreen({ onSeeAll }: { onSeeAll: () => void }) {
           // employee's read as a different component rather than the same one
           // in another role.
           size={300}
-          rssi={detectedNow[0]?.smoothedRssi ?? null}
+          title={orbitTitle}
+          sub={orbitSub}
           onPress={() => void handleAction()}
           disabled={busy || startDisabled}
         />
@@ -499,23 +519,6 @@ export function HostHomeScreen({ onSeeAll }: { onSeeAll: () => void }) {
         onFixed={handleBlockerFixed}
       />
 
-      <Modal
-        visible={celebrate !== null}
-        animationType="fade"
-        onRequestClose={() => setCelebrate(null)}
-        statusBarTranslucent>
-        {celebrate ? (
-          <CheckInSuccessScreen
-            variant="host"
-            employeeName={celebrate.employeeName}
-            employeeId={celebrate.employeeId}
-            checkInTime={celebrate.checkInTime}
-            hostId={store.settings.hostId}
-            photo={store.employees.find(e => e.employeeId === celebrate.employeeId)?.photo}
-            onDismiss={() => setCelebrate(null)}
-          />
-        ) : null}
-      </Modal>
     </Screen>
   );
 }

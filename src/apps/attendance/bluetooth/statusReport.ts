@@ -62,8 +62,32 @@ export interface StatusReport {
    * failing. Decoded into `historyDays`.
    */
   h?: string;
+  /**
+   * Days in this month whose check-out time the employee DECLARED, as
+   * comma-separated two-digit day numbers ("08,15").
+   *
+   * WHY A SEPARATE FIELD RATHER THAN A FIFTH SLOT IN THE PACKED TUPLE.
+   * unpackHistory requires exactly four colon-separated parts and drops any
+   * entry that has more, so widening the tuple would make every older employee
+   * build silently lose its whole history the moment it met a newer Host.
+   * decodeStatusReport, by contrast, whitelists the fields it knows and ignores
+   * the rest — so an older build simply never sees this key and behaves exactly
+   * as it does today.
+   *
+   * WHY IT MATTERS. Without it, a declared departure is overwritten a day
+   * later. buildHistoryFor normally reports checkOutMinutes from lastSeenTime;
+   * once "today" becomes "yesterday" the employee's own screen would replace
+   * the 18:00 they were shown as confirmed with the 18:34 the radio last heard
+   * — the app taking back a number it had already displayed.
+   */
+  dc?: string;
   /** Decoded history. Never sent over the air; produced by decodeStatusReport. */
   historyDays?: HistoryDay[];
+  /**
+   * This report's OWN day carried a declared departure. Derived from `dc`;
+   * never sent as its own field.
+   */
+  leftTimeDeclared?: boolean;
 }
 
 /** One past day, as reported by the Host. */
@@ -74,6 +98,12 @@ export interface HistoryDay {
   /** Minutes since local midnight, or null when not applicable. */
   checkInMinutes: number | null;
   checkOutMinutes: number | null;
+  /**
+   * checkOutMinutes is a departure the employee STATED, not the last moment
+   * the Host heard their phone. Absent or false means the ordinary thing: the
+   * last observed signal.
+   */
+  checkOutDeclared?: boolean;
 }
 
 const STATUS_LETTER: Record<string, HistoryDay['status']> = {
@@ -107,6 +137,26 @@ export function packHistory(days: HistoryDay[]): string {
  */
 export function unpackHistory(packed: string, monthPrefix: string): HistoryDay[] {
   const out: HistoryDay[] = [];
+
+  /**
+   * How many days the reported month ACTUALLY has.
+   *
+   * The bound used to be a flat 1..31, so a report dated in a 30-day month
+   * could mint "2026-09-31" — a date no calendar has. Nothing downstream
+   * re-checks it: EmployeeStatusStore keys stored history by that string and
+   * the month summaries count it, so one impossible day inflates a real
+   * person's recorded total. Day 0 for an unparseable prefix drops every entry,
+   * which is the right failure for unauthenticated radio input.
+   */
+  const [yearPart, monthPart] = monthPrefix.split('-');
+  const monthIndex = Number(monthPart) - 1;
+  const daysInMonth =
+    /^\d{4}$/.test(yearPart ?? '') && /^\d{2}$/.test(monthPart ?? '') &&
+    monthIndex >= 0 &&
+    monthIndex <= 11
+      ? new Date(Number(yearPart), monthIndex + 1, 0).getDate()
+      : 0;
+
   packed.split(',').forEach(entry => {
     if (!entry) {
       return;
@@ -120,7 +170,7 @@ export function unpackHistory(packed: string, monthPrefix: string): HistoryDay[]
       return;
     }
     const day = Number(dd);
-    if (day < 1 || day > 31) {
+    if (day < 1 || day > daysInMonth) {
       return;
     }
     const status = STATUS_LETTER[letter];
@@ -238,15 +288,40 @@ export function decodeStatusReport(bytes: number[]): StatusReport | null {
   if (typeof r.reportedAt !== 'number' || r.reportedAt < MIN_TIME || r.reportedAt > MAX_TIME) {
     return null;
   }
-  // LEFT must carry a left time; PRESENT must not claim one.
+  // LEFT must carry a left time; PRESENT must not claim one. Both halves are
+  // enforced: a report saying someone is simultaneously present and gone is
+  // self-contradictory, and EmployeeStatusStore would otherwise store it as a
+  // PRESENT day carrying a check-out time.
   if (r.status === 'LEFT' && r.leftTime === null) {
+    return null;
+  }
+  if (r.status === 'PRESENT' && r.leftTime !== null) {
     return null;
   }
 
   // History is optional and best-effort: a malformed block is dropped, the
   // rest of the report still stands.
   const packed = typeof r.h === 'string' ? r.h : undefined;
-  const historyDays = packed ? unpackHistory(packed, r.date.slice(0, 7)) : undefined;
+  const rawDays = packed ? unpackHistory(packed, r.date.slice(0, 7)) : undefined;
+
+  /**
+   * Which days carry a declared check-out. Same best-effort rule as the
+   * history block: a malformed list means "no day is marked declared", never a
+   * rejected report — this is unauthenticated radio input, and the fallback
+   * loses a label rather than a day.
+   */
+  const declaredDays = new Set<string>();
+  if (typeof r.dc === 'string' && /^\d{2}(,\d{2})*$/.test(r.dc)) {
+    r.dc.split(',').forEach(dd => declaredDays.add(dd));
+  }
+
+  const historyDays = rawDays
+    ? rawDays.map(d =>
+        declaredDays.has(d.date.slice(8, 10)) ? { ...d, checkOutDeclared: true } : d,
+      )
+    : undefined;
+
+  const leftTimeDeclared = declaredDays.has(r.date.slice(8, 10));
 
   return {
     v: 1,
@@ -258,6 +333,8 @@ export function decodeStatusReport(bytes: number[]): StatusReport | null {
     date: r.date,
     reportedAt: r.reportedAt,
     ...(packed ? { h: packed } : {}),
+    ...(typeof r.dc === 'string' ? { dc: r.dc } : {}),
     ...(historyDays && historyDays.length > 0 ? { historyDays } : {}),
+    ...(leftTimeDeclared ? { leftTimeDeclared: true } : {}),
   };
 }

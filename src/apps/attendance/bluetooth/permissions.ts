@@ -161,11 +161,12 @@ async function requestAll(permissions: Permission[]): Promise<PermissionResult> 
 }
 
 /**
- * Permissions needed to SCAN for advertisements (User Mode).
+ * Permissions needed to SCAN for advertisements (Host Mode).
  *
- * BLUETOOTH_CONNECT is included even though we never connect: on Android 12+
- * it also gates reading the local adapter name, which the diagnostics panel
- * shows. It is a cheap add and avoids a confusing partial-permission state.
+ * BLUETOOTH_CONNECT is genuinely required, not a cheap add: StatusDeliveryService
+ * connects to the employee phone to write the status report back. On Android 12+
+ * the same permission also gates reading the local adapter name for the
+ * diagnostics panel.
  */
 export async function requestScanPermissions(): Promise<PermissionResult> {
   const permissions: Permission[] = isAndroid12OrHigher()
@@ -176,10 +177,15 @@ export async function requestScanPermissions(): Promise<PermissionResult> {
 }
 
 /**
- * Permissions needed to ADVERTISE (Host Mode).
+ * Permissions needed to ADVERTISE (Employee Mode).
  *
  * On Android 11 and below there is nothing to request: BLUETOOTH_ADMIN is an
  * install-time permission and advertising does not require location.
+ *
+ * BLUETOOTH_CONNECT is requested alongside BLUETOOTH_ADVERTISE on 12+ because
+ * openGattServer needs it. Without it advertising still runs and the Host still
+ * marks attendance, but the reply channel silently does not exist and the
+ * employee is never told their own check-in.
  */
 export async function requestAdvertisePermissions(): Promise<PermissionResult> {
   const permissions: Permission[] = isAndroid12OrHigher()

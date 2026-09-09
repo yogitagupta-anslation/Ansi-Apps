@@ -256,8 +256,11 @@ export function buildMonthlyReport(input: {
           // Not a working day for anyone — never an absence.
           return { date, status: 'NOT_APPLICABLE' as DayCellStatus, record, presenceMs: null };
         }
-        if (registeredOn && date < registeredOn) {
-          // Employee did not exist yet; no expectation to meet.
+        if (registeredOn && date < registeredOn && !record) {
+          // Employee did not exist yet and nothing was observed; no expectation
+          // to meet. A day that DOES carry a record falls through and is counted:
+          // the Host saw them, and an observation outranks a registry date that
+          // may simply have been reset by a remove-and-re-add.
           return { date, status: 'NOT_APPLICABLE' as DayCellStatus, record, presenceMs: null };
         }
 

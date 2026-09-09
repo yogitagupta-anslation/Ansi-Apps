@@ -9,12 +9,31 @@
  *      BluetoothLeAdvertiser   ~~~~~~~~>     BluetoothLeScanner
  *      (native Kotlin module)     BLE        (react-native-ble-plx)
  *      broadcasts employeeId              resolves it against the local
- *                                         employee registry, reads RSSI,
- *                                         marks attendance
+ *      (+ the check-out UUID in           employee registry, reads RSSI,
+ *       the scan response while a         marks attendance
+ *       check-out is pending)
  *
- * The Employee advertises. The Host scans. There is no connection, no pairing,
- * no bonding, and no GATT anywhere in the attendance path - the employee id
- * travels inside the advertisement itself, so the Host never needs to connect.
+ *      GATT server             <~~~~~~~~    GATT client
+ *      (BleAdvertiseService)     write      (StatusDeliveryService, ble-plx)
+ *      receives the status                connects and writes the report it
+ *      report and displays it             just recorded, then disconnects
+ *
+ * The Employee advertises and the Host scans - but the path is NOT one-way. The
+ * advertisement is CONNECTABLE (connectable: true, BleAdvertiser.ts), so while
+ * it is up the phone accepts BLE connections unconditionally - setConnectable is
+ * applied whatever else is true. Given BLUETOOTH_CONNECT and both UUIDs, it also
+ * runs a GATT server holding a single write-only characteristic, and that is the
+ * only channel by which an employee is ever told their own check-in: the Host
+ * connects, writes the status report, disconnects. Without that permission the
+ * advertisement is still connectable, but the reply channel silently does not
+ * exist and the employee is never told anything.
+ *
+ * No pairing or bonding is involved, and that is a trade-off, not a safeguard.
+ * The characteristic is PERMISSION_WRITE - unencrypted, unauthenticated - and
+ * the write callback never inspects who wrote. Any central in range can connect
+ * and write; the only gate is the strict JS decoder plus an own-employee-id
+ * match, and that id is broadcast in the clear. See the TRUST BOUNDARY note in
+ * bluetooth/statusReport.ts, where this is documented as an accepted risk.
  *
  * Both phones must run a build with identical values in this file, or the Host
  * will never recognise the Employee's advertisement.
@@ -47,6 +66,37 @@
 export const SERVICE_UUID_16 = 'f00d';
 export const SERVICE_UUID_16_FULL =
   '0000' + SERVICE_UUID_16 + '-0000-1000-8000-00805f9b34fb';
+
+/**
+ * 16-bit service UUID the EMPLOYEE adds to its SCAN RESPONSE while, and only
+ * while, a check-out is pending. Its presence IS the message; it carries no
+ * payload of its own.
+ *
+ * WHY THIS AND NOT THE MANUFACTURER PAYLOAD. The payload is version-framed —
+ * parseManufacturerPayload accepts a packet only when the version byte matches
+ * exactly, and the employee id runs to the end of the buffer, so an appended
+ * byte is either swallowed into the id or rejected as corrupt. Any change there
+ * breaks every phone running an older build, in the way that looks exactly like
+ * "nobody is nearby". An extra service UUID is invisible to a build that does
+ * not look for it: old Hosts ignore it, old employees never send it, and
+ * PROTOCOL_VERSION does not move.
+ *
+ * WHY NOT A GATT READ. The Host only connects when it has something to deliver,
+ * so a characteristic holding this would sit unread until something else
+ * happened to trigger a connection — minutes, on a busy registry. This rides
+ * the advertisement, so the Host sees it on the next scan: about a second,
+ * which is what makes "tap and walk out" work at all.
+ *
+ * BUDGET: the scan response holds the 128-bit UUID at 18 bytes of its own
+ * 31-byte allowance. A 16-bit UUID costs 4, for 22. Fits.
+ *
+ * PRIVACY NOTE: this is world-readable, like the rest of the advertisement.
+ * Anyone sniffing the air learns that some opaque id is about to leave — the
+ * same class of exposure as the id itself, which is already public.
+ */
+export const CHECKOUT_UUID_16 = 'f00e';
+export const CHECKOUT_UUID_16_FULL =
+  '0000' + CHECKOUT_UUID_16 + '-0000-1000-8000-00805f9b34fb';
 
 /**
  * Full random 128-bit service UUID, sent in the SCAN RESPONSE packet, which has
@@ -90,16 +140,28 @@ export const PROTOCOL_VERSION = 0x01;
  *   with N = 1 version byte + 7 employee id bytes        = 19 bytes  <= 31  OK
  *
  * Scan response packet (its own separate 31-byte budget):
- *   128-bit service UUID  (len + type + 16)                18 bytes  <= 31  OK
+ *   128-bit service UUID  (len + type + 16)                18 bytes
+ *   16-bit check-out UUID (len + type + 2), only while pending  4 bytes
+ *                                                      --------------
+ *                                                       = 22 bytes  <= 31  OK
  *
  * setIncludeDeviceName(false) is essential - the device name is appended to the
  * primary packet and overflows it, producing ADVERTISE_FAILED_DATA_TOO_LARGE.
  *
  * WHAT IS DELIBERATELY *NOT* BROADCAST
  * -----------------------------------------------------------------------------
- * Only the opaque employee id ("EMP_001") goes on air. The employee's NAME is
- * never advertised - the Host resolves it locally from its own registry. Anyone
- * sniffing the air learns an opaque code, not a person.
+ * The employee's NAME, department, phone and email are never advertised - the
+ * Host resolves the name locally from its own registry. What DOES go on air is
+ * the employee id in plain ASCII, the service UUIDs, and - while a check-out is
+ * pending - the check-out UUID.
+ *
+ * Do not read that as anonymity. The id is free text the employee types,
+ * validated only against /^[A-Za-z0-9_-]+$/ and the byte cap below, so
+ * "JAISMEET-KAUR" is a legal id; opacity is a property of whatever scheme an
+ * administrator chooses, not something this app enforces. And even a genuinely
+ * opaque id is a STABLE identifier repeated at LOW_LATENCY / TX_POWER_HIGH,
+ * which defeats the platform's BLE address rotation for anyone who links it to
+ * a face once.
  * ========================================================================== */
 
 /**

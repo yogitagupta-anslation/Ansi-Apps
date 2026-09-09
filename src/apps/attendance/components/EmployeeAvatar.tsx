@@ -7,7 +7,8 @@
  * and across restarts, which makes a long list easier to scan. A random colour
  * per render would be actively worse than no colour.
  *
- * No photos: this app has no backend and stores no images.
+ * A stored profile photo (a base64 data URI in AsyncStorage) replaces the
+ * initials disc when present; initials are the fallback, not the only mode.
  * -----------------------------------------------------------------------------
  */
 
