@@ -476,6 +476,22 @@ export function ChatScreen({route, navigation}: RootStackScreenProps<'Chat'>) {
     });
   }, [messages, isGroup]);
 
+  /**
+   * The newest thing we sent, which is the only message that carries a receipt.
+   *
+   * Anything older has been overtaken: whether the message before last was delivered
+   * stops being news the moment another one goes out, and a column of "Delivered"
+   * running down the thread is read once and then never again.
+   */
+  const lastOutgoingId = useMemo(() => {
+    for (let i = messages.length - 1; i >= 0; i--) {
+      if (messages[i].direction === 'outgoing') {
+        return messages[i].id;
+      }
+    }
+    return null;
+  }, [messages]);
+
   const [profileVisible, setProfileVisible] = useState(false);
   const blockedPeerIds = useAppStore(st => st.blockedPeerIds);
 
@@ -499,11 +515,11 @@ export function ChatScreen({route, navigation}: RootStackScreenProps<'Chat'>) {
       {/*
         One header, not four strips.
 
-        The name, who it is, whether the link is up, how good it is and what MTU it
-        negotiated are all facts about the same conversation, so they belong in the same
-        block. They used to be a header, a pill bar, a retry banner and a queued banner
-        stacked above the first message — four chrome layers between opening a chat and
-        reading it.
+        The person is the title, centred, the way every messaging app the reader already
+        knows puts it — with a chevron to say the name opens them. Under it, only what
+        bears on the conversation: whether the link is up and how good it is. This used
+        to be a header, a pill bar, a retry banner and a queued banner stacked above the
+        first message — four chrome layers between opening a chat and reading it.
       */}
       <View style={styles.header}>
         <Touchable
@@ -522,10 +538,10 @@ export function ChatScreen({route, navigation}: RootStackScreenProps<'Chat'>) {
           style={styles.headerIdentity}
           accessibilityLabel={isGroup ? 'Group members' : 'View profile'}>
           {isGroup ? (
-            <GroupAvatar size={40} online={reachableMembers > 0} />
+            <GroupAvatar size={30} online={reachableMembers > 0} />
           ) : (
             <MascotAvatar
-              size={34}
+              size={30}
               tint={avatarHue(theme, peer?.peerId ?? displayName).fg}
               status={connected ? theme.ok : null}
             />
@@ -539,8 +555,11 @@ export function ChatScreen({route, navigation}: RootStackScreenProps<'Chat'>) {
                   "connected" — this makes that proof visible rather than a silent
                   precondition. */}
               {!isGroup && peer?.authenticated ? (
-                <Icon name="shield" color={theme.ok} size={14} strokeWidth={2} />
+                <Icon name="shield" color={theme.ok} size={13} strokeWidth={2} />
               ) : null}
+              {/* The affordance the centred name needs: without it this reads as a
+                  title rather than a way in to who you are talking to. */}
+              <Icon name="chevronRight" color={theme.textFaint} size={13} strokeWidth={2.2} />
             </View>
 
             {/* Line two carries everything the status pill bar used to: state first and
@@ -575,8 +594,11 @@ export function ChatScreen({route, navigation}: RootStackScreenProps<'Chat'>) {
                     {connected && qualityLabel(peer?.metrics?.quality ?? null)
                       ? ' \u00b7 ' + qualityLabel(peer?.metrics?.quality ?? null)
                       : ''}
-                    {peer?.gatt ? ' \u00b7 MTU ' + peer.gatt.mtu : ''}
                   </DenseText>
+                  {/* Bars, not numbers. "MTU 517" used to sit in this line: a fact
+                      about the transport rather than about the person, carried already
+                      by the peer sheet and Diagnostics. What belongs above a thread is
+                      whether it will send. */}
                   <SignalBars rssi={peer?.rssi ?? null} size="sm" />
                 </>
               )}
@@ -696,6 +718,7 @@ export function ChatScreen({route, navigation}: RootStackScreenProps<'Chat'>) {
                   message={item}
                   onRetry={onRetry}
                   onLongPress={onMessageActions}
+                  showReceipt={item.id === lastOutgoingId}
                   // Only in a group: in a one-to-one chat the header already names the
                   // only person who can be sending.
                   senderName={
@@ -962,22 +985,41 @@ const useStyles = makeStyles(t => ({
   header: {
     flexDirection: 'row',
     alignItems: 'center',
+    // The identity sits on top of this row rather than in it, so the row only has to
+    // hold the buttons apart — space-between, with nothing competing for the middle.
+    justifyContent: 'space-between',
     gap: 12,
     paddingLeft: spacing.md,
     paddingRight: spacing.lg,
     paddingTop: 10,
-    paddingBottom: 14,
+    paddingBottom: 12,
+    minHeight: 62,
     backgroundColor: t.bg,
     borderBottomWidth: 1,
     borderBottomColor: t.divider,
   },
-  headerIconButton: {padding: 4},
-  headerIdentity: {flex: 1, flexDirection: 'row', alignItems: 'center', gap: 11},
-  headerText: {flex: 1, minWidth: 0},
-  headerNameRow: {flexDirection: 'row', alignItems: 'center', gap: 5},
-  headerName: {...typography.headline, color: t.text, flexShrink: 1},
-  headerMetaRow: {flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 2},
-  headerMeta: {...typography.caption, color: t.textDim, fontSize: 12, flexShrink: 1},
+  headerIconButton: {padding: 4, zIndex: 2},
+  /**
+   * The person, centred — the way every messaging app the user already knows does it.
+   *
+   * Absolutely positioned rather than laid out between the buttons, because a flexed
+   * middle column centres itself between the side clusters, not in the screen: add one
+   * icon on the right and the name drifts left. Pinning it to the full width and letting
+   * the buttons sit on top keeps the name centred on the phone no matter what flanks it.
+   */
+  headerIdentity: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    alignItems: 'center',
+    gap: 3,
+    paddingVertical: 2,
+  },
+  headerText: {alignItems: 'center', maxWidth: '62%'},
+  headerNameRow: {flexDirection: 'row', alignItems: 'center', gap: 4},
+  headerName: {fontSize: 15.5, fontWeight: '600', letterSpacing: -0.2, color: t.text, flexShrink: 1},
+  headerMetaRow: {flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 1},
+  headerMeta: {...typography.caption, color: t.textDim, fontSize: 11.5, flexShrink: 1},
   headerState: {fontWeight: '400'},
   headerWarn: {
     width: 32,
