@@ -18,6 +18,12 @@
 import { NativeEventEmitter, NativeModules, Platform } from 'react-native';
 
 import type { BleScanResult } from '../../types';
+import { base64ToBytes, bytesToBase64 } from '../../utils/base64';
+
+// Re-exported: these used to live here, and `bytesToBase64` in particular is
+// imported by name elsewhere. The implementation moved to utils/base64.ts so it
+// could be unit-tested and shared with the GATT transport.
+export { base64ToBytes, bytesToBase64 };
 import {
   BleTransportError,
   type AdvertiseOptions,
@@ -53,40 +59,6 @@ interface NativeBleModule {
 const SCAN_EVENT = 'EventPulseBleScanResult';
 const ADAPTER_EVENT = 'EventPulseBleAdapterState';
 const ERROR_EVENT = 'EventPulseBleError';
-
-const B64_ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
-
-export function bytesToBase64(bytes: Uint8Array): string {
-  let out = '';
-  for (let i = 0; i < bytes.length; i += 3) {
-    const b0 = bytes[i];
-    const b1 = i + 1 < bytes.length ? bytes[i + 1] : undefined;
-    const b2 = i + 2 < bytes.length ? bytes[i + 2] : undefined;
-
-    out += B64_ALPHABET[b0 >> 2];
-    out += B64_ALPHABET[((b0 & 0x03) << 4) | ((b1 ?? 0) >> 4)];
-    out += b1 === undefined ? '=' : B64_ALPHABET[((b1 & 0x0f) << 2) | ((b2 ?? 0) >> 6)];
-    out += b2 === undefined ? '=' : B64_ALPHABET[b2 & 0x3f];
-  }
-  return out;
-}
-
-export function base64ToBytes(input: string): Uint8Array {
-  const clean = input.replace(/[^A-Za-z0-9+/]/g, '');
-  const out = new Uint8Array(Math.floor((clean.length * 3) / 4));
-  let outIndex = 0;
-  for (let i = 0; i < clean.length; i += 4) {
-    const c0 = B64_ALPHABET.indexOf(clean[i]);
-    const c1 = B64_ALPHABET.indexOf(clean[i + 1]);
-    const c2 = i + 2 < clean.length ? B64_ALPHABET.indexOf(clean[i + 2]) : -1;
-    const c3 = i + 3 < clean.length ? B64_ALPHABET.indexOf(clean[i + 3]) : -1;
-
-    out[outIndex++] = (c0 << 2) | (c1 >> 4);
-    if (c2 >= 0) out[outIndex++] = ((c1 & 0x0f) << 4) | (c2 >> 2);
-    if (c3 >= 0) out[outIndex++] = ((c2 & 0x03) << 6) | c3;
-  }
-  return out.subarray(0, outIndex);
-}
 
 export class NativeBleTransport implements BleTransport {
   readonly name = 'native';

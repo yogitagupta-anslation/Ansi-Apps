@@ -154,10 +154,27 @@ export class AnchorSolver {
     const rms = Math.sqrt(residualSum / usable.length);
     if (!Number.isFinite(rms) || rms > this.opts.maxResidualMeters) return null;
 
+    const residualConfidence = Math.max(0, Math.min(1, 1 - rms / this.opts.maxResidualMeters));
+
+    /**
+     * A fix may not out-confide the ranges it was built from.
+     *
+     * Residual alone is not evidence: three ranges are an exactly determined
+     * system, so the residual is ~0 for almost any input and the reported
+     * confidence was ~1 by construction at the minimum supported anchor count —
+     * including when every contributing range declared confidence 0, which is
+     * the RSSI pipeline saying "do not trust this". Folding the inputs in
+     * follows the house rule already set by `RelativePositionEngine`, where a
+     * placement is only as good as its weaker half.
+     */
+    const inputConfidence =
+      usable.reduce((sum, { range }) => sum + Math.max(0, Math.min(1, range.confidence)), 0) /
+      usable.length;
+
     return {
       position: { x, y },
       errorMeters: rms,
-      confidence: Math.max(0, Math.min(1, 1 - rms / this.opts.maxResidualMeters)),
+      confidence: Math.min(residualConfidence, inputConfidence),
       anchorsUsed: usable.length,
     };
   }
@@ -179,20 +196,36 @@ export class AnchorSolver {
  */
 export function geometryQuality(anchors: readonly AnchorDefinition[]): number {
   if (anchors.length < 3) return 0;
-  let maxArea = 0;
-  let maxSpan = 0;
+
+  /**
+   * Score each triangle against its OWN longest side and keep the best one.
+   *
+   * The area used to be normalised by the largest span in the whole set, which
+   * made the metric non-monotonic in the number of anchors: a well-formed
+   * triangle scoring 0.80 collapsed to 0.06 — below the rejection gate — as
+   * soon as one distant beacon was also in range, and a fix that the same
+   * ranges solve to within 1e-11 m was refused. An extra correct measurement
+   * can only add information to a least-squares fit, so it must never turn a
+   * good fix into no fix at all. Asking "is there a well-conditioned triangle
+   * in here?" is the question the gate was always meant to ask.
+   */
+  let best = 0;
   for (let i = 0; i < anchors.length; i++) {
     for (let j = i + 1; j < anchors.length; j++) {
-      maxSpan = Math.max(maxSpan, Math.hypot(anchors[i].x - anchors[j].x, anchors[i].y - anchors[j].y));
       for (let k = j + 1; k < anchors.length; k++) {
-        const area = Math.abs(
-          (anchors[j].x - anchors[i].x) * (anchors[k].y - anchors[i].y) -
-            (anchors[k].x - anchors[i].x) * (anchors[j].y - anchors[i].y),
-        ) / 2;
-        maxArea = Math.max(maxArea, area);
+        const a = anchors[i];
+        const b = anchors[j];
+        const c = anchors[k];
+        const area = Math.abs((b.x - a.x) * (c.y - a.y) - (c.x - a.x) * (b.y - a.y)) / 2;
+        const span = Math.max(
+          Math.hypot(a.x - b.x, a.y - b.y),
+          Math.hypot(a.x - c.x, a.y - c.y),
+          Math.hypot(b.x - c.x, b.y - c.y),
+        );
+        if (span === 0) continue;
+        best = Math.max(best, area / (span * span * 0.5));
       }
     }
   }
-  if (maxSpan === 0) return 0;
-  return Math.min(1, maxArea / (maxSpan * maxSpan * 0.5));
+  return Math.min(1, best);
 }

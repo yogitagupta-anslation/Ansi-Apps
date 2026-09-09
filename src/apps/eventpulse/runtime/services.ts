@@ -7,7 +7,7 @@
  * build by changing `config`.
  */
 
-import { AppState, Share, type AppStateStatus } from 'react-native';
+import { AppState, Platform, Share, type AppStateStatus } from 'react-native';
 import * as Battery from 'expo-battery';
 
 import { HttpApiClient, type EventPulseApi } from '../api/ApiClient';
@@ -16,6 +16,21 @@ import type { BleTransport } from '../bluetooth/BleTransport';
 import { NativeBleTransport, isNativeBleAvailable } from '../bluetooth/transports/NativeBleTransport';
 import { SimulatedBleTransport, type SimulatedPeerSpec } from '../bluetooth/transports/SimulatedBleTransport';
 import { ConnectionService } from '../connections/ConnectionService';
+import {
+  ConnectionRequestCoordinator,
+  ConnectionRequestError,
+  type PendingRequest,
+} from '../connections/ConnectionRequestCoordinator';
+import type { ConnectionCard } from '../connections/ConnectionProtocol';
+import { GattSessionManager } from '../bluetooth/gatt/GattSessionManager';
+import { createGattTransport } from '../bluetooth/gatt/transports';
+import {
+  advertisingPlansEqual,
+  computeAdvertisingPlan,
+  nextIosSlice,
+  type AdvertisingPlan,
+} from '../bluetooth/gatt/GattAdvertisingPolicy';
+import { redactProfile } from '../security/PrivacyService';
 import { SavedPeopleService, type SavedTag } from '../connections/SavedPeopleService';
 import { EventStatsService } from '../event/EventStatsService';
 import { EventCache } from '../event/EventCache';
@@ -46,6 +61,7 @@ import { conversationStarter } from '../recommendations/ConversationStarter';
 import { presenceStore, sessionStore, showToast, emptyPresence } from '../state/stores';
 import type { ZoomLevel } from '../positioning/Clustering';
 import { config } from './config';
+import { trace } from './diagnostics';
 
 /* ------------------------------------------------------------------ *
  * Graph
@@ -182,6 +198,59 @@ export const savedPeople = new SavedPeopleService({
   onChange: (saved) => sessionStore.setState({ saved }),
 });
 
+/* ------------------------------------------------------------------ *
+ * GATT — the connection channel
+ *
+ * Separate from the presence radio in every sense: a different library, a
+ * different (connectable) service UUID, and a lifecycle that only runs while
+ * the user is in an event. The presence beacon is untouched by any of this and
+ * stays non-connectable.
+ *
+ * Probed once. When the libraries are not linked into a build, `gatt` is null
+ * and the UI says so rather than offering a Connect button that cannot work.
+ * ------------------------------------------------------------------ */
+
+const gattProbe = createGattTransport();
+
+export const gattSessions = gattProbe.available
+  ? new GattSessionManager({ transport: gattProbe.transport, now: () => Date.now() })
+  : null;
+
+export const connectionRequests = gattSessions
+  ? new ConnectionRequestCoordinator({
+      sessions: gattSessions,
+      connections: connectionService,
+      blocks: blockService,
+      db,
+      now: () => Date.now(),
+      // Redacted for a stranger before it is ever handed to the radio. Offline
+      // this is the ONLY place field visibility can be enforced — there is no
+      // server to filter what the far side receives.
+      myCard: (): ConnectionCard | null => {
+        const profile = profileService.current;
+        const privacy = profileService.privacySettings;
+        if (!profile) return null;
+        const visible = privacy ? redactProfile(profile, privacy, 'attendee') : profile;
+        return {
+          profileId: visible.id,
+          name: visible.name,
+          role: visible.role,
+          company: visible.company,
+        };
+      },
+      acceptsConnectionRequests: () =>
+        profileService.privacySettings?.allowConnectionRequests ?? true,
+      // The radar's current peer id for a person — the value the far side is
+      // advertising as its GATT local name right now.
+      currentPeerIdFor: (profileId) =>
+        presenceStore.getState().people.find((person) => person.profileId === profileId)?.peerId ??
+        null,
+      newRequestId: () => `req_${Date.now().toString(36)}_${(requestCounter++).toString(36)}`,
+    })
+  : null;
+
+let requestCounter = 0;
+
 export const presence = new PresenceController({
   // Replaced with the real transport on join; a null transport would force
   // every call site into a null check for no benefit.
@@ -194,6 +263,20 @@ export const presence = new PresenceController({
 /* ------------------------------------------------------------------ *
  * Actions
  * ------------------------------------------------------------------ */
+
+/**
+ * The result of trying to connect.
+ *
+ * Returned as well as toasted, because a toast is not always visible: the
+ * profile card is a React Native `Modal`, which renders in its own native
+ * window ABOVE the React tree, so a `<Toast />` mounted at the root is painted
+ * behind it and the user sees nothing at all. A caller inside a modal has to be
+ * able to show the failure itself, and that is what this return value is for.
+ */
+export interface ConnectOutcome {
+  ok: boolean;
+  message?: string;
+}
 
 export const actions = {
   async bootstrap(): Promise<void> {
@@ -264,6 +347,7 @@ export const actions = {
 
   async leaveEvent(): Promise<void> {
     const event = sessionStore.getState().event;
+    await stopConnectionChannel();
     await presence.stop();
     presenceStore.reset(emptyPresence);
     if (event) await eventService.leave(event.id);
@@ -483,13 +567,107 @@ export const actions = {
 
   /* -------------------- connections -------------------- */
 
-  async connect(profileId: ProfileId, note?: string): Promise<void> {
-    await connectionService.request(profileId, note);
-    showToast('Connection request sent', 'success');
+  /**
+   * Ask someone to connect, over the radio.
+   *
+   * This no longer writes a local record and hopes: it finds their GATT device,
+   * opens a link and sends a real CONNECTION_REQUEST. The toast says "sent",
+   * not "connected", because nobody is connected until a person on the other
+   * phone answers.
+   */
+  async connect(profileId: ProfileId, note?: string): Promise<ConnectOutcome> {
+    trace('Connect', 'action received', {
+      profileId,
+      gattAvailable: gattProbe.available,
+      coordinator: connectionRequests !== null,
+    });
+    if (!connectionRequests) {
+      trace('Connect', 'ABORT: no GATT coordinator', { reason: gattUnavailableReason() });
+      const message = gattUnavailableReason();
+      showToast(message, 'error');
+      return { ok: false, message };
+    }
+    try {
+      await connectionRequests.request(profileId, note);
+      trace('Request', 'result=sent');
+      showToast('Request sent - waiting for them to accept', 'success');
+      void applyAdvertisingPlan();
+      return { ok: true };
+    } catch (error) {
+      const code = error instanceof ConnectionRequestError ? error.code : 'unknown';
+      trace('Request', 'result=failed', {
+        code,
+        message: error instanceof Error ? error.message : String(error),
+      });
+      const message =
+        error instanceof ConnectionRequestError ? error.message : 'Could not send the request.';
+      showToast(message, 'error');
+      return { ok: false, message };
+    }
   },
 
+  /**
+   * Ask a peer the radar found to connect, without knowing who they are.
+   *
+   * The offline-normal case. Nothing maps a rotating peer id to a person
+   * without a directory, and there is no server to supply one, so requiring a
+   * profileId first made Connect unusable for exactly the people it exists for.
+   * The exchange is filed provisionally and reconciled onto the real identity
+   * the moment their accept arrives carrying it.
+   */
+  async connectToPeer(peerId: PeerId, note?: string): Promise<ConnectOutcome> {
+    trace('Connect', 'action received (by peer)', {
+      peerId,
+      gattAvailable: gattProbe.available,
+      coordinator: connectionRequests !== null,
+    });
+    if (!connectionRequests) {
+      const message = gattUnavailableReason();
+      showToast(message, 'error');
+      return { ok: false, message };
+    }
+    try {
+      await connectionRequests.requestByPeer(peerId, note);
+      showToast('Request sent - waiting for them to accept', 'success');
+      void applyAdvertisingPlan();
+      return { ok: true };
+    } catch (error) {
+      const message =
+        error instanceof ConnectionRequestError ? error.message : 'Could not send the request.';
+      trace('Request', 'result=failed', {
+        code: error instanceof ConnectionRequestError ? error.code : 'unknown',
+        message,
+      });
+      showToast(message, 'error');
+      return { ok: false, message };
+    }
+  },
+
+  /** Withdraw a request we sent. */
+  async cancelConnectionRequest(profileId: ProfileId): Promise<void> {
+    await connectionRequests?.cancel(profileId);
+    showToast('Request cancelled', 'neutral');
+  },
+
+  async acceptConnectionRequest(profileId: ProfileId): Promise<void> {
+    await connectionRequests?.accept(profileId);
+    showToast('Connected', 'success');
+  },
+
+  async rejectConnectionRequest(profileId: ProfileId): Promise<void> {
+    await connectionRequests?.reject(profileId);
+    showToast('Request declined', 'neutral');
+  },
+
+  /**
+   * The Connections screen answers by connection id; the radio works in people.
+   * Resolve one to the other rather than giving the screen a second vocabulary.
+   */
   async respondToConnection(connectionId: string, accept: boolean): Promise<void> {
-    await connectionService.respond(connectionId, accept);
+    const connection = connectionService.list().find((entry) => entry.id === connectionId);
+    if (!connection) return;
+    if (accept) await actions.acceptConnectionRequest(connection.profileId);
+    else await actions.rejectConnectionRequest(connection.profileId);
   },
 
   async setConnectionNote(connectionId: string, note: string): Promise<void> {
@@ -509,13 +687,29 @@ export const actions = {
     await blockService.unblock(profileId);
   },
 
+  /**
+   * The block half is local and always applies; the report half may not have
+   * left the device. `BlockService.report` now rethrows a delivery failure
+   * instead of swallowing it, so the two outcomes get two different messages —
+   * telling someone their report was sent when it is sitting in a queue is the
+   * kind of untruth this app is built not to tell. Both call sites `void` this
+   * promise, so it must not reject.
+   */
   async report(input: ReportInput): Promise<void> {
-    await blockService.report(input);
-    sessionStore.setState({ selectedPeerId: null });
-    showToast(
-      input.alsoBlock === false ? 'Report sent' : 'Reported and blocked',
-      'success',
-    );
+    const alsoBlocked = input.alsoBlock !== false;
+    try {
+      await blockService.report(input);
+      sessionStore.setState({ selectedPeerId: null });
+      showToast(alsoBlocked ? 'Reported and blocked' : 'Report sent', 'success');
+    } catch {
+      sessionStore.setState({ selectedPeerId: null });
+      showToast(
+        alsoBlocked
+          ? 'Blocked. Your report will send when you are back online.'
+          : 'Your report will send when you are back online.',
+        'neutral',
+      );
+    }
   },
 
   /* -------------------- connectivity -------------------- */
@@ -562,6 +756,151 @@ async function enterEvent(event: EventDetail, visibility: Visibility): Promise<v
 
   await presence.start(event);
   await presence.refreshAdvertisement();
+
+  await startConnectionChannel(event.id);
+}
+
+/* ------------------------------------------------------------------ *
+ * The connection channel
+ * ------------------------------------------------------------------ */
+
+let requestTickHandle: ReturnType<typeof setInterval> | null = null;
+let lastAdvertisingPlan: AdvertisingPlan | null = null;
+/** iOS time-slice, advanced by the ticker. Android never reads it. */
+let iosSlice: 'presence' | 'gatt' = 'presence';
+let nextSliceAt = 0;
+
+function publishRequests(): void {
+  sessionStore.setState({ incomingRequests: connectionRequests?.incoming() ?? [] });
+}
+
+function gattUnavailableReason(): string {
+  return gattProbe.available ? 'Connections are unavailable right now.' : gattProbe.reason;
+}
+
+async function startConnectionChannel(eventId: EventId): Promise<void> {
+  if (!gattSessions || !connectionRequests) {
+    sessionStore.setState({
+      gattAvailable: false,
+      gattUnavailableReason: gattUnavailableReason(),
+    });
+    return;
+  }
+
+  gattSessions.start();
+  await connectionRequests.start(eventId);
+
+  connectionRequests.subscribe({
+    onIncomingRequest: (request: PendingRequest) => {
+      publishRequests();
+      showToast(`${request.card.name} wants to connect`, 'neutral');
+    },
+    onSettled: () => {
+      publishRequests();
+      void applyAdvertisingPlan();
+    },
+  });
+
+  trace('GATT', 'channel started', { eventId, transport: gattProbe.available ? 'native' : 'none' });
+  sessionStore.setState({ gattAvailable: true, gattUnavailableReason: null });
+  publishRequests();
+  await applyAdvertisingPlan();
+
+  // One timer drives every deadline on this channel: request expiry, the
+  // session layer's connect timeouts, and the iOS advertising slice. All three
+  // are pure functions of `now`, so there is exactly one place time enters.
+  stopRequestTicker();
+  requestTickHandle = setInterval(() => {
+    const now = Date.now();
+    gattSessions?.tick(now);
+    if (Platform.OS === 'ios' && now >= nextSliceAt) {
+      const next = nextIosSlice(iosSlice);
+      iosSlice = next.slice;
+      nextSliceAt = now + next.durationMs;
+      void applyAdvertisingPlan();
+    }
+    void connectionRequests?.tick(now).then((expired) => {
+      if (expired.length > 0) {
+        publishRequests();
+        showToast('A connection request expired', 'neutral');
+      }
+    });
+  }, 1_000);
+  (requestTickHandle as unknown as { unref?: () => void }).unref?.();
+}
+
+function stopRequestTicker(): void {
+  if (requestTickHandle !== null) clearInterval(requestTickHandle);
+  requestTickHandle = null;
+}
+
+async function stopConnectionChannel(): Promise<void> {
+  stopRequestTicker();
+  await connectionRequests?.stop();
+  if (gattProbe.available) {
+    await gattProbe.transport.stopPeripheral().catch(() => undefined);
+    await gattProbe.transport.stopScan().catch(() => undefined);
+  }
+  lastAdvertisingPlan = null;
+  sessionStore.setState({ incomingRequests: [] });
+}
+
+/**
+ * Make the radio match the policy.
+ *
+ * The plan comes from a pure function that knows nothing about radios; all this
+ * does is apply it. On iOS the plan alternates, because CBPeripheralManager
+ * advertises one service set at a time - see GattAdvertisingPolicy for why
+ * presence wins the default slice.
+ */
+async function applyAdvertisingPlan(): Promise<void> {
+  if (!gattProbe.available) return;
+  const gattTransport = gattProbe.transport;
+
+  const state = sessionStore.getState();
+  const plan = computeAdvertisingPlan({
+    platform: Platform.OS === 'ios' ? 'ios' : Platform.OS === 'android' ? 'android' : 'other',
+    inEvent: state.boot === 'in_event',
+    visibility: state.visibility,
+    acceptsConnectionRequests: state.privacy?.allowConnectionRequests ?? true,
+    hasOutgoingRequest: (connectionRequests?.outgoing().length ?? 0) > 0,
+    hasActiveInboundLink: (connectionRequests?.incoming().length ?? 0) > 0,
+    iosSlice,
+  });
+
+  trace('Advertising', 'plan', {
+    presence: plan.presenceAdvertising,
+    peripheral: plan.gattPeripheral,
+    scanning: plan.gattScanning,
+    reason: plan.reason,
+  });
+
+  if (lastAdvertisingPlan && advertisingPlansEqual(lastAdvertisingPlan, plan)) return;
+  lastAdvertisingPlan = plan;
+
+  try {
+    if (plan.gattPeripheral) {
+      // The local name is our current rotating peer id: the one value that lets
+      // the far side match this device to the person on their radar. It is
+      // already public in every presence beacon and rotates on the same epoch,
+      // so it grants no new or lasting handle.
+      await gattTransport.startPeripheral({
+        displayName: eventService.currentPeerId() ?? undefined,
+      });
+    } else {
+      await gattTransport.stopPeripheral();
+    }
+
+    if (plan.gattScanning) await gattTransport.startScan();
+    else await gattTransport.stopScan();
+  } catch (error) {
+    // A chipset with no advertiser is a real and common outcome. Say so once
+    // rather than failing silently or retrying for ever.
+    sessionStore.setState({
+      gattUnavailableReason:
+        error instanceof Error ? error.message : 'This phone cannot host a connection.',
+    });
+  }
 }
 
 /* ------------------------------------------------------------------ *
@@ -707,6 +1046,34 @@ export const queries = {
 
   connectionStateFor(profileId: ProfileId) {
     return connectionService.stateFor(profileId);
+  },
+
+  /** The live BLE request for this person, in either direction. */
+  pendingRequestFor(profileId: ProfileId) {
+    return connectionRequests?.pendingFor(profileId) ?? null;
+  },
+
+  /**
+   * Can a connection be opened to this person right now?
+   *
+   * Being on the radar is not enough. The radar is a beacon and the connection
+   * is a separate, connectable service, so someone can be four metres away and
+   * still not reachable - because they are not accepting requests, or because
+   * their phone is in the presence half of the iOS advertising slice. The
+   * button reads this rather than assuming.
+   */
+  canConnectTo(profileId: ProfileId): boolean {
+    return connectionRequests?.isReachable(profileId) ?? false;
+  },
+
+  /** True when this radar peer is advertising the connection service right now. */
+  canConnectToPeer(peerId: PeerId): boolean {
+    return connectionRequests?.isPeerReachable(peerId) ?? false;
+  },
+
+  /** Requests waiting on the user, newest first. */
+  incomingRequests() {
+    return connectionRequests?.incoming() ?? [];
   },
 
   /**

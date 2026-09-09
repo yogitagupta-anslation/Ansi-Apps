@@ -45,7 +45,8 @@ import {
 } from '../permissions/BluetoothPermissions';
 import { actions, connectionService, presence, queries } from '../runtime/services';
 import { haptics } from '../runtime/haptics';
-import { presenceStore, sessionStore } from '../state/stores';
+import { presenceStore, sessionStore, showToast } from '../state/stores';
+import { trace } from '../runtime/diagnostics';
 import { useStore } from '../state/store';
 import { useTheme } from '../theme/ThemeProvider';
 import { radius, space, typography } from '../theme/tokens';
@@ -87,6 +88,8 @@ export function EventMapScreen({
   const [recenterNonce, setRecenterNonce] = useState(0);
   const [panned, setPanned] = useState(false);
   const [leaveConfirmOpen, setLeaveConfirmOpen] = useState(false);
+  /** Why the last Connect attempt failed, shown on the card itself. */
+  const [connectNotice, setConnectNotice] = useState<string | null>(null);
 
   // The info button is the whole product flow, so it gets pointed at exactly
   // once — the first time this session that anyone actually shows up.
@@ -357,6 +360,7 @@ export function EventMapScreen({
   const handleOpenProfile = useCallback((peerId: string) => {
     haptics.reveal();
     actions.selectPerson(peerId);
+    setConnectNotice(null);
     setProfileOpen(true);
   }, []);
 
@@ -367,9 +371,32 @@ export function EventMapScreen({
   }, [selectedPerson]);
 
   const handleConnect = useCallback(() => {
-    if (!selectedPerson?.profileId) return;
+    trace('Connect', 'pressed', {
+      peerId: selectedPerson?.peerId,
+      profileId: selectedPerson?.profileId,
+      resolved: selectedPerson?.resolved,
+    });
+    setConnectNotice(null);
+    if (!selectedPerson) return;
+
     haptics.success();
-    void actions.connect(selectedPerson.profileId);
+
+    /*
+     * Two ways to address the same request.
+     *
+     * When the directory has resolved this peer we dial the person. When it has
+     * not - the ordinary case offline, since nothing maps a rotating peer id to
+     * a person without a server - we dial the peer id the radar gave us and let
+     * the handshake tell us who they are. Refusing here, as this used to, made
+     * the button dead for everyone discovered purely over the radio.
+     */
+    const attempt = selectedPerson.profileId
+      ? actions.connect(selectedPerson.profileId)
+      : actions.connectToPeer(selectedPerson.peerId);
+
+    void attempt.then((outcome) => {
+      setConnectNotice(outcome.ok ? null : (outcome.message ?? null));
+    });
   }, [selectedPerson]);
 
   /* --------------------------- blocking states --------------------------- */
@@ -665,6 +692,17 @@ export function EventMapScreen({
         starter={selectedPerson?.profileId ? queries.starterFor(selectedPerson.profileId) : null}
         onClose={() => setProfileOpen(false)}
         onConnect={handleConnect}
+        connectNotice={connectNotice}
+        onCancelRequest={
+          selectedPerson?.profileId
+            ? () => void actions.cancelConnectionRequest(selectedPerson.profileId as string)
+            : undefined
+        }
+        onDeclineRequest={
+          selectedPerson?.profileId
+            ? () => void actions.rejectConnectionRequest(selectedPerson.profileId as string)
+            : undefined
+        }
         onNavigate={handleNavigate}
         onBlock={() => {
           haptics.warn();
