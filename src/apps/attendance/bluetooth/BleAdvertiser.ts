@@ -28,6 +28,7 @@
 import { NativeModules, NativeEventEmitter, Platform } from 'react-native';
 import { decodeStatusReport, type StatusReport } from './statusReport';
 import {
+  CHECKOUT_UUID_16_FULL,
   MANUFACTURER_ID,
   MAX_EMPLOYEE_ID_BYTES,
   SERVICE_UUID_128,
@@ -255,9 +256,16 @@ export interface AdvertiseResult {
 /**
  * Start broadcasting this employee's identifier.
  *
- * Non-connectable on purpose: the Host only needs to HEAR the advertisement.
- * Non-connectable advertising uses less power and removes any possibility of a
- * stray connection or pairing prompt.
+ * CONNECTABLE on purpose - see `connectable: true` and the comment beside it
+ * further down this function. Hearing the advertisement is enough for the Host
+ * to mark attendance, but not for the employee to ever be TOLD about it: the
+ * Host connects back and writes the status report into the GATT characteristic.
+ *
+ * The cost is real and deliberate. A connectable advertisement means any BLE
+ * central in range can connect without a pairing prompt, and the characteristic
+ * is unauthenticated, so a stranger who has read the employee id off the air can
+ * write a fabricated report. Documented as an accepted risk in the TRUST
+ * BOUNDARY note in bluetooth/statusReport.ts.
  */
 export async function startAdvertising(employeeId: string): Promise<AdvertiseResult> {
   // ROLE GUARD — see the matching guard in BleScanner.startScan.
@@ -366,6 +374,9 @@ export async function startAdvertising(employeeId: string): Promise<AdvertiseRes
     await NativeBleAdvertiser.startAdvertising({
       shortServiceUuid: SERVICE_UUID_16_FULL,
       longServiceUuid: SERVICE_UUID_128,
+      // Handed over at start so the two sides can never disagree about which
+      // UUID means "leaving". Raising the flag later carries no UUID of its own.
+      checkOutServiceUuid: CHECKOUT_UUID_16_FULL,
       manufacturerId: MANUFACTURER_ID,
       manufacturerData,
       connectable: true,
@@ -383,6 +394,39 @@ export async function startAdvertising(employeeId: string): Promise<AdvertiseRes
     const message = describeError(error);
     log.error('ADVERTISE', 'startAdvertising failed: ' + message);
     setState({ state: 'ERROR', employeeId: null, error: message, errorCode: null });
+    return { success: false, error: message };
+  }
+}
+
+/**
+ * Declare, or withdraw, a departure.
+ *
+ * Adds one 16-bit service UUID to the scan response for as long as a check-out
+ * is pending. A Host sees it on its next scan — about a second — and records
+ * the departure on its own clock, then writes the receipt back over the GATT
+ * channel that stays open throughout.
+ *
+ * WHAT THIS DOES NOT DO. It does not check anybody out. This phone cannot: the
+ * Host owns the attendance record, and the only honest evidence a check-out
+ * happened is a status report coming back with a leftTime in it. A resolved
+ * promise here means the flag is up, nothing more — so the UI must keep saying
+ * "waiting" until a report arrives, and must never paint a time of its own.
+ *
+ * Silently a no-op when the phone is not broadcasting: the service ignores the
+ * request, because a flag on a silent radio is a message nobody can receive.
+ */
+export async function setCheckOutIntent(pending: boolean): Promise<AdvertiseResult> {
+  if (!NATIVE_MODULE_AVAILABLE) {
+    return { success: false, error: MISSING_MODULE_MESSAGE };
+  }
+
+  try {
+    await NativeBleAdvertiser.setCheckOutIntent(pending);
+    log.info('ADVERTISE', 'Check-out flag ' + (pending ? 'raised' : 'lowered'));
+    return { success: true, error: null };
+  } catch (error) {
+    const message = describeError(error);
+    log.error('ADVERTISE', 'setCheckOutIntent failed: ' + message);
     return { success: false, error: message };
   }
 }

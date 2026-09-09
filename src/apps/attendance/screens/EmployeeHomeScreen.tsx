@@ -13,12 +13,17 @@
  *   they show dashes. Tapping the orbit never fills them in.
  *
  * WHICH ORBIT STATES THIS SCREEN CAN HONESTLY REACH. The component knows seven;
- * an employee phone can only observe four of them. It broadcasts one-way and is
- * never told whether a Host heard it, so "device found" and "connected" are not
- * facts this side of the exchange holds. Claiming them would be theatre, so the
- * employee orbit moves between ready → scanning → checked-in, plus permission
- * when the radio is blocked. The Host, which really does discover and connect,
- * uses the full set.
+ * an employee phone can only observe four of them. The advertisement IS
+ * connectable and the Host DOES connect to write the status report back - but
+ * this side is never notified of it: the GATT server overrides no
+ * onConnectionStateChange, so the phone cannot tell whether anything is nearby,
+ * scanning, or currently connected. Its only feedback is a status report
+ * arriving (`store.employeeStatusReport`, read below), and that is a check-in
+ * fact, not a "device found" one. So "device found" and "connected" remain
+ * facts this side of the exchange does not hold; claiming them would be
+ * theatre, and the employee orbit
+ * moves between ready → scanning → checked-in, plus permission when the radio is
+ * blocked. The Host, which really does discover and connect, uses the full set.
  * -----------------------------------------------------------------------------
  */
 
@@ -34,6 +39,17 @@ import { formatClockTime } from '../constants/appConfig';
 import { useAppStore } from '../state/appStore';
 import { numeric } from '../theme/theme';
 import { useTheme } from '../theme/ThemeContext';
+
+/**
+ * How long a check-out request waits before this phone admits it does not know.
+ *
+ * The flag rides the advertisement, so a Host that is scanning sees it within
+ * about a second and the receipt follows immediately. Ninety seconds is
+ * therefore generous: it covers a Host mid-connection with someone else, a
+ * scan-throttle window, and a brief walk out of range — while still failing
+ * loudly rather than leaving somebody staring at a spinner on their way home.
+ */
+const CHECKOUT_CONFIRM_TIMEOUT_MS = 90_000;
 
 const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -63,6 +79,7 @@ export function EmployeeHomeScreen() {
 
   const [busy, setBusy] = useState(false);
   const [permissionError, setPermissionError] = useState<string | null>(null);
+  const [checkOutError, setCheckOutError] = useState<string | null>(null);
   const [sheet, setSheet] = useState<BlockerKind | null>(null);
 
   const adv = store.advertiser;
@@ -173,6 +190,68 @@ export function EmployeeHomeScreen() {
     ? 'scanning'
     : 'ready';
 
+  /* ------------------------------------------------------------ check out -- */
+
+  const checkOutRequestedAt = store.checkOutRequestedAt;
+
+  const handleCheckOut = useCallback(async () => {
+    setBusy(true);
+    setCheckOutError(null);
+    try {
+      const result = await store.requestCheckOut();
+      if (!result.success) {
+        /**
+         * Its own error, not permissionError.
+         *
+         * That state renders a banner titled "Could not start broadcasting",
+         * which is the wrong sentence for a check-out that failed to send —
+         * and being told about the wrong problem is barely better than being
+         * told nothing. A failed request must never leave the screen looking
+         * exactly as it did before the tap.
+         */
+        setCheckOutError(
+          result.error ?? 'Your phone could not send the request. Try again.',
+        );
+      }
+    } finally {
+      setBusy(false);
+    }
+  }, [store]);
+
+  /**
+   * Which of the five check-out states this screen is in.
+   *
+   *   available    checked in, still here, able to ask
+   *   waiting      the flag is up and no receipt has come back yet
+   *   unconfirmed  it has been up too long; this phone knows nothing more
+   *   again        a departure is recorded and can still be taken back
+   *   none         nothing to offer — no check-in, or off air
+   *
+   * A pending request is tested FIRST, before the recorded departure. On a
+   * correction both are true at once — there is an old departure on record and
+   * a new request in flight — and checking the record first would show the
+   * button again while the previous tap was still unanswered.
+   *
+   * The control is offered only while broadcasting, because the flag rides the
+   * advertisement: asking from a silent radio would be a request nobody can
+   * hear, and offering a button that cannot work is its own kind of lie.
+   */
+  const checkOutElapsed =
+    checkOutRequestedAt === null ? 0 : now.getTime() - checkOutRequestedAt;
+
+  const checkOutStage: 'available' | 'waiting' | 'unconfirmed' | 'again' | 'none' =
+    report === null
+      ? 'none'
+      : checkOutRequestedAt !== null
+      ? checkOutElapsed > CHECKOUT_CONFIRM_TIMEOUT_MS
+        ? 'unconfirmed'
+        : 'waiting'
+      : !onAir
+      ? 'none'
+      : report.leftTime !== null
+      ? 'again'
+      : 'available';
+
   /* ---------------------------------------------------- delivered values -- */
 
   const checkInLabel = report ? formatClockTime(report.checkInTime) : '--:--';
@@ -190,8 +269,14 @@ export function EmployeeHomeScreen() {
 
   const cells = [
     { label: 'CHECK IN', value: checkInLabel, tone: valueTone },
-    // Check-out only ever arrives as a LEFT update, so it is never green.
-    { label: 'CHECK OUT', value: checkOutLabel, tone: t.colors.textMuted },
+    // Green only once a Host has actually reported a departure. A pending
+    // request leaves this muted at '--:--', because this phone has no time to
+    // show and must not colour a dash as though it did.
+    {
+      label: 'CHECK OUT',
+      value: checkOutLabel,
+      tone: report?.leftTime ? t.colors.success : t.colors.textMuted,
+    },
     { label: 'TOTAL', value: totalLabel, tone: valueTone },
   ];
 
@@ -230,7 +315,21 @@ export function EmployeeHomeScreen() {
           size={300}
           deviceName={report?.hostId}
           checkInTime={report ? formatClockTime(report.checkInTime) : undefined}
-          sub={configured ? undefined : 'Set up your profile first'}
+          /**
+           * The core is the biggest thing on this screen, so it must not
+           * contradict the tile beneath it. orbitState is 'present' for any
+           * delivered report, and that state's stock title is a green pulsing
+           * "Checked in" — which stays on screen after a departure has been
+           * recorded unless it is overridden here.
+           */
+          title={report?.leftTime ? 'Checked out' : undefined}
+          sub={
+            !configured
+              ? 'Set up your profile first'
+              : report?.leftTime
+              ? 'At ' + formatClockTime(report.leftTime)
+              : undefined
+          }
           onPress={handleTap}
           disabled={busy}
         />
@@ -259,6 +358,113 @@ export function EmployeeHomeScreen() {
           </View>
         ))}
       </View>
+
+      {/* ------------------------------------------------------ check out -- */}
+      {checkOutStage === 'available' ? (
+        <Pressable
+          onPress={() => void handleCheckOut()}
+          disabled={busy}
+          accessibilityRole="button"
+          accessibilityState={{ disabled: busy }}
+          // A miss on a 15px-padded card is easy and looks identical to a
+          // press that did nothing, so widen the target beyond its border.
+          hitSlop={10}
+          android_ripple={{ color: t.colors.primarySoft }}
+          style={({ pressed }) => [
+            styles.checkOutBtn,
+            {
+              // A pressed card CHANGES COLOUR rather than only dimming. 0.6
+              // opacity on a near-white surface is close to invisible, which
+              // is how a tap that did land could still read as one that did
+              // not.
+              backgroundColor: pressed ? t.colors.surfaceMuted : t.colors.surface,
+              borderColor: pressed ? t.colors.primary : t.colors.border,
+              opacity: busy ? 0.6 : 1,
+            },
+            t.shadow(1),
+          ]}>
+          <Txt style={[styles.checkOutLabel, { color: t.colors.textPrimary }]}>
+            {busy ? 'Sending…' : 'Check out'}
+          </Txt>
+          <Txt style={[styles.checkOutHint, { color: t.colors.textMuted }]}>
+            Tells {report?.hostId ?? 'the Host'} you are leaving. Stay in range for a moment.
+          </Txt>
+        </Pressable>
+      ) : null}
+
+      {checkOutStage === 'again' ? (
+        <Pressable
+          onPress={() => void handleCheckOut()}
+          disabled={busy}
+          accessibilityRole="button"
+          accessibilityState={{ disabled: busy }}
+          hitSlop={10}
+          android_ripple={{ color: t.colors.primarySoft }}
+          style={({ pressed }) => [
+            styles.checkOutBtn,
+            {
+              backgroundColor: pressed ? t.colors.surfaceMuted : t.colors.surface,
+              borderColor: pressed ? t.colors.primary : t.colors.border,
+              opacity: busy ? 0.6 : 1,
+            },
+            t.shadow(1),
+          ]}>
+          <Txt style={[styles.checkOutLabel, { color: t.colors.textPrimary }]}>
+            {busy ? 'Sending…' : "I'm still here"}
+          </Txt>
+          {/*
+            An UNDO, not a nudge. Checking out by accident is the common
+            mistake, and the useful answer is to be checked in again — not to
+            have the wrong departure moved a few minutes later.
+            The Host can honour this because the radio is still hearing this
+            phone, so "I never left" is a claim the evidence supports. When the
+            person really does leave, they press Check out again and it records
+            afresh.
+          */}
+          <Txt style={[styles.checkOutHint, { color: t.colors.textMuted }]}>
+            {report?.leftTime
+              ? 'Checked out at ' +
+                formatClockTime(report.leftTime) +
+                ' by mistake? Tap to undo it and stay checked in.'
+              : 'Tap to undo your check-out.'}
+          </Txt>
+        </Pressable>
+      ) : null}
+
+      {checkOutStage === 'waiting' ? (
+        <View style={{ marginTop: t.spacing.md }}>
+          <Banner
+            tone="info"
+            title="Waiting for the Host"
+            detail={
+              'Requested at ' +
+              formatClockTime(checkOutRequestedAt ?? now.getTime()) +
+              '. Your phone is broadcasting that you are leaving; the time is recorded ' +
+              'by the Host, not by this phone. Keep Bluetooth on and stay in range.'
+            }
+          />
+        </View>
+      ) : null}
+
+      {checkOutStage === 'unconfirmed' ? (
+        <View style={{ marginTop: t.spacing.md }}>
+          {/*
+            Says only what THIS phone observed. It cannot see the Host's
+            records, so "the Host did not record it" would be a claim it has no
+            basis for — a fabricated negative is no better than a fabricated
+            time. The Host may well have recorded the departure and simply
+            failed to deliver the receipt.
+          */}
+          <Banner
+            tone="warning"
+            title="Check-out not confirmed"
+            detail={
+              'This phone never received a receipt, so it does not know whether your ' +
+              'check-out was recorded. Ask your Host to confirm.'
+            }
+          />
+        </View>
+      ) : null}
 
       {/* ---------------------------------------------------------- today -- */}
       <View style={styles.todayHead}>
@@ -292,6 +498,21 @@ export function EmployeeHomeScreen() {
       </Txt>
 
       {/* --------------------------------------------------------- banners -- */}
+      {checkOutError ? (
+        <View style={{ marginTop: t.spacing.md }}>
+          {/*
+            Says only that the REQUEST did not leave this phone. It cannot
+            claim the Host did or did not record anything, because at this
+            point nothing was ever sent for a Host to read.
+          */}
+          <Banner
+            tone="danger"
+            title="Check-out not sent"
+            detail={checkOutError}
+          />
+        </View>
+      ) : null}
+
       {permissionError ? (
         <View style={{ marginTop: t.spacing.lg }}>
           <Banner tone="danger" title="Could not start broadcasting" detail={permissionError} />
@@ -422,6 +643,26 @@ const styles = StyleSheet.create({
     fontSize: 11,
     lineHeight: 16.5,
     marginTop: 11,
+    textAlign: 'center',
+  },
+  checkOutBtn: {
+    alignItems: 'center',
+    borderRadius: 18,
+    borderWidth: 1,
+    marginTop: 18,
+    paddingHorizontal: 18,
+    paddingVertical: 15,
+  },
+  checkOutLabel: {
+    fontFamily: 'PlusJakartaSans_600SemiBold',
+    fontSize: 15,
+    letterSpacing: 0.2,
+  },
+  checkOutHint: {
+    fontFamily: 'PlusJakartaSans_400Regular',
+    fontSize: 11,
+    lineHeight: 16,
+    marginTop: 4,
     textAlign: 'center',
   },
 });

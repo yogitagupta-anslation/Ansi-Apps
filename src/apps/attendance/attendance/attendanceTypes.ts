@@ -61,10 +61,31 @@ export interface AttendanceRecord {
   lastSeenTime: number | null;
 
   /**
-   * When the grace period was found to have been exceeded. Cleared on
-   * re-entry, because the employee is demonstrably back.
+   * When the employee stopped being present.
+   *
+   * Two different things can put a number here, and `leftTimeSource` says
+   * which — see there, because they behave differently on re-entry.
    */
   leftTime: number | null;
+
+  /**
+   * How `leftTime` got there.
+   *
+   *   INFERRED  the grace period elapsed with no detection. This is a
+   *             deduction from silence, and a fresh detection FALSIFIES it —
+   *             the employee is demonstrably back, so it is cleared.
+   *   DECLARED  the employee said so on their own phone and a Host observed
+   *             the statement over the air. A later sighting does not unsay
+   *             it; it only adds "and was seen again", which the event log
+   *             records. So it SURVIVES re-entry.
+   *   null      leftTime is null; nobody has left.
+   *
+   * The distinction is the whole reason this field exists. Without it,
+   * re-entry would erase a departure the employee had already been shown as
+   * confirmed, which is the worst outcome available: a number the app
+   * displayed, then silently took back.
+   */
+  leftTimeSource: 'DECLARED' | 'INFERRED' | null;
 
   /** First ever advertisement today, including ones before confirmation. */
   firstDetectedAt: number | null;
@@ -89,6 +110,10 @@ export type AttendanceEventType =
   | 'FIRST_DETECTED'
   | 'CHECK_IN'
   | 'LEFT'
+  /** The employee declared a departure; a Host read it off the air. */
+  | 'CHECK_OUT'
+  /** The employee took that declaration back while still in range. */
+  | 'CHECK_OUT_CANCELLED'
   | 'RE_ENTRY';
 
 export interface AttendanceEvent {

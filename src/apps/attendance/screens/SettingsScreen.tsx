@@ -24,6 +24,7 @@ import { CONFIG_BOUNDS } from '../constants/proximityConfig';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { useAppStore } from '../state/appStore';
 import { clearAllLocalData } from '../storage/AppStorage';
+import { EmployeeStatusStore } from '../attendance/EmployeeStatusStore';
 import { AttendanceStorage } from '../storage/AttendanceStorage';
 import { EmployeeStorage } from '../storage/EmployeeStorage';
 import { useTheme } from '../theme/ThemeContext';
@@ -95,6 +96,9 @@ export function SettingsScreen({ onOpenDebug }: { onOpenDebug: () => void }) {
           style: 'destructive',
           onPress: () =>
             void clearAllLocalData().then(async () => {
+              // Storage is gone; drop the in-memory copy too, or the employee
+              // screens keep showing the times that were just erased.
+              EmployeeStatusStore.clear();
               await store.refreshEmployees();
               await loadStats();
             }),

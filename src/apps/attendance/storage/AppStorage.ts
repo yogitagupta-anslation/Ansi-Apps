@@ -18,6 +18,18 @@ export const STORAGE_KEYS = {
   employees: '@bleattendance/employees',
   attendance: '@bleattendance/attendance',
   settings: '@bleattendance/settings',
+  /**
+   * The EMPLOYEE side's own copy of what a Host reported about them: today's
+   * status and the delivered month history.
+   *
+   * These live here rather than privately inside EmployeeStatusStore because
+   * they were once private, and clearAllLocalData below could not see them —
+   * so "Erase all local data" left an employee holding a stored record of
+   * exactly the thing they had asked to remove. A key this table does not know
+   * about is a key the wipe cannot reach.
+   */
+  employeeStatusReport: '@bleattendance/employeeStatusReport',
+  employeeHistory: '@bleattendance/employeeHistory',
 } as const;
 
 /**
@@ -74,12 +86,19 @@ export async function removeKey(key: string): Promise<void> {
   }
 }
 
-/** Wipe every table this app owns. Destructive; confirmation-gated in the UI. */
+/**
+ * Wipe every table this app owns. Destructive; confirmation-gated in the UI.
+ *
+ * EVERY key in STORAGE_KEYS, deliberately — iterated rather than listed, so a
+ * table added later is erased by default instead of being silently retained.
+ * The previous version named three of the five by hand and missed the two the
+ * employee side writes, which is precisely the failure this shape prevents.
+ *
+ * Storage only. In-memory caches are the caller's responsibility: see
+ * EmployeeStatusStore.clear(), which must be called alongside this or the
+ * erased values stay on screen until the next launch.
+ */
 export async function clearAllLocalData(): Promise<void> {
-  await Promise.all([
-    removeKey(STORAGE_KEYS.employees),
-    removeKey(STORAGE_KEYS.attendance),
-    removeKey(STORAGE_KEYS.settings),
-  ]);
+  await Promise.all(Object.values(STORAGE_KEYS).map(key => removeKey(key)));
   log.warn('BLE', 'All local data cleared by user');
 }

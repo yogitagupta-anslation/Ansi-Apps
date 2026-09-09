@@ -84,6 +84,15 @@ export interface DetectedEmployee {
 
   /** Whether the smoothed signal currently passes the proximity threshold. */
   isNearby: boolean;
+
+  /**
+   * This employee is declaring a departure in the advertisement being reported.
+   *
+   * False means only "not in this packet" — an older employee build cannot
+   * send it, and the scan response it rides in needs an active scan. Never
+   * read a false as evidence that somebody is staying.
+   */
+  checkOutIntent: boolean;
   /** Consecutive nearby readings so far, toward the confirmation requirement. */
   consecutiveNearbyReadings: number;
 
