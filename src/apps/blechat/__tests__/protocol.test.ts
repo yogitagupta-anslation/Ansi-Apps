@@ -20,7 +20,11 @@ import {
   utf8Decode,
   utf8Encode,
 } from '../utils/bytes';
-import {DEFAULT_ATT_MTU, FRAGMENT_HEADER_SIZE} from '../config/constants';
+import {
+  DEFAULT_ATT_MTU,
+  FRAGMENT_HEADER_SIZE,
+  GATT_MAX_ATTR_LEN,
+} from '../config/constants';
 
 describe('byte utils', () => {
   it('round-trips base64 for every byte value', () => {
@@ -55,6 +59,36 @@ describe('fragmentation', () => {
     expect(usableChunkSize(DEFAULT_ATT_MTU)).toBe(
       DEFAULT_ATT_MTU - 3 - FRAGMENT_HEADER_SIZE,
     );
+  });
+
+  /**
+   * The bug that stopped every message this app ever tried to send.
+   *
+   * An attribute value cannot exceed 512 bytes, whatever the MTU — a separate ceiling
+   * from the MTU and the reason a negotiated 517 is a trap. Frames were sized as
+   * mtu - 3 - header, which is 514 at 517, and Android refused every one of them in the
+   * GATT client before the radio was involved. Instant, total, and identical on every
+   * device; the connection and its small writes worked throughout, so it read as a
+   * peer problem for a long time.
+   *
+   * The old test only checked the default MTU of 23, where the arithmetic cannot
+   * overshoot, which is precisely why it never caught this.
+   */
+  it('never builds a frame larger than an attribute can hold', () => {
+    // 517 is what Android negotiates in practice, and the case that failed.
+    for (const mtu of [DEFAULT_ATT_MTU, 100, 185, 247, 512, 515, 517, 1024]) {
+      const payload = utf8Encode('x'.repeat(4000));
+      for (const frame of fragment(payload, mtu, 1)) {
+        expect(frame.length).toBeLessThanOrEqual(GATT_MAX_ATTR_LEN);
+      }
+    }
+  });
+
+  it('still fills the packet when the MTU is the tighter limit', () => {
+    // The cap must not become a blanket 501: below 515 the MTU is what binds, and
+    // shrinking frames there would cost throughput for no reason.
+    expect(usableChunkSize(247)).toBe(247 - 3 - FRAGMENT_HEADER_SIZE);
+    expect(usableChunkSize(517)).toBe(GATT_MAX_ATTR_LEN - FRAGMENT_HEADER_SIZE);
   });
 
   it('reassembles a payload split across many fragments at the default MTU', () => {

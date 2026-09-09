@@ -1,6 +1,7 @@
 import {
   ATT_HEADER_SIZE,
   FRAGMENT_HEADER_SIZE,
+  GATT_MAX_ATTR_LEN,
   FRAGMENT_MAGIC,
   FRAME_TYPE_DATA,
   FRAME_TYPE_NACK,
@@ -38,7 +39,19 @@ const MAX_FRAGMENTS = 0xffff;
  */
 
 export function usableChunkSize(mtu: number): number {
-  const size = mtu - ATT_HEADER_SIZE - FRAGMENT_HEADER_SIZE;
+  /**
+   * Two ceilings, and the lower one wins.
+   *
+   * The MTU says how much fits in one ATT packet; the spec says an attribute value
+   * cannot exceed 512 bytes whatever the MTU. Only the first was applied here, so a
+   * negotiated 517 produced 514-byte frames — two bytes past the limit — and Android
+   * refused every one of them in the GATT client, before the radio was involved. Small
+   * writes were unaffected, which is why the connection, the MTU exchange, service
+   * discovery and the notification subscription all worked while no message ever left
+   * the phone.
+   */
+  const perWrite = Math.min(mtu - ATT_HEADER_SIZE, GATT_MAX_ATTR_LEN);
+  const size = perWrite - FRAGMENT_HEADER_SIZE;
   // Guard against a nonsense MTU report leaving us with a non-positive chunk size.
   return Math.max(1, size);
 }
