@@ -50,7 +50,8 @@ import type {Peer, PeerIdentity, SignalStrength} from '../types/Peer';
 import {EventBus} from '../utils/EventBus';
 import {logger} from '../utils/logger';
 import {sanitiseInterests} from '../config/interests';
-import {shortId} from '../utils/id';
+import {sanitiseLanguages} from '../config/languages';
+import {peerIdPrefix, shortId, shouldDial} from '../utils/id';
 import {makeFailure, toLinkFailure} from '../utils/linkFailure';
 
 const TAG = 'PeerManager';
@@ -112,6 +113,7 @@ interface Negotiated {
   publicKey: string;
   /** Sanitised: the peer chose these bytes, so they are bounded before we keep them. */
   interests: string[];
+  languages: string[];
 }
 
 /**
@@ -157,6 +159,7 @@ function blankPeer(linkId: LinkId, state: LinkState): Peer {
     peerIdPrefix: null,
     displayName: null,
     interests: [],
+    languages: [],
     linkId,
     role: isCentralLink(linkId) ? 'central' : 'peripheral',
     state,
@@ -225,6 +228,7 @@ export class PeerManager implements PeerRouteResolver {
    * reaches the next peer you meet without restarting anything.
    */
   private interestsProvider: () => string[] = () => [];
+  private languagesProvider: () => string[] = () => [];
 
   /**
    * Links we tore down ourselves because a better link to the same peer already exists.
@@ -235,6 +239,15 @@ export class PeerManager implements PeerRouteResolver {
    * flickering between connected and reconnecting forever.
    */
   private superseded = new Set<LinkId>();
+  /**
+   * Dials we cancelled ourselves, waiting for the transport's rejection to catch up.
+   *
+   * Whether an attempt was cancelled is something this class KNOWS — it is the one that
+   * asked — so it is recorded rather than inferred from how the platform happened to word
+   * the rejection. Reading it out of the error text works only for the stacks whose
+   * wording we have seen; this works for all of them.
+   */
+  private cancelling = new Set<LinkId>();
   /**
    * Identities this device refuses to handshake with.
    *
@@ -283,6 +296,7 @@ export class PeerManager implements PeerRouteResolver {
       displayName: string;
       lastSeen: number;
       interests?: string[];
+      languages?: string[];
       connectCount?: number;
       firstSeen?: number;
       lastConnected?: number;
@@ -298,6 +312,7 @@ export class PeerManager implements PeerRouteResolver {
         peerId: entry.peerId,
         peerIdPrefix: entry.peerId.slice(0, 16),
         interests: entry.interests ?? [],
+        languages: entry.languages ?? [],
         attempts: 0,
         failures: 0,
         reconnectAttempt: 0,
@@ -351,6 +366,31 @@ export class PeerManager implements PeerRouteResolver {
   }
 
   /** A peerId this advertised prefix belongs to, if we have ever identified it. */
+  /**
+   * Whether any link to this advertised prefix is currently alive or coming up.
+   *
+   * Deliberately counts a link that is still connecting or handshaking. The question it
+   * answers is "is the other side already dealing with this peer?", and a link halfway up
+   * is a yes — dialling on top of it is what creates the collision in the first place.
+   */
+  hasLiveLinkToPrefix(prefix: string | null, exceptLinkId?: LinkId): boolean {
+    if (!prefix) {
+      return false;
+    }
+    for (const peer of [...this.peers.values(), ...this.unidentified.values()]) {
+      // The link being asked about is not evidence about itself.
+      if (exceptLinkId && peer.linkId === exceptLinkId) {
+        continue;
+      }
+      const matches =
+        peer.peerIdPrefix === prefix || (peer.peerId?.startsWith(prefix) ?? false);
+      if (matches && peer.state !== 'disconnected' && peer.state !== 'failed') {
+        return true;
+      }
+    }
+    return false;
+  }
+
   peerIdForPrefix(prefix: string | null): string | null {
     if (!prefix) {
       return null;
@@ -390,6 +430,10 @@ export class PeerManager implements PeerRouteResolver {
 
   setCapabilitiesProvider(provider: () => Capabilities): void {
     this.capabilitiesProvider = provider;
+  }
+
+  setLanguagesProvider(provider: () => string[]): void {
+    this.languagesProvider = provider;
   }
 
   setInterestsProvider(provider: () => string[]): void {
@@ -691,18 +735,46 @@ export class PeerManager implements PeerRouteResolver {
     // The side that dialled speaks first.
     if (role === 'central') {
       const hello = buildHello(
-        {...this.identity, interests: this.interestsProvider()},
+        {
+          ...this.identity,
+          interests: this.interestsProvider(),
+          languages: this.languagesProvider(),
+        },
         this.capabilitiesProvider(),
         session.ourChallenge,
         ephemeralPublicKeyToHex(session.ephemeral.publicKey),
       );
       logger.info(TAG, `sending HELLO on ${linkId}`);
       this.router?.sendOnLink(linkId, hello).catch(err => {
+        /**
+         * We could not even send the greeting.
+         *
+         * This used to emit an event nothing listened to and then wait for the handshake
+         * timeout to notice — fifteen seconds later, and under the wrong heading:
+         * "Peer did not answer HELLO" when the truth is that no HELLO ever left this
+         * phone. Two costs, both real. The row spun on "Saying hello..." for the whole
+         * wait and then quietly redialled into the same wall, which is what "it never
+         * connects and never says why" looks like from the outside. And the recorded
+         * reason blamed the other side for our own failed write, which is the kind of
+         * wrong diagnosis that sends you looking at the wrong phone.
+         */
+        const message = err instanceof Error ? err.message : String(err);
         logger.error(TAG, `HELLO failed on ${linkId}`, err);
-        this.bus.emit('handshakeFailed', {
+        const session = this.sessions.get(linkId);
+        if (session?.handshakeTimer) {
+          clearTimeout(session.handshakeTimer);
+          session.handshakeTimer = null;
+        }
+        this.recordFailure(
           linkId,
-          reason: err instanceof Error ? err.message : String(err),
-        });
+          makeFailure(
+            'HandshakeFailed',
+            'handshaking',
+            `Could not send the greeting: ${message}`,
+          ),
+        );
+        this.bus.emit('handshakeFailed', {linkId, reason: message});
+        void this.transport.disconnect(linkId).catch(() => undefined);
       });
     } else {
       logger.info(TAG, `awaiting HELLO on ${linkId} (peripheral role)`);
@@ -820,6 +892,27 @@ export class PeerManager implements PeerRouteResolver {
     if (this.hasBetterRoute(linkId)) {
       return;
     }
+    /**
+     * A reconnect is still a dial, and the same side should place it.
+     *
+     * The tie-break was applied when a peer was first discovered but not here, so after
+     * the first failure both phones went back to dialling each other on a timer —
+     * rebuilding the very collision the tie-break exists to prevent. Standing down is
+     * safe: the peer keeps advertising, and the discovery path re-arms with its own
+     * grace period if they never call.
+     */
+    const theirPrefix =
+      this.linkToPrefix.get(linkId) ?? this.unidentified.get(linkId)?.peerIdPrefix ?? null;
+    const myPrefix = this.identity ? peerIdPrefix(this.identity.peerId) : null;
+    if (theirPrefix && myPrefix && !shouldDial(myPrefix, theirPrefix)) {
+      logger.info(
+        TAG,
+        `not redialling ${linkId}; their identity places the call`,
+      );
+      this.reconnectAttempts.delete(linkId);
+      return;
+    }
+
     const attempt = (this.reconnectAttempts.get(linkId) ?? 0) + 1;
     if (attempt > RECONNECT_MAX_ATTEMPTS) {
       // Stop rather than retrying forever. The peer is left alone until it advertises
@@ -957,7 +1050,11 @@ export class PeerManager implements PeerRouteResolver {
     );
 
     const ack = buildHelloAck(
-      {...this.identity, interests: this.interestsProvider()},
+      {
+          ...this.identity,
+          interests: this.interestsProvider(),
+          languages: this.languagesProvider(),
+        },
       payload.peerId,
       this.capabilitiesProvider(),
       negotiated.protocolVersion,
@@ -1220,6 +1317,7 @@ export class PeerManager implements PeerRouteResolver {
       publicKey?: string;
       challenge?: string;
       interests?: string[];
+      languages?: string[];
     },
   ): Negotiated | null {
     // Checked before anything else: refusing a blocked identity is cheaper than
@@ -1299,6 +1397,7 @@ export class PeerManager implements PeerRouteResolver {
       protocolVersion: outcome.agreed,
       capabilities: remoteCaps,
       agreed,
+      languages: sanitiseLanguages(payload.languages),
       compatibilityNote:
         outcome.verdict === 'exact' ? null : outcome.explanation,
       publicKey: publicKeyHex,
@@ -1378,6 +1477,7 @@ export class PeerManager implements PeerRouteResolver {
       peerIdPrefix: info.peerId.slice(0, 16),
       displayName: info.displayName,
       interests: info.interests,
+      languages: info.languages,
       linkId: session.linkId,
       role: session.role,
       state: 'connected',
@@ -1423,6 +1523,7 @@ export class PeerManager implements PeerRouteResolver {
    * unreachable, because it is evidence of nothing at all.
    */
   async cancelConnect(linkId: LinkId): Promise<void> {
+    this.cancelling.add(linkId);
     this.cancelReconnect(linkId);
     this.note(linkId, 'Cancelled by user');
     try {
@@ -1474,10 +1575,23 @@ export class PeerManager implements PeerRouteResolver {
       this.unidentified.get(linkId)?.peerIdPrefix ?? this.linkToPrefix.get(linkId);
     if (prefix) {
       const existing = this.findPeerByPrefix(prefix);
-      if (existing?.peerId && existing.state === 'connected') {
+      /**
+       * A link that is still coming up counts.
+       *
+       * This used to require `connected`, so a peer whose link was mid-handshake did not
+       * stop a second dial — and the handshake is exactly when the collision does its
+       * damage. Two phones running this app reach each other in BOTH directions: each
+       * has a client connection out and a server connection in, to the same peer. On
+       * hardware that is when the GATT client starts refusing writes.
+       */
+      const reachable =
+        (existing?.peerId && existing.state === 'connected') ||
+        this.hasLiveLinkToPrefix(prefix, linkId);
+      if (reachable) {
         logger.info(
           TAG,
-          `already connected to ${shortId(existing.peerId)} on ${existing.linkId}; ` +
+          `already reachable on ${existing?.linkId ?? 'another link'}` +
+            `${existing?.peerId ? ` (${shortId(existing.peerId)})` : ''}; ` +
             `not dialling ${linkId}`,
         );
         this.unidentified.delete(linkId);
@@ -1486,6 +1600,8 @@ export class PeerManager implements PeerRouteResolver {
       }
     }
 
+    // A fresh dial is not the one that was cancelled.
+    this.cancelling.delete(linkId);
     this.bumpStats(linkId, 'attempts');
     this.updateUnidentifiedState(linkId, 'connecting');
     this.emitPeers();
@@ -1494,7 +1610,11 @@ export class PeerManager implements PeerRouteResolver {
       // linkUp fires from the transport; the handshake starts there.
     } catch (err) {
       // The transport rejects with a typed failure carrying the exact stage that broke.
-      this.recordFailure(linkId, toLinkFailure(err, 'connecting', 'ConnectionRefused'));
+      const message = err instanceof Error ? err.message : String(err);
+      const failure = this.cancelling.delete(linkId)
+        ? makeFailure('Cancelled', 'connecting', message)
+        : toLinkFailure(err, 'connecting', 'ConnectionRefused');
+      this.recordFailure(linkId, failure);
       throw err;
     }
   }
@@ -1582,13 +1702,33 @@ export class PeerManager implements PeerRouteResolver {
 
   /** Attach a typed failure to whichever peer record represents this link. */
   private recordFailure(linkId: LinkId, failure: LinkFailure): void {
+    /**
+     * A cancellation is not a failure, and recording it as one is not cosmetic.
+     *
+     * `cancelConnect` already clears the peer, but the transport's rejection arrives
+     * afterwards and used to land here — marking the peer `failed`, storing a bogus
+     * reason and counting the attempt against the peer in the reconnect budget. The
+     * user's own Cancel then read back to them as "Connection failed", and the row they
+     * cancelled sat in an error state they never caused.
+     */
+    if (failure.reason === 'Cancelled') {
+      this.note(linkId, 'Cancelled', 'progress', 'cancelled during ' + failure.phase);
+      const cancelledPeerId =
+        this.sessions.get(linkId)?.peerId ?? this.linkToPeer.get(linkId);
+      const cancelled = cancelledPeerId
+        ? this.peers.get(cancelledPeerId)
+        : this.unidentified.get(linkId);
+      if (cancelled) {
+        cancelled.state = 'disconnected';
+        cancelled.failure = null;
+      }
+      logger.info(TAG, `${linkId} cancelled during ${failure.phase}`);
+      this.emitPeers();
+      return;
+    }
+
     this.bumpStats(linkId, 'failures');
-    this.note(
-      linkId,
-      failure.reason === 'Cancelled' ? 'Cancelled' : 'Failed',
-      failure.reason === 'Cancelled' ? 'progress' : 'error',
-      `${failure.reason} during ${failure.phase}`,
-    );
+    this.note(linkId, 'Failed', 'error', `${failure.reason} during ${failure.phase}`);
     const peerId = this.sessions.get(linkId)?.peerId ?? this.linkToPeer.get(linkId);
     const peer = peerId ? this.peers.get(peerId) : this.unidentified.get(linkId);
     if (peer) {

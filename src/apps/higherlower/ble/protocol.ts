@@ -11,8 +11,21 @@
 export const MAX_PAYLOAD = 180;
 
 export type Msg =
-  /** Peer announces itself after connecting to a room. */
-  | { t: 'hello'; id: string; nm: string }
+  /**
+   * Peer announces itself after connecting to a room. `h` marks the host, so a
+   * joiner never has to guess which of the names on the link is holding the
+   * start button.
+   */
+  | { t: 'hello'; id: string; nm: string; h?: boolean }
+  /**
+   * The host describing its room, sent to each joiner the moment they are in.
+   * The advertisement is only a preview -- 31 bytes cannot carry a name, a
+   * range and a seat count -- so this is where a joiner learns what it actually
+   * walked into.
+   */
+  | { t: 'room'; ct: string; hn: string; cap: number; lo: number; hi: number }
+  /** The room is full. Sent to the joiner who missed the last seat. */
+  | { t: 'full' }
   /** Peer is leaving the room. */
   | { t: 'bye'; id: string }
   /** Lobby ready-state toggle. */
@@ -79,7 +92,15 @@ export function decode(raw: string): Msg | null {
 
   switch (m.t) {
     case 'hello':
-      return isStr(m.id) && isStr(m.nm) ? { t: 'hello', id: m.id, nm: m.nm } : null;
+      return isStr(m.id) && isStr(m.nm)
+        ? { t: 'hello', id: m.id, nm: m.nm, ...(m.h === true ? { h: true } : {}) }
+        : null;
+    case 'room':
+      return isStr(m.ct) && isStr(m.hn) && isNum(m.cap) && isNum(m.lo) && isNum(m.hi)
+        ? { t: 'room', ct: m.ct, hn: m.hn, cap: m.cap, lo: m.lo, hi: m.hi }
+        : null;
+    case 'full':
+      return { t: 'full' };
     case 'bye':
       return isStr(m.id) ? { t: 'bye', id: m.id } : null;
     case 'rdy':

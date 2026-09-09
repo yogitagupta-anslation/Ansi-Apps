@@ -3,9 +3,12 @@ import { StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import Screen from '../components/Screen';
 import Button from '../components/Button';
+import Stepper from '../components/Stepper';
 import BleStatusBadge from '../components/BleStatusBadge';
 import { bleStatusLabel, useBle } from '../ble/BleProvider';
+import { MAX_CAPACITY, MIN_CAPACITY } from '../ble/constants';
 import { useSettings } from '../settings/SettingsProvider';
+import { plural } from '../util/format';
 import { Palette, fonts, radius, spacing } from '../theme/tokens';
 import { useTheme, useThemedStyles } from '../theme/ThemeProvider';
 
@@ -18,19 +21,29 @@ interface MultiplayerScreenProps {
 export default function MultiplayerScreen({ onBack, onHosted, onJoin }: MultiplayerScreenProps) {
   const { colors } = useTheme();
   const styles = useThemedStyles(makeStyles);
-  const { state, players, hostRoom, transport } = useBle();
-  const { playerName, range } = useSettings();
+  const { state, players, hostRoom, transport, error, clearError } = useBle();
+  const { playerName, range, maxPlayers, setMaxPlayers } = useSettings();
   const [hosting, setHosting] = useState(false);
+  const [hostError, setHostError] = useState<string | null>(null);
 
   const host = async () => {
     setHosting(true);
+    setHostError(null);
+    clearError();
     try {
-      await hostRoom();
+      await hostRoom(maxPlayers);
       onHosted();
+    } catch (err) {
+      // Hosting fails for reasons a player can do something about — Bluetooth
+      // off, permission refused, a handset whose radio cannot advertise — so
+      // the reason is worth more than a spinner that quietly stops.
+      setHostError(err instanceof Error ? err.message : 'Could not open a room.');
     } finally {
       setHosting(false);
     }
   };
+
+  const problem = hostError ?? error;
 
   return (
     <Screen
@@ -44,29 +57,50 @@ export default function MultiplayerScreen({ onBack, onHosted, onJoin }: Multipla
         <Ionicons name="bluetooth" size={30} color={colors.accent} />
         <Text style={styles.heroTitle}>Same number, every phone</Text>
         <Text style={styles.heroBody}>
-          The host picks the hidden number and sends it to everyone nearby. From then on each guess is relayed as it
-          happens, so you can watch the others closing in. Fastest correct guess wins, and everyone gets to finish.
+          One phone hosts and gets a room code. Everyone else joins it over Bluetooth. The host picks the hidden number
+          and starts the round; from then on every guess is relayed as it happens, so you can watch the others closing
+          in.
         </Text>
       </View>
 
-      <View style={styles.actions}>
+      {problem ? (
+        <View style={styles.error}>
+          <Ionicons name="alert-circle-outline" size={16} color={colors.danger} />
+          <Text style={styles.errorText}>{problem}</Text>
+        </View>
+      ) : null}
+
+      <View style={styles.hostBlock}>
+        <Stepper
+          label="Room size"
+          hint={`Up to ${plural(maxPlayers, 'phone')}, yours included`}
+          value={maxPlayers}
+          min={MIN_CAPACITY}
+          max={MAX_CAPACITY}
+          onChange={setMaxPlayers}
+          disabled={hosting}
+        />
         <Button label="Host a game" icon="radio-outline" onPress={host} busy={hosting} />
-        <Button label="Join a game" icon="search-outline" variant="secondary" onPress={onJoin} />
       </View>
+
+      <Button label="Join with a code" icon="search-outline" variant="secondary" onPress={onJoin} />
 
       <View style={styles.facts}>
-        <Fact icon="people-outline" text="2–4 players in Bluetooth range" />
+        <Fact icon="key-outline" text="The host's four-letter code is what joiners look for" />
+        <Fact icon="people-outline" text={`${plural(maxPlayers, 'player')} in Bluetooth range — about ten metres`} />
         <Fact icon="grid-outline" text={`Host's range setting wins — yours is ${range.min}–${range.max}`} />
         <Fact icon="flash-outline" text="No internet, no accounts, no server" />
-        <Fact icon="pulse-outline" text="Every guess syncs live — drops reconnect on their own" />
       </View>
 
-      <View style={styles.note}>
-        <Ionicons name="information-circle-outline" size={14} color={colors.textMuted} />
-        <Text style={styles.noteText}>
-          Playing against stand-in opponents ({transport.label.toLowerCase()}), so the whole flow works on one device.
-        </Text>
-      </View>
+      {transport.simulated ? (
+        <View style={styles.note}>
+          <Ionicons name="information-circle-outline" size={14} color={colors.textMuted} />
+          <Text style={styles.noteText}>
+            This build has no Bluetooth radio available, so you are playing against stand-in opponents
+            ({transport.label.toLowerCase()}). Install the dev build to play against real phones.
+          </Text>
+        </View>
+      ) : null}
     </Screen>
   );
 }
@@ -86,7 +120,7 @@ const makeStyles = (colors: Palette) => StyleSheet.create({
   hero: {
     alignItems: 'center',
     gap: spacing.sm,
-    paddingVertical: spacing.xl,
+    paddingVertical: spacing.lg,
   },
   heroTitle: {
     ...fonts.title,
@@ -99,9 +133,26 @@ const makeStyles = (colors: Palette) => StyleSheet.create({
     lineHeight: 19,
     textAlign: 'center',
   },
-  actions: {
+  error: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
     gap: spacing.sm,
-    marginBottom: spacing.lg,
+    padding: spacing.md,
+    borderRadius: radius.md,
+    backgroundColor: colors.panel,
+    borderWidth: 1,
+    borderColor: colors.danger,
+    marginBottom: spacing.md,
+  },
+  errorText: {
+    color: colors.textSecondary,
+    fontSize: 12,
+    lineHeight: 18,
+    flex: 1,
+  },
+  hostBlock: {
+    gap: spacing.sm,
+    marginBottom: spacing.sm,
   },
   facts: {
     gap: spacing.sm,
@@ -110,6 +161,7 @@ const makeStyles = (colors: Palette) => StyleSheet.create({
     backgroundColor: colors.panel,
     borderWidth: 1,
     borderColor: colors.panelBorder,
+    marginTop: spacing.lg,
   },
   fact: {
     flexDirection: 'row',

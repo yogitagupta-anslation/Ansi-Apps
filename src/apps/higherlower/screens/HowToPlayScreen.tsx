@@ -135,8 +135,10 @@ export default function HowToPlayScreen({ onBack }: { onBack: () => void }) {
 
       <Section title="Multiplayer">
         <Text style={styles.body}>
-          One phone hosts and sends the hidden number to everyone in Bluetooth range. Every guess is relayed as it is
-          made, so each lane shows the others closing in. The host picks the mode:
+          One phone hosts and gets a four-letter room code; everyone else types it on their Join screen, or picks the
+          room off the list of what their radio can hear. The host decides how many phones may join, holds the start
+          button, and sends the hidden number to all of them at once. Every guess is relayed as it is made, so each lane
+          shows the others closing in. The host picks the mode:
         </Text>
         <View style={styles.table}>
           <View style={styles.tableRow}>

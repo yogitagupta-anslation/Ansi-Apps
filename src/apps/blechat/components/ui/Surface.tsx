@@ -1,8 +1,9 @@
 import React from 'react';
-import {View, type ViewStyle} from 'react-native';
+import {StyleSheet, View, type ViewStyle} from 'react-native';
 import {elevation, radius, spacing, typography} from '../../config/theme';
 import {makeStyles, useTheme} from '../../theme/ThemeProvider';
 import {AppText, DenseText} from '../AppText';
+import {Icon, type IconName} from './Icon';
 import {Touchable} from '../Motion';
 
 /**
@@ -138,22 +139,47 @@ const VARIANT_LABEL: Record<ButtonVariant, (s: Styles) => object> = {
  * than blank space.
  */
 export function EmptyState({
+  icon,
   glyph,
   title,
   detail,
+  action,
+  footnote,
 }: {
-  glyph: string;
+  /** Preferred. A drawn icon rather than whatever the platform font makes of a symbol. */
+  icon?: IconName;
+  /** Legacy Unicode fallback, kept so a caller without a matching icon still renders. */
+  glyph?: string;
   title: string;
   detail?: string;
+  /** The one thing to do about the emptiness, when there is one. */
+  action?: React.ReactNode;
+  /**
+   * A quieter line under the action, for context that explains the emptiness rather
+   * than asking anything of the reader.
+   */
+  footnote?: string;
 }) {
   const styles = useStyles();
+  const theme = useTheme();
   return (
     <View style={styles.empty}>
+      {icon || glyph ? (
       <View style={styles.emptyGlyphWrap}>
-        <AppText style={styles.emptyGlyph}>{glyph}</AppText>
+        {icon ? (
+          // Drawn at the same weight as the rest of the chrome. "✉" and "◎" were
+          // whatever the system font happened to have for those code points, which is a
+          // different design on every device and a missing box on some.
+          <Icon name={icon} size={30} color={theme.textFaint} strokeWidth={1.5} />
+        ) : (
+          <AppText style={styles.emptyGlyph}>{glyph}</AppText>
+        )}
       </View>
+      ) : null}
       <AppText style={styles.emptyTitle}>{title}</AppText>
       {detail ? <DenseText style={styles.emptyDetail}>{detail}</DenseText> : null}
+      {action ? <View style={styles.emptyAction}>{action}</View> : null}
+      {footnote ? <DenseText style={styles.emptyFootnote}>{footnote}</DenseText> : null}
     </View>
   );
 }
@@ -223,11 +249,14 @@ export function KeyValue({
 const useStyles = makeStyles(t => ({
   grow: {flex: 1},
 
+  // A card marks a real boundary — a tappable group, an overlay. It was being used as a
+  // container for prose, for helper text and for single rows, which is how a screen ends
+  // up with nine stacked outlines and an eye that reads borders instead of content.
+  // Grouping is space and a hairline now; what is left keeps the fill but drops the
+  // outline, so it still reads as a group without drawing one.
   card: {
-    backgroundColor: t.surface,
+    backgroundColor: t.surfaceAlt,
     borderRadius: radius.lg,
-    borderWidth: 1,
-    borderColor: t.border,
   },
   cardPadded: {padding: spacing.lg},
 
@@ -238,10 +267,10 @@ const useStyles = makeStyles(t => ({
     paddingHorizontal: spacing.xs,
   },
   sectionTitle: {...typography.overline, color: t.textDim},
-  sectionAction: {...typography.callout, color: t.accent, fontWeight: '600'},
+  sectionAction: {...typography.callout, color: t.accent},
 
   button: {
-    borderRadius: radius.md,
+    borderRadius: radius.pill,
     paddingVertical: 13,
     paddingHorizontal: spacing.lg,
     alignItems: 'center',
@@ -258,31 +287,41 @@ const useStyles = makeStyles(t => ({
     borderColor: 'transparent',
     opacity: 0.6,
   },
-  buttonLabel: {...typography.headline},
+  buttonLabel: {...typography.body, fontWeight: '500'},
   buttonLabelPrimary: {color: t.onAccent},
   buttonLabelSecondary: {color: t.text},
   buttonLabelGhost: {color: t.accent},
   buttonLabelDanger: {color: t.error},
 
   empty: {alignItems: 'center', paddingVertical: spacing.xl * 2},
+  // No tinted disc behind the glyph. An empty state is already the quietest thing on a
+  // screen; giving its icon a filled circle made the absence look like a component.
   emptyGlyphWrap: {
     width: 56,
     height: 56,
-    borderRadius: 28,
-    backgroundColor: t.surfaceAlt,
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: spacing.md,
+    marginBottom: spacing.sm,
   },
-  emptyGlyph: {fontSize: 22, color: t.textDim},
-  emptyTitle: {...typography.headline, color: t.text},
-  emptyDetail: {
+  emptyGlyph: {fontSize: 26, color: t.textFaint},
+  emptyAction: {marginTop: spacing.lg},
+  emptyFootnote: {
     ...typography.caption,
+    color: t.textFaint,
+    textAlign: 'center',
+    marginTop: spacing.xl,
+    paddingTop: spacing.lg,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: t.divider,
+    maxWidth: 280,
+  },
+  emptyTitle: {...typography.title, color: t.text},
+  emptyDetail: {
+    ...typography.body,
     color: t.textDim,
     textAlign: 'center',
-    marginTop: spacing.xs,
-    maxWidth: 260,
-    lineHeight: 17,
+    marginTop: spacing.sm,
+    maxWidth: 280,
   },
 
   badgeSoft: {borderColor: 'transparent'},
@@ -296,6 +335,6 @@ const useStyles = makeStyles(t => ({
 
   kv: {flexDirection: 'row', alignItems: 'center', paddingVertical: spacing.sm},
   kvLabel: {...typography.callout, color: t.textDim},
-  kvValue: {...typography.callout, color: t.text, fontWeight: '600', flexShrink: 1},
-  kvMono: {fontFamily: 'monospace', fontSize: 12, fontWeight: '400'},
+  kvValue: {...typography.callout, color: t.text, flexShrink: 1},
+  kvMono: {...typography.monoSmall},
 }));

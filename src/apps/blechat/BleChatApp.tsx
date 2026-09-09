@@ -16,13 +16,13 @@
  */
 
 import React, { useEffect, useState } from 'react';
-import { ActivityIndicator, AppState, View } from 'react-native';
+import { AppState } from 'react-native';
 
 import { AppNavigator } from './navigation/AppNavigator';
+import { BootScreen } from './components/BootScreen';
 import { AppLockScreen } from './screens/AppLockScreen';
 import { ErrorBoundary } from './components/ErrorBoundary';
-import { DenseText } from './components/AppText';
-import { ThemeProvider, makeStyles, useTheme } from './theme/ThemeProvider';
+import { ThemeProvider } from './theme/ThemeProvider';
 import { initApp, useAppStore } from './state/appStore';
 import { storage } from './storage/LocalStorage';
 import { pinMatches } from './security/AppLock';
@@ -52,8 +52,6 @@ export default function BleChatApp(): React.JSX.Element {
 
 /** Split out so it sits inside ThemeProvider and can read the active palette. */
 function AppShell(): React.JSX.Element {
-  const styles = useStyles();
-  const theme = useTheme();
   const ready = useAppStore((s) => s.ready);
   const initError = useAppStore((s) => s.initError);
 
@@ -98,11 +96,10 @@ function AppShell(): React.JSX.Element {
   if (lock === null) {
     // Whether to lock at all is not known yet — never render real content in the
     // gap, or a locked app would flash its own contents before covering them.
-    return (
-      <View style={styles.loading}>
-        <ActivityIndicator size="large" color={theme.accent} />
-      </View>
-    );
+    //
+    // No status line: saying "checking the lock" out loud would tell anyone holding the
+    // phone that there is one to get past.
+    return <BootScreen status="" />;
   }
 
   if (showLockScreen) {
@@ -121,12 +118,7 @@ function AppShell(): React.JSX.Element {
   }
 
   if (!ready && !initError) {
-    return (
-      <View style={styles.loading}>
-        <ActivityIndicator size="large" color={theme.accent} />
-        <DenseText style={styles.loadingText}>Starting Bluetooth stack...</DenseText>
-      </View>
-    );
+    return <BootScreen status="Waking up the radio" />;
   }
 
   return (
@@ -135,13 +127,3 @@ function AppShell(): React.JSX.Element {
     </ErrorBoundary>
   );
 }
-
-const useStyles = makeStyles((t) => ({
-  loading: {
-    flex: 1,
-    backgroundColor: t.bg,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  loadingText: { color: t.textDim, marginTop: 12, fontSize: 14 },
-}));

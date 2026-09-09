@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { DarkTheme, DefaultTheme, ThemeProvider as NavigationThemeProvider, Theme } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import HomeScreen from '../screens/HomeScreen';
@@ -68,6 +68,41 @@ function scoreline(match: MatchState, youId: string): string {
 }
 
 /**
+ * Keeps a joiner with the room between rounds of a match.
+ *
+ * The Lobby listens for the host's 'go', which is enough for the first round
+ * and nothing after it: in a best-of-three the host is one tap from starting
+ * round two while everyone else is still reading the scoreboard, and a joiner
+ * sitting on Result would simply never hear it. So the Result screen listens
+ * too. Only a joiner does -- the host is the one sending 'go', and it is
+ * already on its way to the board when it does.
+ */
+function RoundWatcher({
+  active,
+  onRound,
+}: {
+  active: boolean;
+  onRound: (round: IncomingRound) => void;
+}) {
+  const { onMessage } = useBle();
+  // Held in a ref so the subscription survives a re-render: re-subscribing is
+  // where an in-flight 'go' would go missing, which is the exact bug this
+  // component exists to close.
+  const handler = useRef(onRound);
+  handler.current = onRound;
+
+  useEffect(() => {
+    if (!active) return;
+    return onMessage((msg) => {
+      if (msg.t !== 'go') return;
+      handler.current({ rid: msg.rid, lo: msg.lo, hi: msg.hi, tg: msg.tg, md: msg.md, mf: msg.mf });
+    });
+  }, [active, onMessage]);
+
+  return null;
+}
+
+/**
  * Home -> Solo, Daily or Multiplayer, all converging on the shared Result
  * screen.
  *
@@ -76,7 +111,7 @@ function scoreline(match: MatchState, youId: string): string {
  * finished round gets folded into the player's profile.
  */
 export default function RootNavigator() {
-  const { leaveRoom } = useBle();
+  const { leaveRoom, role } = useBle();
   const { colors, scheme } = useTheme();
   const { record } = useStats();
   const { matchRounds } = useSettings();
@@ -221,38 +256,44 @@ export default function RootNavigator() {
         <Stack.Screen name="Result">
           {({ navigation }) =>
             finished ? (
-              <ResultScreen
-                summary={finished.summary}
-                youId={finished.youId}
-                unlocked={finished.unlocked}
-                matchLine={
-                  match
-                    ? matchWinner
-                      ? `🏆 MATCH ${matchWinner === finished.youId ? 'WON' : 'LOST'} — ${scoreline(match, finished.youId)}`
-                      : `ROUND ${match.played} OF ${match.rounds} — ${scoreline(match, finished.youId)}`
-                    : null
-                }
-                playAgainLabel={
-                  match && !matchWinner
-                    ? 'Next round'
-                    : finished.mode === 'multiplayer'
-                      ? 'Back to lobby'
-                      : finished.mode === 'daily'
-                        ? 'Try again'
-                        : 'Play again'
-                }
-                onPlayAgain={() => {
-                  if (matchWinner) setMatch(null);
-                  if (finished.mode === 'multiplayer') navigation.replace('Lobby');
-                  else if (finished.mode === 'daily') navigation.replace('SoloGame', { daily: true });
-                  else navigation.replace('SoloGame');
-                }}
-                onHome={() => {
-                  if (finished.mode === 'multiplayer') void leaveRoom();
-                  setMatch(null);
-                  navigation.navigate('Home');
-                }}
+              <>
+                <ResultScreen
+                  summary={finished.summary}
+                  youId={finished.youId}
+                  unlocked={finished.unlocked}
+                  matchLine={
+                    match
+                      ? matchWinner
+                        ? `🏆 MATCH ${matchWinner === finished.youId ? 'WON' : 'LOST'} — ${scoreline(match, finished.youId)}`
+                        : `ROUND ${match.played} OF ${match.rounds} — ${scoreline(match, finished.youId)}`
+                      : null
+                  }
+                  playAgainLabel={
+                    match && !matchWinner
+                      ? 'Next round'
+                      : finished.mode === 'multiplayer'
+                        ? 'Back to lobby'
+                        : finished.mode === 'daily'
+                          ? 'Try again'
+                          : 'Play again'
+                  }
+                  onPlayAgain={() => {
+                    if (matchWinner) setMatch(null);
+                    if (finished.mode === 'multiplayer') navigation.replace('Lobby');
+                    else if (finished.mode === 'daily') navigation.replace('SoloGame', { daily: true });
+                    else navigation.replace('SoloGame');
+                  }}
+                  onHome={() => {
+                    if (finished.mode === 'multiplayer') void leaveRoom();
+                    setMatch(null);
+                    navigation.navigate('Home');
+                  }}
+                />
+              <RoundWatcher
+                active={finished.mode === 'multiplayer' && role === 'client'}
+                onRound={(round) => navigation.replace('MultiplayerGame', { round })}
               />
+              </>
             ) : null
           }
         </Stack.Screen>

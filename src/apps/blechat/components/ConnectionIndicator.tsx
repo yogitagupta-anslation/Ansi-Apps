@@ -14,19 +14,28 @@ interface Props {
   compact?: boolean;
 }
 
+/**
+ * What is happening, not which protocol step it is.
+ *
+ * The five stages between "connecting" and "connected" are real and are still named
+ * individually in Diagnostics, where the distinction matters. On a row or a chat header
+ * they were the transport talking to itself: "Negotiating MTU" tells the person holding
+ * the phone nothing they can act on, and three of the five looked like errors to anyone
+ * who did not know better. They collapse into one honest word.
+ */
 export const LABELS: Record<LinkState, string> = {
-  disconnected: 'Disconnected',
+  disconnected: 'Not connected',
   // "Available" rather than "Found nearby": it says what the user can DO about it.
   discovering: 'Available',
-  connecting: 'Connecting',
-  discoveringServices: 'Discovering services',
-  negotiatingMtu: 'Negotiating MTU',
-  enablingNotifications: 'Enabling notifications',
-  handshaking: 'Handshaking',
+  connecting: 'Saying hello…',
+  discoveringServices: 'Saying hello…',
+  negotiatingMtu: 'Saying hello…',
+  enablingNotifications: 'Saying hello…',
+  handshaking: 'Saying hello…',
   connected: 'Connected',
   disconnecting: 'Disconnecting',
-  reconnecting: 'Reconnecting',
-  failed: 'Connection failed',
+  reconnecting: 'Trying to reconnect',
+  failed: "Couldn't connect",
 };
 
 /** Step N of the connection sequence, for a progress hint while connecting. */

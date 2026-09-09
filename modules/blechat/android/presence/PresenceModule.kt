@@ -2,6 +2,8 @@ package com.blechat.presence
 
 import android.Manifest
 import android.app.Activity
+import android.app.ActivityManager
+import android.app.ApplicationExitInfo
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
@@ -193,6 +195,73 @@ class PresenceModule(private val reactContext: ReactApplicationContext) :
       promise.resolve(false)
     }
   }
+
+  /**
+   * Why this app's process died last time, according to Android itself.
+   *
+   * The one question no amount of JavaScript can answer. A JS error can be caught and
+   * written down on the way out; a native crash, an ANR or a low-memory kill end the
+   * process with nothing running, so the app wakes up with no idea anything happened —
+   * which is exactly the situation when somebody reports "it just closes".
+   *
+   * This asks the system, which keeps the record regardless of who died or how. Knowing
+   * whether the last exit was CRASH_NATIVE or CRASH (the JS/Java kind) decides where to
+   * look next, and telling them apart by hand is guesswork.
+   *
+   * Resolves null when there is nothing to report or the OS is too old to keep the
+   * record — an unanswered question, which is different from "nothing happened".
+   */
+  @ReactMethod
+  fun getLastExitReason(promise: Promise) {
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
+      promise.resolve(null)
+      return
+    }
+    try {
+      val manager =
+          reactContext.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
+      val history = manager.getHistoricalProcessExitReasons(reactContext.packageName, 0, 1)
+      val last = history.firstOrNull()
+      if (last == null) {
+        promise.resolve(null)
+        return
+      }
+      val map = com.facebook.react.bridge.Arguments.createMap()
+      map.putString("reason", reasonName(last.reason))
+      map.putString("description", last.description ?: "")
+      map.putDouble("at", last.timestamp.toDouble())
+      map.putInt("status", last.status)
+      // Only a genuine crash carries one, and it is the difference between "the OS
+      // reclaimed memory" and "we have a bug".
+      map.putBoolean(
+          "wasCrash",
+          last.reason == ApplicationExitInfo.REASON_CRASH ||
+              last.reason == ApplicationExitInfo.REASON_CRASH_NATIVE ||
+              last.reason == ApplicationExitInfo.REASON_ANR,
+      )
+      promise.resolve(map)
+    } catch (e: Exception) {
+      promise.resolve(null)
+    }
+  }
+
+  /** The constant's name in words, because the numbers mean nothing on a screen. */
+  private fun reasonName(reason: Int): String =
+      when (reason) {
+        ApplicationExitInfo.REASON_CRASH -> "App crashed (Java or JavaScript)"
+        ApplicationExitInfo.REASON_CRASH_NATIVE -> "Native crash"
+        ApplicationExitInfo.REASON_ANR -> "Stopped responding"
+        ApplicationExitInfo.REASON_LOW_MEMORY -> "Killed to free memory"
+        ApplicationExitInfo.REASON_USER_REQUESTED -> "Closed by you"
+        ApplicationExitInfo.REASON_USER_STOPPED -> "Force stopped"
+        ApplicationExitInfo.REASON_EXCESSIVE_RESOURCE_USAGE -> "Using too many resources"
+        ApplicationExitInfo.REASON_PERMISSION_CHANGE -> "A permission changed"
+        ApplicationExitInfo.REASON_SIGNALED -> "Killed by a signal"
+        ApplicationExitInfo.REASON_EXIT_SELF -> "Exited on its own"
+        ApplicationExitInfo.REASON_DEPENDENCY_DIED -> "A service it needed died"
+        ApplicationExitInfo.REASON_OTHER -> "Other"
+        else -> "Unknown ($reason)"
+      }
 
   companion object {
     private const val REQUEST_NOTIFICATIONS = 8801

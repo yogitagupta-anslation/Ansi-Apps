@@ -21,6 +21,13 @@ RCT_EXTERN_METHOD(start
                   : (RCTPromiseResolveBlock)resolve rejecter
                   : (RCTPromiseRejectBlock)reject)
 
+RCT_EXTERN_METHOD(updateAdvertisement
+                  : (NSString *)peerIdPrefix displayName
+                  : (NSString *)displayName interestMask
+                  : (nonnull NSNumber *)interestMask resolver
+                  : (RCTPromiseResolveBlock)resolve rejecter
+                  : (RCTPromiseRejectBlock)reject)
+
 RCT_EXTERN_METHOD(stop
                   : (RCTPromiseResolveBlock)resolve rejecter
                   : (RCTPromiseRejectBlock)reject)

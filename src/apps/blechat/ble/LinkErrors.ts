@@ -43,6 +43,18 @@ function reasonFromBleErrorCode(code: BleErrorCode): LinkFailureReason | null {
     case BleErrorCode.OperationTimedOut:
       return 'ConnectionTimeout';
 
+    /**
+     * The user pressed Cancel.
+     *
+     * ble-plx rejects the in-flight connect with this the moment
+     * `cancelDeviceConnection` lands, and without this case it fell through to the
+     * phase fallback and was recorded as ConnectionRefused — so cancelling produced
+     * "Connection failed: Operation was cancelled", marked the peer failed, and counted
+     * against it in the reconnect budget. A cancellation is evidence of nothing.
+     */
+    case BleErrorCode.OperationCancelled:
+      return 'Cancelled';
+
     case BleErrorCode.DeviceNotFound:
     case BleErrorCode.DeviceNotConnected:
     case BleErrorCode.DeviceDisconnected:
@@ -67,6 +79,24 @@ function reasonFromBleErrorCode(code: BleErrorCode): LinkFailureReason | null {
     default:
       return null;
   }
+}
+
+/**
+ * The Android GATT client refused to START the operation.
+ *
+ * `BluetoothGatt` allows one operation at a time and clears its busy flag from the
+ * completion callback. An operation issued in the same tick as the previous one's
+ * completion is rejected outright — writeCharacteristic returns false, ble-plx reports
+ * OperationStartFailed, and the failure comes back in zero milliseconds without any
+ * radio traffic. It says nothing about the peer or the link, and the same call succeeds
+ * a moment later, which is exactly what makes it worth retrying rather than reporting.
+ */
+export function isGattBusy(err: unknown): boolean {
+  if (err instanceof BleError && err.errorCode === BleErrorCode.OperationStartFailed) {
+    return true;
+  }
+  const message = (err instanceof Error ? err.message : String(err)).toLowerCase();
+  return message.includes('operation was rejected');
 }
 
 /**
@@ -165,6 +195,10 @@ export function classifyBleError(err: unknown, phase: LinkState): BleLinkError {
   }
   if (lower.includes('timeout') || lower.includes('timed out')) {
     return new BleLinkError('ConnectionTimeout', phase, message, err);
+  }
+  // Both spellings, for the stacks that throw a plain Error rather than a coded one.
+  if (lower.includes('cancelled') || lower.includes('canceled')) {
+    return new BleLinkError('Cancelled', phase, message, err);
   }
 
   return new BleLinkError(fallbackReason(phase), phase, message, err);

@@ -19,6 +19,15 @@ export type IconName =
   | 'link'
   | 'clock'
   | 'chevronRight'
+  | 'arrowUp'
+  | 'info'
+  | 'checkDouble'
+  | 'bluetoothOff'
+  | 'link2'
+  | 'chatPlus'
+  | 'tabYou'
+  | 'tabChats'
+  | 'tabNearby'
   | 'plus'
   | 'pencil'
   | 'shield'
@@ -84,6 +93,12 @@ type StrokeProps = {
 
 const ICONS: Record<IconName, (p: StrokeProps, color: string) => React.ReactNode> = {
   bluetooth: p => <Path {...p} d="M6.5 6.5L17.5 17.5L12 23L12 1L17.5 6.5L6.5 17.5" />,
+  bluetoothOff: p => (
+    <>
+      <Path {...p} d="M6.5 6.5L17.5 17.5L12 23L12 1L17.5 6.5L6.5 17.5" />
+      <Path {...p} d="M3 3l18 18" />
+    </>
+  ),
   radar: (p, color) => (
     <>
       <Circle cx={12} cy={12} r={8} {...p} />
@@ -122,6 +137,69 @@ const ICONS: Record<IconName, (p: StrokeProps, color: string) => React.ReactNode
     </>
   ),
   chevronRight: p => <Path {...p} d="M9 5l7 7-7 7" />,
+  // The tab-bar set and the row pills, traced from the design rather than approximated
+  // with the nearest existing glyph — these are the icons a reader sees most often, so a
+  // near-miss is visible every time the app is opened.
+  tabNearby: p => (
+    <>
+      <Circle cx={12} cy={12} r={7.5} {...p} />
+      <Circle cx={12} cy={12} r={2.2} fill={p.stroke} stroke="none" />
+    </>
+  ),
+  tabChats: p => (
+    <Path
+      {...p}
+      d="M4 6.5A2.5 2.5 0 016.5 4h11A2.5 2.5 0 0120 6.5v8a2.5 2.5 0 01-2.5 2.5H10l-4.5 4v-4H6.5A2.5 2.5 0 014 14.5v-8z"
+    />
+  ),
+  tabYou: p => (
+    <>
+      <Circle cx={12} cy={8.5} r={3.4} {...p} />
+      <Path {...p} d="M5.5 19.5c0-3.6 2.9-6 6.5-6s6.5 2.4 6.5 6" />
+    </>
+  ),
+  /** "Start a conversation" — a bubble with a second one joining it. */
+  chatPlus: p => (
+    <>
+      <Path {...p} d="M18 8.5V6.2a2 2 0 00-2-2H6a2 2 0 00-2 2v7a2 2 0 002 2h1v3l3.5-3" />
+      <Path
+        {...p}
+        d="M12 11h6.5a1.5 1.5 0 011.5 1.5v4a1.5 1.5 0 01-1.5 1.5H17v2.2L14 18h-2a1.5 1.5 0 01-1.5-1.5"
+      />
+    </>
+  ),
+  /** A link, for a live connection. */
+  link2: p => (
+    <>
+      <Path {...p} d="M9.5 14.5l5-5" />
+      <Path {...p} d="M11 6.5l1-1a3.5 3.5 0 015 5l-1 1" />
+      <Path {...p} d="M13 17.5l-1 1a3.5 3.5 0 01-5-5l1-1" />
+    </>
+  ),
+
+  // Two ticks, the second trailing the first. "Sent" is one write completing; this is
+  // the peer having acknowledged it, which is a different fact and needs a different mark.
+  checkDouble: p => (
+    <>
+      <Path {...p} d="M2 12.5l3.5 3.5L13 8.5" />
+      <Path {...p} d="M10 15l1 1 7.5-7.5" />
+    </>
+  ),
+  info: p => (
+    <>
+      <Circle cx={12} cy={12} r={9} {...p} />
+      <Path {...p} d="M12 11v5" />
+      <Path {...p} d="M12 8h.01" />
+    </>
+  ),
+  // A stem and a chevron, not a filled triangle: it sits inside a 34px accent circle at
+  // 16px, and a solid glyph that small turns into a blob.
+  arrowUp: p => (
+    <>
+      <Path {...p} d="M12 19V6" />
+      <Path {...p} d="M6 12l6-6 6 6" />
+    </>
+  ),
   plus: p => (
     <>
       <Path {...p} d="M12 5v14" />

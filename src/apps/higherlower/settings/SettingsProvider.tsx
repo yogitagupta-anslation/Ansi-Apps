@@ -2,6 +2,7 @@ import React, { createContext, useCallback, useContext, useMemo, useState } from
 import { Difficulty, RaceMode, Range } from '../types/game';
 import { parGuesses } from '../game/engine';
 import { ModifierId, toggleModifier } from '../game/modifiers';
+import { DEFAULT_CAPACITY, MAX_CAPACITY, MIN_CAPACITY } from '../ble/constants';
 
 export interface RangePreset {
   id: string;
@@ -36,6 +37,8 @@ export interface Settings {
   mode: RaceMode;
   /** 1 for a single round, 3 for best-of-three. */
   matchRounds: number;
+  /** Seats in a room you host, your own included. */
+  maxPlayers: number;
 }
 
 interface SettingsContextValue extends Settings {
@@ -50,6 +53,7 @@ interface SettingsContextValue extends Settings {
   setModifiers(ids: ModifierId[]): void;
   setMode(mode: RaceMode): void;
   setMatchRounds(rounds: number): void;
+  setMaxPlayers(players: number): void;
 }
 
 const DEFAULTS: Settings = {
@@ -61,6 +65,7 @@ const DEFAULTS: Settings = {
   modifiers: [],
   mode: 'speed',
   matchRounds: 1,
+  maxPlayers: DEFAULT_CAPACITY,
 };
 
 const SettingsContext = createContext<SettingsContextValue | null>(null);
@@ -93,6 +98,8 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
         setSettings((prev) => ({ ...prev, modifiers: toggleModifier(prev.modifiers, id) })),
       setMode: (mode) => patch({ mode }),
       setMatchRounds: (matchRounds) => patch({ matchRounds }),
+      setMaxPlayers: (players) =>
+        patch({ maxPlayers: Math.min(MAX_CAPACITY, Math.max(MIN_CAPACITY, players)) }),
     };
   }, [settings, patch]);
 

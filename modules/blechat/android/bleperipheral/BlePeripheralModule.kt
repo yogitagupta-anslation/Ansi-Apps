@@ -439,6 +439,50 @@ class BlePeripheralModule(private val reactContext: ReactApplicationContext) :
     }
   }
 
+  /**
+   * Rewrites the advertised payload in place.
+   *
+   * `stop`/`start` would also refresh it, but stopInternal closes the GATT server, which
+   * drops every phone already connected. A room whose occupancy changes every time
+   * somebody joins cannot afford that, so this restarts the ADVERTISER only and leaves
+   * the server, its characteristics and its connections untouched.
+   *
+   * startPromise is deliberately left null: resolveStart tears the server down on
+   * failure, and a refresh that could not be applied is a stale scan entry, not a reason
+   * to end the game.
+   */
+  @SuppressLint("MissingPermission")
+  @ReactMethod
+  fun updateAdvertisement(
+      peerIdPrefixHex: String,
+      displayName: String,
+      interestMask: Double,
+      promise: Promise,
+  ) {
+    val adv = advertiser
+    if (adv == null || gattServer == null) {
+      promise.reject("E_NOT_ADVERTISING", "Not advertising; call start first")
+      return
+    }
+
+    pendingAdvertisePayload = buildManufacturerPayload(peerIdPrefixHex, displayName, interestMask)
+
+    try {
+      if (isAdvertising) {
+        adv.stopAdvertising(advertiseCallback)
+        isAdvertising = false
+      }
+    } catch (e: Exception) {
+      Log.w(TAG, "stopAdvertising during update failed", e)
+    }
+
+    startAdvertising()
+
+    val map = Arguments.createMap()
+    map.putBoolean("advertising", true)
+    promise.resolve(map)
+  }
+
   @ReactMethod
   fun stop(promise: Promise) {
     stopInternal()
