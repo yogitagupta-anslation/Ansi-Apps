@@ -128,7 +128,7 @@ export function formatDisplayDate(dateString: string): string {
     'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
   ];
   const parts = dateString.split('-');
-  if (parts.length !== 3) {
+  if (parts.length !== 3 || !parts.every(part => /^\d+$/.test(part))) {
     return dateString;
   }
   const [year, month, day] = parts;

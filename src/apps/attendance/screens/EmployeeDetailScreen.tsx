@@ -255,9 +255,40 @@ export function EmployeeDetailScreen() {
       ? { fg: c.warning, soft: c.warningSoft, bd: c.warning }
       : { fg: c.textMuted, soft: c.surfaceMuted, bd: c.borderStrong };
 
+  /**
+   * A departure the employee DECLARED ends the day here, exactly as it does on
+   * their own phone.
+   *
+   * These tiles used to read lastSeenTime unconditionally, which meant that
+   * after someone tapped Check out the Host kept counting: LAST SEEN advanced
+   * with every advertisement and ON SITE grew, while the employee's own screen
+   * showed a settled check-out and a fixed total. Two screens describing one
+   * person's day, disagreeing by however long they lingered near the Host.
+   *
+   * The rule is the one the rest of the system already uses — buildHistoryFor
+   * picks the declared time over lastSeenTime for exactly these days — so the
+   * register, the delivered history and this screen now say the same thing.
+   *
+   * An INFERRED departure is deliberately NOT treated this way. There, the
+   * grace period elapsed in silence and lastSeenTime IS the observation; the
+   * leftTime is derived from it. Showing "last seen" is the honest label for a
+   * day nobody made a statement about.
+   *
+   * The live radio fact is not lost: the status chip still reads IN RANGE and
+   * the proximity block below still shows a current reading. What changes is
+   * that the day's TOTAL stops being a running clock once its owner has said
+   * they are done.
+   */
+  const declaredExit =
+    record?.leftTimeSource === 'DECLARED' && record.leftTime !== null
+      ? record.leftTime
+      : null;
+
+  const endOfDayMs = declaredExit ?? record?.lastSeenTime ?? null;
+
   const onSiteMs =
-    record?.checkInTime && record.lastSeenTime
-      ? record.lastSeenTime - record.checkInTime
+    record?.checkInTime && endOfDayMs !== null
+      ? endOfDayMs - record.checkInTime
       : null;
 
   const stats = [
@@ -267,8 +298,11 @@ export function EmployeeDetailScreen() {
       fg: record?.checkInTime ? c.success : c.textMuted,
     },
     {
-      n: record?.lastSeenTime ? formatClockTime(record.lastSeenTime) : '--:--',
-      label: 'LAST SEEN',
+      n: endOfDayMs !== null ? formatClockTime(endOfDayMs) : '--:--',
+      // The label carries the provenance, because the two are different claims:
+      // one is a statement the employee made, the other is the last time the
+      // radio heard them.
+      label: declaredExit !== null ? 'CHECKED OUT' : 'LAST SEEN',
       fg: c.textPrimary,
     },
     {

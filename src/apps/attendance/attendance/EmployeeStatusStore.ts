@@ -27,11 +27,17 @@
 
 import type { HistoryDay, StatusReport } from '../bluetooth/statusReport';
 import { todayDateString } from '../constants/appConfig';
-import { readJson, writeJson } from '../storage/AppStorage';
+import { readJson, writeJson, STORAGE_KEYS } from '../storage/AppStorage';
 import { log } from '../utils/logger';
 
-const STORAGE_KEY = '@bleattendance/employeeStatusReport';
-const HISTORY_KEY = '@bleattendance/employeeHistory';
+/**
+ * Owned by STORAGE_KEYS so the wipe can see them.
+ *
+ * These were local string literals, invisible to clearAllLocalData, and that is
+ * how "Erase all local data" came to leave an employee's own attendance behind.
+ */
+const STORAGE_KEY = STORAGE_KEYS.employeeStatusReport;
+const HISTORY_KEY = STORAGE_KEYS.employeeHistory;
 
 /** One day as this phone knows it. Times are minutes since local midnight. */
 export interface StoredDay {
@@ -39,6 +45,16 @@ export interface StoredDay {
   status: HistoryDay['status'];
   checkInMinutes: number | null;
   checkOutMinutes: number | null;
+  /**
+   * checkOutMinutes is a departure this employee STATED and a Host recorded,
+   * rather than the last moment the Host heard this phone.
+   *
+   * Optional because every day stored before check-outs existed predates the
+   * distinction; absent reads as "observed", which is what those days were.
+   * The screens use it to avoid claiming "the Host stopped seeing this device"
+   * about a departure where the Host was, in fact, still seeing it.
+   */
+  checkOutDeclared?: boolean;
   /** Which Host reported it, for attribution. */
   hostId: string;
   /** When this phone received it. */
@@ -98,6 +114,7 @@ export const EmployeeStatusStore = {
       status: d.status,
       checkInMinutes: d.checkInMinutes,
       checkOutMinutes: d.checkOutMinutes,
+      ...(d.checkOutDeclared ? { checkOutDeclared: true } : {}),
       hostId: report.hostId,
       receivedAt: now,
     }));
@@ -110,13 +127,40 @@ export const EmployeeStatusStore = {
       checkInMinutes: minutesOfDay(report.checkInTime),
       // Today has no observed check-out until the Host says the person left.
       checkOutMinutes: report.leftTime !== null ? minutesOfDay(report.leftTime) : null,
+      ...(report.leftTimeDeclared ? { checkOutDeclared: true } : {}),
       hostId: report.hostId,
       receivedAt: now,
     });
 
+    /**
+     * A stored DECLARED check-out is never replaced by an observed one.
+     *
+     * Ordinarily the incoming block simply wins — it is the Host's current
+     * view and corrects anything stale. But a declared departure is a number
+     * this phone has already shown its owner as confirmed, and the Host's
+     * history reports the last observed signal for any day it does not mark
+     * declared. A Host on an older build never sends the marks at all, so
+     * without this guard yesterday's stated 18:00 would quietly become the
+     * 18:34 the radio last heard, on a screen that had promised otherwise.
+     *
+     * The narrow rule: keep the declaration, take everything else from the
+     * incoming day, so status and check-in still correct normally.
+     */
     const days = { ...history.days };
     incoming.forEach(day => {
-      days[day.date] = day;
+      const stored = days[day.date];
+      const wouldDropDeclaration =
+        stored?.checkOutDeclared === true &&
+        !day.checkOutDeclared &&
+        stored.checkOutMinutes !== null;
+
+      days[day.date] = wouldDropDeclaration
+        ? {
+            ...day,
+            checkOutMinutes: stored.checkOutMinutes,
+            checkOutDeclared: true,
+          }
+        : day;
     });
     history = { days, lastSyncedAt: now };
     await writeJson(HISTORY_KEY, history);
@@ -174,5 +218,24 @@ export const EmployeeStatusStore = {
     return () => {
       historyListeners.delete(listener);
     };
+  },
+
+  /**
+   * Forget everything this phone was told about its own attendance.
+   *
+   * Storage is cleared by clearAllLocalData, which now covers both keys. This
+   * handles the half that lives in memory: `cached` and `history` are
+   * module-level and survive any amount of key deletion, so without this the
+   * screens keep rendering the erased times until the next app launch — the
+   * user asks to erase their data and watches it stay on screen.
+   *
+   * `loaded` is reset too, so a later initialize() re-reads from disk rather
+   * than short-circuiting on a flag set before the wipe.
+   */
+  clear(): void {
+    cached = null;
+    history = { days: {}, lastSyncedAt: null };
+    loaded = false;
+    notify();
   },
 };

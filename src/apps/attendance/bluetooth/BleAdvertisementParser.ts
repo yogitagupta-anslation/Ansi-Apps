@@ -13,6 +13,7 @@
 
 import type { Device } from 'react-native-ble-plx';
 import {
+  CHECKOUT_UUID_16_FULL,
   MANUFACTURER_ID,
   PROTOCOL_VERSION,
   SERVICE_UUID_128,
@@ -38,6 +39,15 @@ export interface ParsedAdvertisement {
   rawManufacturerHex: string | null;
   /** Set when the advertisement looked like ours but the payload was corrupt. */
   malformed: boolean;
+  /**
+   * The employee is declaring a departure right now.
+   *
+   * Present only while a check-out is pending on their phone, so its ABSENCE
+   * is not evidence of anything — an older employee build never sends it, and
+   * an active scan is needed to see the scan response at all. Treat a true as
+   * a statement and a false as silence, never as "they are still here".
+   */
+  checkOutIntent: boolean;
 }
 
 const NOT_OURS: ParsedAdvertisement = {
@@ -47,6 +57,7 @@ const NOT_OURS: ParsedAdvertisement = {
   matchedBy: [],
   rawManufacturerHex: null,
   malformed: false,
+  checkOutIntent: false,
 };
 
 /**
@@ -132,6 +143,15 @@ export function parseAdvertisement(device: Device): ParsedAdvertisement {
   if (uuids.includes(SERVICE_UUID_16_FULL)) {
     matchedBy.push('serviceUuid16');
   }
+
+  /**
+   * Deliberately NOT added to matchedBy: this UUID must never make an
+   * advertisement count as ours on its own. It is a modifier on an
+   * advertisement already identified by the signals above — otherwise any
+   * device that happened to advertise 0xF00E would be read as an employee
+   * declaring a departure.
+   */
+  const checkOutIntent = uuids.includes(CHECKOUT_UUID_16_FULL);
   if (uuids.includes(normalizeUuid(SERVICE_UUID_128))) {
     matchedBy.push('serviceUuid128');
   }
@@ -169,6 +189,7 @@ export function parseAdvertisement(device: Device): ParsedAdvertisement {
       matchedBy,
       rawManufacturerHex,
       malformed: true,
+      checkOutIntent,
     };
   }
 
@@ -177,6 +198,7 @@ export function parseAdvertisement(device: Device): ParsedAdvertisement {
     employeeId: payload.employeeId,
     protocolVersion: payload.protocolVersion,
     matchedBy,
+    checkOutIntent,
     rawManufacturerHex,
     malformed: false,
   };

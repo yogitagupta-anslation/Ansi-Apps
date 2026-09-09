@@ -136,13 +136,27 @@ export class AttendanceManager {
     if (existing && existing.checkInTime !== null) {
       const wasLeft = statusBefore === 'LEFT';
 
+      /**
+       * Re-entry clears an INFERRED departure but never a DECLARED one.
+       *
+       * An inferred leftTime is a deduction from silence, and this detection
+       * is direct evidence against it — so it goes. A declared one is the
+       * employee's own statement, already delivered back to their phone and
+       * shown to them as confirmed; a later sighting does not unsay it, it
+       * only adds that they were seen again, which the RE_ENTRY event below
+       * records. Clearing it would take back a number the app had displayed.
+       *
+       * They can declare a second departure later if they really do work on;
+       * recordDeclaredCheckOut accepts a LATER time for exactly that.
+       */
+      const clearsLeft = wasLeft && existing.leftTimeSource !== 'DECLARED';
+
       const updated: AttendanceRecord = {
         ...existing,
         lastSeenTime: now,
         lastDetectedAt: now,
-        // Re-entry clears leftTime: the employee is demonstrably back, so a
-        // stale departure time would misrepresent the day.
-        leftTime: wasLeft ? null : existing.leftTime,
+        leftTime: clearsLeft ? null : existing.leftTime,
+        leftTimeSource: clearsLeft ? null : existing.leftTimeSource,
         events: wasLeft
           ? [...existing.events, { type: 'RE_ENTRY', at: now, rssi: detection.smoothedRssi } as AttendanceEvent]
           : existing.events,
@@ -179,6 +193,7 @@ export class AttendanceManager {
       checkInTime: null,
       lastSeenTime: null,
       leftTime: null,
+      leftTimeSource: null,
       firstDetectedAt: now,
       lastDetectedAt: now,
       hostId: this.config.hostId,
@@ -268,6 +283,9 @@ export class AttendanceManager {
       const updated: AttendanceRecord = {
         ...record,
         leftTime: leftAt,
+        // Deduced from silence, not stated by anyone. Labelling it here is what
+        // lets re-entry know it is allowed to take this one back.
+        leftTimeSource: 'INFERRED',
         events: [...record.events, { type: 'LEFT', at: leftAt }],
       };
 
@@ -289,6 +307,151 @@ export class AttendanceManager {
   }
 
   /* ============================================================= reads === */
+
+  /* =================================================== declared exit === */
+
+  /**
+   * Record a departure the EMPLOYEE declared, which this Host has just
+   * observed on the air.
+   *
+   * WHOSE OBSERVATION IS THIS? The employee's phone raises a flag in its
+   * advertisement; `leftAt` is the moment THIS Host first saw that flag, on
+   * this Host's own clock. Nothing is inferred and no clock is imported from
+   * the other device, so there is no skew to correct and nothing to reconcile.
+   * The lag between the tap and this instant is one scan interval — about a
+   * second — because the flag rides the advertisement rather than waiting for
+   * a connection.
+   *
+   * WHY NOT JUST SET leftTime? Because `deriveStatus` would disagree. It reads
+   * `lastSeenTime` arithmetic alone and will keep saying PRESENT while the
+   * phone is still in range — correctly, since the radio genuinely still hears
+   * it. Those are two different true facts, and `leftTimeSource` is what keeps
+   * them distinguishable instead of letting one quietly overwrite the other.
+   * Within one grace period of the person actually walking out the two agree
+   * again, on their own.
+   *
+   * Returns the updated record, or null when the declaration was refused —
+   * refusals are logged and are never turned into an approximate time.
+   */
+  async recordDeclaredCheckOut(
+    employeeId: string,
+    leftAt: number,
+  ): Promise<AttendanceRecord | null> {
+    await this.rolloverIfNewDay();
+
+    const existing = this.todayCache.get(employeeId) ?? null;
+
+    // Nobody can leave a day they never arrived on. This is not an edge case:
+    // a phone can advertise the flag before its Host has confirmed a check-in.
+    if (!existing || existing.checkInTime === null) {
+      log.warn(
+        'ATTENDANCE',
+        'Declared check-out from ' + employeeId + ' ignored - no check-in today',
+      );
+      return null;
+    }
+
+    // A departure before the arrival is incoherent. Clamping it into range
+    // would manufacture a time nobody observed, so it is refused outright.
+    if (leftAt < existing.checkInTime) {
+      log.warn(
+        'ATTENDANCE',
+        'Declared check-out from ' + employeeId + ' ignored - earlier than check-in',
+      );
+      return null;
+    }
+
+    /**
+     * An INFERRED departure already standing is left alone: the grace sweep
+     * observed real silence, and a declaration arriving afterwards is the
+     * stale one. A DECLARED departure may be replaced, but only by a LATER
+     * one — that is someone who came back, worked on and is now leaving
+     * again. Moving a declared time EARLIER would rewrite a number the
+     * employee has already been shown as confirmed.
+     */
+    if (existing.leftTime !== null) {
+      const replaceable =
+        existing.leftTimeSource === 'DECLARED' && leftAt > existing.leftTime;
+      if (!replaceable) {
+        return null;
+      }
+    }
+
+    const updated: AttendanceRecord = {
+      ...existing,
+      leftTime: leftAt,
+      leftTimeSource: 'DECLARED',
+      events: [...existing.events, { type: 'CHECK_OUT', at: leftAt }],
+    };
+
+    this.todayCache.set(employeeId, updated);
+    await this.persist(updated);
+    this.detectionStreak.delete(employeeId);
+    this.notify();
+
+    log.info(
+      'ATTENDANCE',
+      'CHECK_OUT ' + existing.employeeName + ' (' + employeeId + ') declared departure',
+    );
+
+    return updated;
+  }
+
+  /**
+   * Take back a declared departure. The employee says they are still here.
+   *
+   * WHY THIS IS HONEST. A declared departure is a statement, and a statement
+   * can be mistaken — a pocket press, or leaving and immediately returning.
+   * The employee is the only one who knows, and the Host has direct evidence
+   * agreeing with them: the radio is still hearing the phone, which is why
+   * `deriveStatus` has been saying PRESENT throughout. Clearing the departure
+   * removes a claim the record should never have held; it does not invent one.
+   *
+   * ONLY A DECLARED DEPARTURE. An INFERRED one was deduced from real silence
+   * and is not the employee's to retract — and it does not need retracting,
+   * because a fresh detection already clears it on re-entry.
+   *
+   * The CHECK_OUT event stays in the log with a CHECK_OUT_CANCELLED after it.
+   * Both happened, and an audit trail that quietly dropped the first would be
+   * a worse record than one that shows a person changing their mind.
+   */
+  async cancelDeclaredCheckOut(employeeId: string): Promise<AttendanceRecord | null> {
+    await this.rolloverIfNewDay();
+
+    const existing = this.todayCache.get(employeeId) ?? null;
+
+    if (!existing || existing.leftTime === null) {
+      return null;
+    }
+
+    if (existing.leftTimeSource !== 'DECLARED') {
+      log.warn(
+        'ATTENDANCE',
+        'Cancel from ' + employeeId + ' ignored - departure was inferred, not declared',
+      );
+      return null;
+    }
+
+    const now = Date.now();
+
+    const updated: AttendanceRecord = {
+      ...existing,
+      leftTime: null,
+      leftTimeSource: null,
+      events: [...existing.events, { type: 'CHECK_OUT_CANCELLED', at: now }],
+    };
+
+    this.todayCache.set(employeeId, updated);
+    await this.persist(updated);
+    this.notify();
+
+    log.info(
+      'ATTENDANCE',
+      'CHECK_OUT_CANCELLED ' + existing.employeeName + ' (' + employeeId + ') is still here',
+    );
+
+    return updated;
+  }
 
   getStatus(employeeId: string, now: number = Date.now()): AttendanceStatus {
     return deriveStatus(

@@ -7,8 +7,10 @@
  *
  * Uses react-native-ble-plx, which fully supports what is needed here: scanning,
  * reading advertisement contents, and reading RSSI directly from the scan
- * callback. We never connect to an employee phone - `Device.readRSSI()`, which
- * would require an active GATT connection, is never called.
+ * callback. It never connects to an employee phone - `Device.readRSSI()` would
+ * require an active GATT connection and is never called. Delivering the status
+ * report back to the employee DOES connect, but that happens elsewhere, in
+ * services/StatusDeliveryService.ts.
  *
  * WHAT THIS FILE DOES NOT DO
  * -----------------------------------------------------------------------------
@@ -297,6 +299,10 @@ function handleDevice(device: Device): void {
     rssiSamples: samples,
     isNearby,
     consecutiveNearbyReadings,
+    // Carried per-advertisement, never latched: the flag is true for exactly as
+    // long as the phone is sending it, so a stale true cannot outlive the
+    // request it represents.
+    checkOutIntent: parsed.checkOutIntent,
     firstSeenAt: existing?.firstSeenAt ?? now,
     lastSeenAt: now,
     advertisementCount: (existing?.advertisementCount ?? 0) + 1,

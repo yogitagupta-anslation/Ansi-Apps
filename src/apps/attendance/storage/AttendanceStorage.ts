@@ -29,6 +29,60 @@ async function readAll(): Promise<AttendanceRecord[]> {
  * read means a schema addition never turns into a crash on someone's existing
  * data - the missing fields simply come back null.
  */
+/**
+ * A run of CHECK_OUT events closer together than a person could produce.
+ *
+ * An earlier build recorded a declared departure on the LEVEL of the check-out
+ * flag rather than its rising edge. The flag rides every advertisement until a
+ * receipt comes back, so the Host appended a CHECK_OUT several times a second
+ * — thousands on a single record — which pushed the day's real events out of
+ * the 50-entry log entirely.
+ *
+ * Ten seconds is far above the advertisement interval that caused this and far
+ * below any interval a human can produce: re-declaring a departure means
+ * noticing a wrong time, reading the screen and tapping, which is tens of
+ * seconds at the very least. So a gap under this bound is machine repetition,
+ * not a person changing their mind.
+ */
+const DUPLICATE_CHECK_OUT_WINDOW_MS = 10_000;
+
+/**
+ * Collapse each run of machine-repeated CHECK_OUT events to its LAST entry.
+ *
+ * The last one is kept, not the first, because it is the one that matches the
+ * record's stored `leftTime` — the repetition walked the departure forward,
+ * and the final write is the time the record actually holds.
+ *
+ * Deliberately narrow. Only CHECK_OUT is touched, only consecutive ones, and
+ * only within the window above, so a genuine correction minutes later survives
+ * as its own event. Anything else in the log is left exactly as written: this
+ * repairs a known defect, it does not tidy an audit trail to taste.
+ *
+ * What it cannot repair: on a badly affected record the real FIRST_DETECTED
+ * and CHECK_IN entries were already evicted by the 50-entry cap before this
+ * ran. Those are gone. The timestamps they described survive as fields on the
+ * record itself, which is why the screens still show a correct check-in.
+ */
+function collapseRepeatedCheckOuts(events: AttendanceEvent[]): AttendanceEvent[] {
+  const out: AttendanceEvent[] = [];
+
+  for (const event of events) {
+    const previous = out[out.length - 1];
+    const isRepeat =
+      event.type === 'CHECK_OUT' &&
+      previous?.type === 'CHECK_OUT' &&
+      event.at - previous.at <= DUPLICATE_CHECK_OUT_WINDOW_MS;
+
+    if (isRepeat) {
+      out[out.length - 1] = event;
+    } else {
+      out.push(event);
+    }
+  }
+
+  return out;
+}
+
 function normalize(record: Partial<AttendanceRecord>): AttendanceRecord {
   return {
     id: record.id ?? record.date + ':' + record.employeeId,
@@ -38,11 +92,15 @@ function normalize(record: Partial<AttendanceRecord>): AttendanceRecord {
     checkInTime: record.checkInTime ?? null,
     lastSeenTime: record.lastSeenTime ?? record.checkInTime ?? null,
     leftTime: record.leftTime ?? null,
+    // A record written before this field existed can only have got its
+    // leftTime from the grace sweep, because declaring one was not possible
+    // then. INFERRED is therefore the truthful backfill, not a guess.
+    leftTimeSource: record.leftTimeSource ?? (record.leftTime != null ? 'INFERRED' : null),
     firstDetectedAt: record.firstDetectedAt ?? record.checkInTime ?? null,
     lastDetectedAt: record.lastDetectedAt ?? record.lastSeenTime ?? null,
     hostId: record.hostId ?? '',
     checkInRssi: record.checkInRssi ?? null,
-    events: record.events ?? [],
+    events: collapseRepeatedCheckOuts(record.events ?? []),
   };
 }
 

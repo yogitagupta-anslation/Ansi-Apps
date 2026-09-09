@@ -88,7 +88,9 @@ export function signalBand(rssi: number): SignalBand {
 
 /** Title-case label for display, e.g. "Strong". */
 export function signalBandLabel(rssi: number | null): string {
-  if (rssi === null) {
+  // Loose equality on purpose: catches undefined as well as null, so an absent
+  // reading can never be reported as a signal strength.
+  if (rssi == null) {
     return 'No signal';
   }
   const band = signalBand(rssi);

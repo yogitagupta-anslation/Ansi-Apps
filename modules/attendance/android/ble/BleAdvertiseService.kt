@@ -77,6 +77,17 @@ class BleAdvertiseService : Service() {
         const val ACTION_START = "com.bleattendance.ble.action.START"
         const val ACTION_STOP = "com.bleattendance.ble.action.STOP"
 
+        /**
+         * Raise or lower the check-out flag WITHOUT disturbing anything else.
+         *
+         * Deliberately its own action rather than a re-issued ACTION_START:
+         * startAdvertisingInternal opens with closeGattServer(), so replaying a
+         * start to change advertising data would destroy the reply channel the
+         * Host uses to send the receipt back — i.e. it would tear down the one
+         * thing the check-out is waiting for.
+         */
+        const val ACTION_SET_CHECKOUT = "com.bleattendance.ble.action.SET_CHECKOUT"
+
         const val EXTRA_SHORT_UUID = "shortServiceUuid"
         const val EXTRA_LONG_UUID = "longServiceUuid"
         const val EXTRA_MANUFACTURER_ID = "manufacturerId"
@@ -84,6 +95,10 @@ class BleAdvertiseService : Service() {
         const val EXTRA_CONNECTABLE = "connectable"
         const val EXTRA_EMPLOYEE_ID = "employeeId"
         const val EXTRA_STATUS_CHAR_UUID = "statusCharUuid"
+
+        /** 16-bit service UUID added to the scan response while leaving. */
+        const val EXTRA_CHECKOUT_UUID = "checkOutServiceUuid"
+        const val EXTRA_CHECKOUT_PENDING = "checkOutPending"
 
         /**
          * Whether an advertisement is genuinely on air, per Android's own
@@ -112,6 +127,19 @@ class BleAdvertiseService : Service() {
     private var advertiser: BluetoothLeAdvertiser? = null
     private var activeCallback: AdvertiseCallback? = null
     private var lastStartIntent: Intent? = null
+
+    /**
+     * The check-out flag, and the UUID that carries it.
+     *
+     * The UUID comes from JS on ACTION_START so the two sides can never drift
+     * apart over a constant. `checkOutPending` is the live state: it is true
+     * for exactly as long as the employee is waiting for a receipt, and the
+     * scan response is rebuilt whenever it changes.
+     */
+    private var checkOutUuid: String? = null
+
+    @Volatile
+    private var checkOutPending: Boolean = false
     private var gattServer: BluetoothGattServer? = null
 
     /**
@@ -156,6 +184,22 @@ class BleAdvertiseService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent == null || intent.action == ACTION_STOP) {
             shutdown()
+            return START_NOT_STICKY
+        }
+
+        /**
+         * Flag change only. Never promotes the service, never touches the GATT
+         * server, and does nothing at all if we are not already on air — a
+         * check-out is meaningless from a phone that is not broadcasting,
+         * because the Host has nothing to read it from.
+         */
+        if (intent.action == ACTION_SET_CHECKOUT) {
+            val pending = intent.getBooleanExtra(EXTRA_CHECKOUT_PENDING, false)
+            if (pending != checkOutPending) {
+                checkOutPending = pending
+                Log.i(TAG, "Check-out flag " + (if (pending) "raised" else "lowered"))
+                refreshAdvertisementData()
+            }
             return START_NOT_STICKY
         }
 
@@ -236,6 +280,17 @@ class BleAdvertiseService : Service() {
         val payload = intent.getByteArrayExtra(EXTRA_PAYLOAD) ?: ByteArray(0)
         val connectable = intent.getBooleanExtra(EXTRA_CONNECTABLE, false)
         val statusCharUuid = intent.getStringExtra(EXTRA_STATUS_CHAR_UUID)
+        checkOutUuid = intent.getStringExtra(EXTRA_CHECKOUT_UUID)
+
+        /**
+         * A fresh start clears the flag.
+         *
+         * Broadcasting was off, so no Host can have read the previous request,
+         * and re-raising it silently would resurrect an intent the employee may
+         * have abandoned hours ago. JS re-raises it explicitly if the request
+         * is genuinely still outstanding.
+         */
+        checkOutPending = false
 
         /**
          * The attendance reply channel: a connectable advertisement plus a GATT
@@ -247,6 +302,25 @@ class BleAdvertiseService : Service() {
             openGattServer(manager, longUuid, statusCharUuid)
         }
 
+        launchAdvertisement(leAdvertiser, shortUuid, longUuid, manufacturerId, payload, connectable)
+    }
+
+    /**
+     * Build the packets and hand them to the stack.
+     *
+     * Split out of startAdvertisingInternal so the check-out flag can be raised
+     * or lowered by rebuilding ONLY this half. Everything above it — the
+     * adapter checks, and above all openGattServer — stays untouched, which is
+     * what makes a flag change non-destructive to the reply channel.
+     */
+    private fun launchAdvertisement(
+        leAdvertiser: android.bluetooth.le.BluetoothLeAdvertiser,
+        shortUuid: String,
+        longUuid: String?,
+        manufacturerId: Int,
+        payload: ByteArray,
+        connectable: Boolean,
+    ) {
         val settings = AdvertiseSettings.Builder()
             .setAdvertiseMode(AdvertiseSettings.ADVERTISE_MODE_LOW_LATENCY)
             .setTxPowerLevel(AdvertiseSettings.ADVERTISE_TX_POWER_HIGH)
@@ -264,13 +338,33 @@ class BleAdvertiseService : Service() {
             .apply { if (payload.isNotEmpty()) addManufacturerData(manufacturerId, payload) }
             .build()
 
-        // Scan response has its own separate 31-byte budget, which is the only
-        // reason a full 128-bit UUID fits anywhere.
+        /**
+         * Scan response has its own separate 31-byte budget, which is the only
+         * reason a full 128-bit UUID fits anywhere.
+         *
+         *   128-bit service UUID                     18 bytes
+         *   16-bit check-out UUID, only while pending  4 bytes
+         *                                          -----------
+         *                                            22 <= 31
+         *
+         * The check-out UUID goes HERE rather than in the primary packet or the
+         * manufacturer payload. The payload is version-framed and its employee
+         * id runs to the end of the buffer, so appending anything there breaks
+         * every older Host in the way that looks exactly like "nobody nearby".
+         * An extra service UUID is simply not looked for by builds that predate
+         * it.
+         */
         val scanResponse = if (!longUuid.isNullOrBlank()) {
             AdvertiseData.Builder()
                 .setIncludeDeviceName(false)
                 .setIncludeTxPowerLevel(false)
                 .addServiceUuid(ParcelUuid.fromString(longUuid))
+                .apply {
+                    val flagUuid = checkOutUuid
+                    if (checkOutPending && !flagUuid.isNullOrBlank()) {
+                        addServiceUuid(ParcelUuid.fromString(flagUuid))
+                    }
+                }
                 .build()
         } else {
             null
@@ -304,6 +398,46 @@ class BleAdvertiseService : Service() {
             lastError = "startAdvertising threw: ${e.message}"
             listener?.invoke(false, lastError, null)
         }
+    }
+
+    /**
+     * Re-emit the advertisement with the current check-out flag.
+     *
+     * Android has no "edit the advertising data" call — the only way to change
+     * a packet is to stop the advertiser and start it again. What matters is
+     * what is NOT restarted: the GATT server stays open, so the Host can still
+     * connect and write the receipt, and the brief gap is a fraction of a
+     * scan interval.
+     *
+     * Does nothing when we are not already advertising: raising a flag on a
+     * silent radio would be a request nobody can hear.
+     */
+    private fun refreshAdvertisementData() {
+        val intent = lastStartIntent ?: return
+        if (!isAdvertising) {
+            return
+        }
+
+        val manager = getSystemService(Context.BLUETOOTH_SERVICE) as? BluetoothManager
+        val leAdvertiser = manager?.adapter?.bluetoothLeAdvertiser ?: return
+        val shortUuid = intent.getStringExtra(EXTRA_SHORT_UUID) ?: return
+
+        activeCallback?.let {
+            try {
+                leAdvertiser.stopAdvertising(it)
+            } catch (e: Exception) {
+                Log.w(TAG, "Could not stop advertisement for refresh: ${e.message}")
+            }
+        }
+
+        launchAdvertisement(
+            leAdvertiser,
+            shortUuid,
+            intent.getStringExtra(EXTRA_LONG_UUID),
+            intent.getIntExtra(EXTRA_MANUFACTURER_ID, 0xFFFF),
+            intent.getByteArrayExtra(EXTRA_PAYLOAD) ?: ByteArray(0),
+            intent.getBooleanExtra(EXTRA_CONNECTABLE, false),
+        )
     }
 
     private fun describeFailure(errorCode: Int): String = when (errorCode) {
@@ -416,6 +550,8 @@ class BleAdvertiseService : Service() {
     }
 
     private fun shutdown() {
+        // Going off air ends any outstanding request: nothing can read it now.
+        checkOutPending = false
         try {
             activeCallback?.let { advertiser?.stopAdvertising(it) }
         } catch (e: Exception) {

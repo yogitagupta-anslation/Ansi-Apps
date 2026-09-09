@@ -46,6 +46,7 @@ import {
 } from '../attendance/attendanceTypes';
 import {
   getAdvertiserState,
+  setCheckOutIntent,
   subscribeToAdvertiserState,
   type AdvertiserState,
 } from '../bluetooth/BleAdvertiser';
@@ -230,6 +231,23 @@ interface AppStoreValue {
   startAdvertising: () => Promise<{ success: boolean; error: string | null }>;
   stopAdvertising: () => Promise<void>;
 
+  /**
+   * When this phone raised its check-out flag, or null when none is pending.
+   *
+   * Deliberately NOT persisted. Reviving a request across a process restart
+   * would mean reconstructing how long it had been waiting from the wall
+   * clock, and any clock movement in between — an NTP correction, a manual
+   * change, a bad RTC at boot — would shift the recorded departure by exactly
+   * that amount and land as a real attendance time with no dash available. A
+   * killed process therefore loses the request, and the screen says so.
+   *
+   * This is a REQUEST, never an answer. The check-out is real only when a Host
+   * sends back a report carrying a leftTime.
+   */
+  checkOutRequestedAt: number | null;
+  requestCheckOut: () => Promise<{ success: boolean; error: string | null }>;
+  cancelCheckOut: () => Promise<void>;
+
   refreshReadiness: () => Promise<void>;
   /** Re-check readiness and resume any radio the stored preference wants on. */
   reconcileRadioState: () => Promise<void>;
@@ -251,6 +269,26 @@ export function AppStoreProvider({ children }: { children: React.ReactNode }) {
    * never a locally invented status.
    */
   const [employeeStatusReport, setEmployeeStatusReport] = useState<StatusReport | null>(null);
+  /**
+   * The outstanding check-out request, or null.
+   *
+   * `priorLeftTime` is the departure already on record when the request was
+   * made, and it is what makes a SECOND check-out possible. Completion cannot
+   * be "leftTime is now set" — after a first check-out it always is, so a
+   * correction would be treated as finished the instant it was asked for, and
+   * the flag would come down before any Host could read it. Completion is
+   * "leftTime CHANGED from the value we started with".
+   *
+   * A value comparison, deliberately, not a timestamp one: the request is
+   * stamped on this phone's clock and the answer on the Host's, so anything
+   * that compared the two would be at the mercy of the skew between them.
+   */
+  const [checkOut, setCheckOut] = useState<{
+    requestedAt: number;
+    priorLeftTime: number | null;
+  } | null>(null);
+
+  const checkOutRequestedAt = checkOut?.requestedAt ?? null;
   /** Days a Host has delivered to this phone, newest first. EMPLOYEE role. */
   const [employeeHistory, setEmployeeHistory] = useState<StoredDay[]>([]);
   const [employeeLastSyncedAt, setEmployeeLastSyncedAt] = useState<number | null>(null);
@@ -738,9 +776,68 @@ export function AppStoreProvider({ children }: { children: React.ReactNode }) {
   }, [updateSettings]);
 
   const stopAdvertising = useCallback(async () => {
+    // Going off air also withdraws any pending request: the flag rides the
+    // advertisement, so silence retracts it whether we ask or not. Clearing the
+    // state here keeps the screen from showing a wait that cannot end.
+    setCheckOut(null);
     await EmployeePresenceService.stopBroadcasting();
     await updateSettings({ advertisingEnabled: false });
   }, [updateSettings]);
+
+  /* ------------------------------------------------------- check-out -- */
+
+  const requestCheckOut = useCallback(async () => {
+    // Captured BEFORE the flag goes up, so the completion test below has
+    // something to compare against. On a correction this is the earlier
+    // departure the employee is trying to move.
+    const priorLeftTime = employeeStatusReport?.leftTime ?? null;
+
+    const result = await setCheckOutIntent(true);
+    if (result.success) {
+      setCheckOut({ requestedAt: Date.now(), priorLeftTime });
+    }
+    return result;
+  }, [employeeStatusReport]);
+
+  const cancelCheckOut = useCallback(async () => {
+    // Lower the flag first, then forget the request. If a Host already read it
+    // the departure stands — this cannot reach back and undo a record, and the
+    // screen must not pretend otherwise.
+    await setCheckOutIntent(false);
+    setCheckOut(null);
+  }, []);
+
+  /**
+   * A receipt arrived — the request is answered, so lower the flag.
+   *
+   * Leaving it raised would keep broadcasting a departure the Host has already
+   * recorded, and every later scan would re-offer it. recordDeclaredCheckOut
+   * refuses a repeat that is not strictly later, so nothing would be corrupted
+   * — but the phone would be saying something untrue about itself, which is
+   * reason enough.
+   */
+  useEffect(() => {
+    if (checkOut === null) {
+      return;
+    }
+    const leftTime = employeeStatusReport?.leftTime ?? null;
+
+    /**
+     * Completion is "the departure CHANGED", including changing to nothing.
+     *
+     * Not "a departure exists": after a first check-out one always does, so
+     * that test would clear a correction the moment it was made. And not
+     * "a departure exists AND differs" either — undoing one ends at null, and
+     * requiring non-null would leave the undo waiting for a receipt that had
+     * already arrived.
+     */
+    if (leftTime === checkOut.priorLeftTime) {
+      return;
+    }
+
+    setCheckOut(null);
+    void setCheckOutIntent(false);
+  }, [checkOut, employeeStatusReport]);
 
   /* ------------------------------------------------------------ role -- */
 
@@ -905,6 +1002,7 @@ export function AppStoreProvider({ children }: { children: React.ReactNode }) {
       employeeStatusReport, employeeHistory, employeeLastSyncedAt,
       todayRecords, todaySummary, attendanceRows,
       startScanning, stopScanning, startAdvertising, stopAdvertising,
+      checkOutRequestedAt, requestCheckOut, cancelCheckOut,
       refreshReadiness, reconcileRadioState, refreshEmployees, clearAttendanceHistory,
     }),
     [
@@ -915,6 +1013,7 @@ export function AppStoreProvider({ children }: { children: React.ReactNode }) {
       employeeStatusReport, employeeHistory, employeeLastSyncedAt,
       todayRecords, todaySummary, attendanceRows,
       startScanning, stopScanning, startAdvertising, stopAdvertising,
+      checkOutRequestedAt, requestCheckOut, cancelCheckOut,
       refreshReadiness, reconcileRadioState, refreshEmployees, clearAttendanceHistory,
     ],
   );

@@ -201,16 +201,42 @@ export function EditProfileScreen() {
         <View style={styles.rowCenter}>
           <Icon name="shield" size={t.iconSize.sm} color={t.colors.primary} />
           <Txt variant="heading" style={{ marginLeft: t.spacing.sm }}>
-            What leaves this phone
+            What goes out, and what can come in
           </Txt>
         </View>
         <Txt
           variant="caption"
           color={t.colors.textSecondary}
           style={{ lineHeight: 20, marginTop: 8 }}>
-          Only your Employee ID is transmitted — not your name, department, phone
-          or email. The broadcast is one-way and non-connectable, so no device can
-          connect to this phone through it and no pairing is involved.
+          While check-in is on, your phone broadcasts the Employee ID above — not
+          your name, department, phone or email. Any Bluetooth device nearby can
+          read it, not just the office Host. It is the same ID every day, so
+          anyone who works out whose it is can tell when you arrive and leave, at
+          the office or away from it. If you ask to check out, your phone also
+          broadcasts to anyone in range that you are leaving, and keeps
+          broadcasting it until a Host replies, you cancel, or you turn check-in
+          off.
+        </Txt>
+        <Txt
+          variant="caption"
+          color={t.colors.textSecondary}
+          style={{ lineHeight: 20, marginTop: 8 }}>
+          Your phone also accepts Bluetooth connections while check-in is on,
+          because that is the only way the Host can send your recorded times to
+          your Home screen. It will not ask you to approve a connection, so any
+          device in range — not only a real Host — could send you times you never
+          worked, change a day already recorded, cancel a check-out you asked
+          for, or stop your times showing at all. Whatever is sent is saved here
+          and stays after you restart the phone.
+        </Txt>
+        <Txt
+          variant="caption"
+          color={t.colors.textSecondary}
+          style={{ lineHeight: 20, marginTop: 8 }}>
+          Nothing can be taken out that way — not your name, department, phone,
+          email or your attendance history — and nothing goes over the internet.
+          Turning check-in off stops all of it. Your office keeps its own record,
+          so if the times on your Home screen look wrong, ask your Host.
         </Txt>
       </Card>
       <PhotoActionSheet

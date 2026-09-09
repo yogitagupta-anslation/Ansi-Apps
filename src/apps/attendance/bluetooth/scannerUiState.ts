@@ -80,7 +80,18 @@ export function deriveScannerUiState(input: {
     };
   }
 
-  const bluetoothOff = readiness !== null && !readiness.bluetooth.ready;
+  /**
+   * Bluetooth is off if EITHER source says so.
+   *
+   * readiness is the observation; resumeBlockedReason is what the last resume
+   * attempt ran into. readiness is null until the first checkReadiness
+   * resolves, and that gap is precisely when the store has just recorded
+   * BLUETOOTH_OFF — so consulting only readiness left a window where the app
+   * held the observation and still offered to resume over a dead adapter.
+   */
+  const bluetoothOff =
+    (readiness !== null && !readiness.bluetooth.ready) ||
+    resumeBlockedReason === 'BLUETOOTH_OFF';
 
   if (bluetoothOff) {
     return {
@@ -96,7 +107,17 @@ export function deriveScannerUiState(input: {
     };
   }
 
-  if (scanningEnabled && resumeBlockedReason === 'PERMISSIONS_MISSING') {
+  /**
+   * Same asymmetry as above, on the other prerequisite: permissions were read
+   * only from resumeBlockedReason, so a readiness report that had ALREADY
+   * observed them missing still fell through to "Resume scanning" — a button
+   * calling startScanning, which cannot succeed without them.
+   */
+  const permissionsMissing =
+    (readiness !== null && !readiness.permissionsGranted) ||
+    resumeBlockedReason === 'PERMISSIONS_MISSING';
+
+  if (scanningEnabled && permissionsMissing) {
     return {
       state: 'PERMISSION_REQUIRED',
       title: 'Permissions required',

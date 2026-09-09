@@ -48,17 +48,24 @@ import com.facebook.react.bridge.UiThreadUtil
  * Legacy BLE advertising gives 31 bytes in the primary packet, plus a separate
  * 31 bytes in the scan response. We use:
  *
- *   primary packet   AD flags (added by Android)                  3 bytes
+ *   primary packet   AD flags (Android adds these because we are connectable)
+ *                                                                 3 bytes
  *                    16-bit service UUID                          4 bytes
  *                    manufacturer data (company id + payload)  4 + N bytes
  *
  *   scan response    128-bit service UUID                        18 bytes
+ *                    16-bit check-out UUID, only while pending    4 bytes
  *
  * setIncludeDeviceName(false) is essential - the device name is appended to the
  * primary packet and overflows it, producing ADVERTISE_FAILED_DATA_TOO_LARGE.
  *
- * Advertising is NON-CONNECTABLE: the scanner only needs to hear the broadcast.
- * No pairing, no bonding, no GATT connection is involved anywhere.
+ * Advertising is CONNECTABLE. Hearing the broadcast is enough for the scanner to
+ * mark attendance, but the employee phone needs a way to be TOLD the result, so
+ * BleAdvertiseService opens a GATT server with one write-only characteristic and
+ * the Host connects and writes the report into it. No pairing and no bonding are
+ * involved - which is also why that write is unauthenticated and any central in
+ * range can perform it. See the TRUST BOUNDARY note in
+ * src/apps/attendance/bluetooth/statusReport.ts.
  * -----------------------------------------------------------------------------
  */
 class BleAdvertiserModule(private val reactContext: ReactApplicationContext) :
@@ -296,6 +303,41 @@ class BleAdvertiserModule(private val reactContext: ReactApplicationContext) :
      * ACCESS_FINE_LOCATION rather than the neverForLocation flag).
      * Advertising is not affected.
      */
+    /**
+     * Raise or lower the employee's check-out flag.
+     *
+     * Sends its own action rather than re-issuing ACTION_START: a start would
+     * run startAdvertisingInternal, which begins with closeGattServer() and
+     * would destroy the channel the Host writes the receipt into — the exact
+     * thing this request is waiting for.
+     *
+     * Resolves true when the request reached the service. That is NOT a
+     * promise that any Host saw it: the flag only rides the air while this
+     * phone is advertising, and whether anyone read it is answered by a status
+     * report coming back, never by this call.
+     */
+    @ReactMethod
+    fun setCheckOutIntent(pending: Boolean, promise: Promise) {
+        val intent = Intent(reactContext, BleAdvertiseService::class.java).apply {
+            action = BleAdvertiseService.ACTION_SET_CHECKOUT
+            putExtra(BleAdvertiseService.EXTRA_CHECKOUT_PENDING, pending)
+        }
+
+        try {
+            // startService, NOT startForegroundService: the service is already
+            // running and foreground when this is meaningful, and asking for a
+            // promotion we do not need risks the "did not call startForeground
+            // in time" kill on a service that is only flipping a boolean.
+            reactContext.startService(intent)
+            promise.resolve(true)
+        } catch (e: Exception) {
+            promise.reject(
+                E_INVALID_CONFIG,
+                "Could not update the check-out flag: ${e.message}"
+            )
+        }
+    }
+
     @ReactMethod
     fun isLocationServicesEnabled(promise: Promise) {
         promise.resolve(locationServicesEnabled())
@@ -479,6 +521,10 @@ class BleAdvertiserModule(private val reactContext: ReactApplicationContext) :
             putExtra(
                 BleAdvertiseService.EXTRA_STATUS_CHAR_UUID,
                 config.getString("statusCharUuid")
+            )
+            putExtra(
+                BleAdvertiseService.EXTRA_CHECKOUT_UUID,
+                config.getString("checkOutServiceUuid")
             )
         }
 

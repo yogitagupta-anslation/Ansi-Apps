@@ -88,17 +88,30 @@ const MAP: Record<OrbitState, StateSpec> = {
 const HOST_SUB: Record<OrbitState, string> = {
   ready: 'Tap to start scanning',
   scanning: 'Listening for broadcasts',
-  looking: 'No employee in range',
-  found: 'Employee detected',
+  looking: 'Tap to stop',
+  found: 'Employees in range',
   connected: 'Writing the attendance record',
   present: 'Attendance recorded',
   permission: 'Allow nearby devices',
 };
 
-/** The host renames three of the seven; the rest keep the shared wording. */
+/**
+ * The host renames three of the seven; the rest keep the shared wording.
+ *
+ * These are FALLBACKS. HostHomeScreen passes `title`/`sub` overrides for the
+ * two states where the honest label depends on a live count, because the count
+ * lives on the screen and not in here.
+ *
+ * They deliberately avoid the singular definite phrasing this pair used to
+ * carry ('Employee found'). The host is not seeking a particular person: it
+ * scans for anyone on the registry, so a label implying one identified
+ * counterparty misdescribes the whole operation. 'Nobody in range' also had to
+ * go — it was byte-identical to the empty state ~200px below it on the same
+ * screen, so the screen said the same six words twice.
+ */
 const HOST_TITLE: Partial<Record<OrbitState, string>> = {
-  looking: 'Nobody in range',
-  found: 'Employee found',
+  looking: 'Listening',
+  found: 'In range',
   present: 'Attendance recorded',
 };
 
@@ -111,7 +124,19 @@ interface OrbitProps {
   deviceName?: string;
   /** When checked in, the time it happened. */
   checkInTime?: string;
-  /** Signal at match, shown on `found`. Omitted when it is not known. */
+  /**
+   * Signal at match, shown on `found`. Omitted when it is not known.
+   *
+   * EMPLOYEE ROLE ONLY. An employee talks to exactly one host, so a bare dBm in
+   * the core is unambiguous — it is paired with that host's name.
+   *
+   * The host must NOT use this. It hears many employees at once, and the only
+   * reading it could pass is one particular person's: the snapshot is sorted
+   * strongest-first, so the number belonged to whoever happened to be closest
+   * at that instant, unlabelled, and silently changed subject as people moved.
+   * The measurement was real; the attribution was not. Per-employee dBm is
+   * shown, with names attached, in the 'In range now' list instead.
+   */
   rssi?: number | null;
   /**
    * Replaces the state's stock sub-line.
@@ -122,6 +147,15 @@ interface OrbitProps {
    * has to say so, or the label lies about the control.
    */
   sub?: string;
+  /**
+   * Replaces the state's stock title.
+   *
+   * Same reasoning as `sub`: when the honest title depends on something only
+   * the screen knows — how many employees are in range right now — the screen
+   * has to supply it, because a fixed string would have to either invent a
+   * number or omit one.
+   */
+  title?: string;
   onPress?: () => void;
   disabled?: boolean;
 }
@@ -134,6 +168,7 @@ export function Orbit({
   checkInTime,
   rssi,
   sub: subOverride,
+  title: titleOverride,
   onPress,
   disabled = false,
 }: OrbitProps) {
@@ -151,12 +186,12 @@ export function Orbit({
   };
   const tone = TONE[spec.tone];
 
-  const title = (isHost && HOST_TITLE[state]) || spec.title;
+  const title = titleOverride ?? ((isHost && HOST_TITLE[state]) || spec.title);
   const device = deviceName || 'the host';
+  // The host branch reads no rssi: see the prop doc. One employee's signal is
+  // not a property of the scan.
   const stockSub = isHost
-    ? state === 'found' && rssi !== null && rssi !== undefined
-      ? 'Employee detected · ' + rssi + ' dBm'
-      : HOST_SUB[state]
+    ? HOST_SUB[state]
     : {
         ready: 'Tap to start check-in',
         scanning: 'Listening for a host device',
