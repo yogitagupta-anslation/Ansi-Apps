@@ -3,12 +3,14 @@ import {Alert, ScrollView, Text, TextInput, View} from 'react-native';
 import {AppText, DenseText} from '../components/AppText';
 import {FadeIn, Touchable} from '../components/Motion';
 import {Card, EmptyState} from '../components/ui/Surface';
+import {ConfirmSheet} from '../components/ConfirmSheet';
 import {Screen} from '../components/ui/Screen';
 import {GroupAvatar, InitialAvatar} from '../components/ui/Primitives';
 import {Icon} from '../components/ui/Icon';
 import {radius, spacing, typography} from '../config/theme';
 import {makeStyles, useTheme} from '../theme/ThemeProvider';
 import {toggleFavoritePeer, useAppStore} from '../state/appStore';
+import {bleChat} from '../services/BleChatService';
 import type {RootTabScreenProps} from '../navigation/types';
 
 /**
@@ -96,16 +98,40 @@ export function ChatsScreen({navigation}: RootTabScreenProps<'Chats'>) {
       .slice(0, 8);
   }, [peers]);
 
-  /** Name or last-message match, case-insensitive — the two things worth finding a chat by. */
+  /**
+   * Name, or anything actually said in the conversation.
+   *
+   * This searched the preview line, which is only the most recent message — so the box
+   * offering to search "names and messages" could not find a message unless it happened
+   * to be the last one. Searching the stored thread is what the placeholder was already
+   * promising, and it is the reason to have a search box at all: finding the address
+   * somebody sent you an hour ago.
+   */
   const visibleChats = useMemo(() => {
     const q = query.trim().toLowerCase();
     if (!q) {
       return chats;
     }
-    return chats.filter(
-      c => c.name.toLowerCase().includes(q) || c.preview.toLowerCase().includes(q),
-    );
-  }, [chats, query]);
+    return chats.filter(c => {
+      if (c.name.toLowerCase().includes(q)) {
+        return true;
+      }
+      const thread = conversations[c.conversationId] ?? [];
+      return thread.some(m => m.text.toLowerCase().includes(q));
+    });
+  }, [chats, query, conversations]);
+
+  /**
+   * The conversation waiting on a yes, with the count it will take with it.
+   *
+   * Held as state rather than confirmed inline because the number matters to the
+   * decision: "delete 2 messages" and "delete 340 messages" are not the same question.
+   */
+  const [pendingDelete, setPendingDelete] = useState<{
+    conversationId: string;
+    name: string;
+    count: number;
+  } | null>(null);
 
   const reachableCount = peers.filter(p => p.state === 'connected').length;
 
@@ -135,9 +161,12 @@ export function ChatsScreen({navigation}: RootTabScreenProps<'Chats'>) {
         </FadeIn>
 
         <FadeIn index={1}>
-          {/* Only worth showing once there is more than a couple to look through — below
-              that a search box is one more thing on screen for nothing. */}
-          {chats.length > 2 && (
+          {/* Shown whenever there is anything to search. It used to wait for a third
+              conversation, on the reasoning that a search box above two rows is clutter
+              — true of the rows, but not of what is inside them: one conversation can
+              hold a hundred messages, and a control people go looking for should not be
+              hiding. */}
+          {chats.length > 0 && (
             <View style={styles.searchBar}>
               <Icon name="search" color={theme.textFaint} size={15} />
               <TextInput
@@ -235,19 +264,32 @@ export function ChatsScreen({navigation}: RootTabScreenProps<'Chats'>) {
                         displayName: chat.name,
                       })
                     }
-                    onLongPress={
-                      chat.groupId
-                        ? undefined
-                        : () =>
-                            Alert.alert(chat.name, undefined, [
+                    onLongPress={() =>
+                      Alert.alert(chat.name, undefined, [
+                        ...(chat.groupId
+                          ? []
+                          : [
                               {
                                 text: chat.favorite
                                   ? 'Remove from favourites'
                                   : 'Add to favourites',
                                 onPress: () => toggleFavoritePeer(chat.conversationId),
                               },
-                              {text: 'Cancel', style: 'cancel'},
-                            ])
+                            ]),
+                        {
+                          text: 'Delete conversation',
+                          style: 'destructive' as const,
+                          // Not deleted here. The consequences are worth reading, and
+                          // an OS alert has nowhere to put them.
+                          onPress: () =>
+                            setPendingDelete({
+                              conversationId: chat.conversationId,
+                              name: chat.name,
+                              count: (conversations[chat.conversationId] ?? []).length,
+                            }),
+                        },
+                        {text: 'Cancel', style: 'cancel' as const},
+                      ])
                     }
                     style={i > 0 ? [styles.row, styles.rowDivided] : styles.row}>
                     {chat.groupId ? (
@@ -353,6 +395,43 @@ export function ChatsScreen({navigation}: RootTabScreenProps<'Chats'>) {
           )}
         </FadeIn>
       </ScrollView>
+      <ConfirmSheet
+        visible={pendingDelete !== null}
+        icon="trash"
+        title={`Delete this conversation?`}
+        /**
+         * Says what actually happens, including the part that surprises people: the
+         * other phone keeps its copy. There is no server here, so "delete" reaches
+         * exactly as far as this device and no further — and a person deciding whether
+         * to delete a conversation with someone they just met deserves to know that
+         * before they tap, not after.
+         */
+        body={
+          pendingDelete
+            ? `${pendingDelete.count} message${
+                pendingDelete.count === 1 ? '' : 's'
+              } with ${pendingDelete.name} will be removed from this phone. ${
+                pendingDelete.name
+              } keeps their copy — there is no server to delete it from, and this cannot be undone.`
+            : ''
+        }
+        confirmLabel="Delete for me"
+        onCancel={() => setPendingDelete(null)}
+        onConfirm={() => {
+          const target = pendingDelete;
+          setPendingDelete(null);
+          if (target) {
+            void bleChat.messages
+              .clearConversation(target.conversationId)
+              .catch(err =>
+                Alert.alert(
+                  'Could not delete',
+                  err instanceof Error ? err.message : String(err),
+                ),
+              );
+          }
+        }}
+      />
     </Screen>
   );
 }
