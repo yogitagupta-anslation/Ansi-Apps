@@ -8,6 +8,7 @@ import {Touchable} from './Motion';
 import {Icon} from './ui/Icon';
 import {QualityBadge} from './ui/QualityBadge';
 import {SignalBars} from './ui/Primitives';
+import {MascotAvatar} from './ui/Mascot';
 import {sharedInterests} from '../config/interests';
 import {relativeTime} from '../utils/time';
 import {formatDuration} from '../peers/LinkMetrics';
@@ -126,10 +127,30 @@ export function PeerProfileSheet({
           {/* The grip. A sheet you dismiss by dragging needs something to say so. */}
           <View style={styles.grip} />
 
+          {/* Only Close up here. Favourite already has a place in the action row below,
+              next to block, where the two decisions you can make about a person sit
+              together — offering it twice on one card just asks which one is the real
+              button. */}
+          <View style={styles.cornerActions}>
+            <Touchable
+              scale={false}
+              onPress={onClose}
+              hitSlop={12}
+              style={styles.closeButton}
+              accessibilityLabel="Close">
+              <Icon name="close" color={theme.textDim} size={18} />
+            </Touchable>
+          </View>
+
           <View style={styles.header}>
-            <View style={[styles.avatar, {backgroundColor: speakerTint(theme, peerId) + '33'}]}>
-              <Icon name="bluetooth" color={speakerTint(theme, peerId)} size={22} />
-            </View>
+            {/* The same face they have in Nearby and at the top of the thread. It was a
+                generic Bluetooth glyph here, so opening someone's card turned the person
+                you had been talking to into a radio symbol. */}
+            <MascotAvatar
+              size={64}
+              tint={speakerTint(theme, peerId)}
+              status={peer.state === 'connected' ? theme.ok : null}
+            />
             <View style={styles.headerText}>
               <AppText style={styles.name} numberOfLines={1}>
                 {peer.displayName ?? 'Someone you have met'}
@@ -146,26 +167,6 @@ export function PeerProfileSheet({
                 <QualityBadge score={peer.metrics?.quality ?? null} />
               </View>
             </View>
-            <Touchable
-              scale={false}
-              onPress={() => toggleFavoritePeer(peerId)}
-              hitSlop={12}
-              style={styles.closeButton}
-              accessibilityLabel={isFavorite ? 'Remove from favorites' : 'Add to favorites'}>
-              <Icon
-                name={isFavorite ? 'starFilled' : 'star'}
-                color={isFavorite ? theme.tileAmberFg : theme.textDim}
-                size={19}
-              />
-            </Touchable>
-            <Touchable
-              scale={false}
-              onPress={onClose}
-              hitSlop={12}
-              style={styles.closeButton}
-              accessibilityLabel="Close">
-              <Icon name="close" color={theme.textDim} size={18} />
-            </Touchable>
           </View>
 
 
@@ -278,17 +279,6 @@ export function PeerProfileSheet({
               {peer.rssi !== null ? qualityWord(peer.rssi) : 'Not measured'}
             </DenseText>
           </View>
-
-          {/* "Message size limit", not MTU. It is the same negotiated number, said as
-              the thing it decides — how much fits in one go before a message has to be
-              split up. */}
-          {peer.gatt ? (
-            <View style={styles.connRow}>
-              <Icon name="inbox" color={theme.textDim} size={15} strokeWidth={1.9} />
-              <DenseText style={styles.connLabel}>Message size limit</DenseText>
-              <DenseText style={styles.connMono}>{peer.gatt.mtu} bytes</DenseText>
-            </View>
-          ) : null}
 
           <View style={[styles.connRow, styles.connRowLast]}>
             <Icon name="clock" color={theme.textDim} size={15} strokeWidth={1.9} />
@@ -440,7 +430,14 @@ const useStyles = makeStyles(t => ({
     paddingBottom: spacing.xl,
     maxHeight: '85%',
   },
-  header: {flexDirection: 'row', alignItems: 'center', gap: spacing.md},
+  cornerActions: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    alignItems: 'center',
+    gap: spacing.xs,
+    marginBottom: -8,
+  },
+  header: {alignItems: 'center', gap: 10, paddingTop: 2, paddingBottom: 4},
   avatar: {
     width: 52,
     height: 52,
@@ -448,9 +445,15 @@ const useStyles = makeStyles(t => ({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  headerText: {flex: 1, gap: 4},
-  name: {...typography.title, color: t.text},
-  badgeRow: {flexDirection: 'row', alignItems: 'center', gap: spacing.xs, flexWrap: 'wrap'},
+  headerText: {alignItems: 'center', gap: 6},
+  name: {...typography.title, color: t.text, textAlign: 'center'},
+  badgeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.xs,
+    flexWrap: 'wrap',
+  },
   miniBadge: {flexDirection: 'row', alignItems: 'center', gap: 3},
   miniBadgeText: {fontSize: 11, fontWeight: '700'},
   closeButton: {padding: 4},
