@@ -259,6 +259,18 @@ export function ChatScreen({route, navigation}: RootStackScreenProps<'Chat'>) {
   const connected = isGroup ? reachableMembers > 0 : peer?.state === 'connected';
 
   /**
+   * Whether the link is worth a line of its own.
+   *
+   * A group always says how many members are reachable, because that number changes what
+   * happens when you send. One-to-one, silence means "fine": the avatar's dot carries
+   * "connected", and a poor link is the only healthy-looking state that still deserves
+   * warning about, since it is the one where a message may not make it.
+   */
+  const linkQuality = peer?.metrics?.quality ?? null;
+  const statusWorthSaying =
+    isGroup || !connected || (linkQuality !== null && linkQuality < 40);
+
+  /**
    * Grouped by calendar day. Without this, a conversation from last night reads as if it
    * happened moments ago — the screenshots showed 17:41 messages sitting under a 10:08
    * status bar with nothing to distinguish them.
@@ -538,11 +550,15 @@ export function ChatScreen({route, navigation}: RootStackScreenProps<'Chat'>) {
           onPress={() => (isGroup ? setMembersVisible(true) : setProfileVisible(true))}
           style={styles.headerIdentity}
           accessibilityLabel={isGroup ? 'Group members' : 'View profile'}>
+          {/* The face carries the identity and the name labels it — not the other way
+              round. At 30px against a 15.5pt bold name the two were competing, and the
+              name won, which is how a header ends up reading as a title with a small
+              picture stuck to it. */}
           {isGroup ? (
-            <GroupAvatar size={30} online={reachableMembers > 0} />
+            <GroupAvatar size={46} online={reachableMembers > 0} />
           ) : (
             <MascotAvatar
-              size={30}
+              size={46}
               tint={avatarHue(theme, peer?.peerId ?? displayName).fg}
               status={connected ? theme.ok : null}
             />
@@ -552,20 +568,27 @@ export function ChatScreen({route, navigation}: RootStackScreenProps<'Chat'>) {
               <AppText style={styles.headerName} numberOfLines={1}>
                 {group?.name ?? peer?.displayName ?? displayName}
               </AppText>
-              {/* Every handshake is authenticated or the link never reaches
-                  "connected" — this makes that proof visible rather than a silent
-                  precondition. */}
-              {!isGroup && peer?.authenticated ? (
-                <Icon name="shield" color={theme.ok} size={13} strokeWidth={2} />
-              ) : null}
-              {/* The affordance the centred name needs: without it this reads as a
-                  title rather than a way in to who you are talking to. */}
-              <Icon name="chevronRight" color={theme.textFaint} size={13} strokeWidth={2.2} />
+              {/* Just the chevron. The verified shield lived here too, and three marks
+                  on one short line — name, shield, chevron — is what made this row look
+                  crowded. Verification is not news on every glance at a thread: it is
+                  stated properly on the card this chevron opens, next to the security
+                  code that backs it up. */}
+              <Icon name="chevronRight" color={theme.textFaint} size={12} strokeWidth={2.4} />
             </View>
 
-            {/* Line two carries everything the status pill bar used to: state first and
-                in its own colour, then the quality word, then the negotiated MTU, then
-                the bars. Nothing was dropped — it stopped being a separate strip. */}
+            {/*
+              Line two, only when it has something to say.
+              
+              "Connected · Excellent" in green under every healthy conversation is a
+              status bar reporting that nothing is wrong — read once, then never again,
+              while taking a third of the header and shouting in the one colour reserved
+              for good news. The dot on the avatar already says the link is up.
+              
+              So this appears when the link is NOT fine: down, coming up, or connected
+              but poor enough that a message might not go. Then it is worth the space,
+              and its colour means something because it is not always there.
+            */}
+            {statusWorthSaying ? (
             <View style={styles.headerMetaRow}>
               {isGroup ? (
                 <DenseText style={styles.headerMeta} numberOfLines={1}>
@@ -604,9 +627,18 @@ export function ChatScreen({route, navigation}: RootStackScreenProps<'Chat'>) {
                 </>
               )}
             </View>
+            ) : null}
           </View>
         </Touchable>
 
+        {/* One group, not two loose children.
+        
+            The identity is absolutely positioned so it can centre on the screen, which
+            leaves the row laying out only the buttons — and with space-between and three
+            children the middle one was placed dead centre, directly behind the avatar.
+            The encryption warning was on screen and invisible. Both right-hand controls
+            belong in one cluster. */}
+        <View style={styles.headerActions}>
         {/* The encryption warning keeps its own affordance rather than folding into the
             overflow menu: "anyone in range can read this" is not a setting. */}
         {!isGroup ? (
@@ -649,6 +681,7 @@ export function ChatScreen({route, navigation}: RootStackScreenProps<'Chat'>) {
             </Touchable>
           )
         )}
+        </View>
       </View>
 
       {/*
@@ -1011,12 +1044,15 @@ const useStyles = makeStyles(t => ({
     paddingRight: spacing.lg,
     paddingTop: 10,
     paddingBottom: 12,
-    minHeight: 62,
+    // Room for a 46px avatar with its label underneath, rather than squeezing both into
+    // the height of a toolbar.
+    minHeight: 92,
     backgroundColor: t.bg,
     borderBottomWidth: 1,
     borderBottomColor: t.divider,
   },
   headerIconButton: {padding: 4, zIndex: 2},
+  headerActions: {flexDirection: 'row', alignItems: 'center', gap: 10, zIndex: 2},
   /**
    * The person, centred — the way every messaging app the user already knows does it.
    *
@@ -1030,14 +1066,18 @@ const useStyles = makeStyles(t => ({
     left: 0,
     right: 0,
     alignItems: 'center',
-    gap: 3,
+    // Real air between the face and its label, which is most of what made the old
+    // header feel cramped.
+    gap: 6,
     paddingVertical: 2,
   },
-  headerText: {alignItems: 'center', maxWidth: '62%'},
-  headerNameRow: {flexDirection: 'row', alignItems: 'center', gap: 4},
-  headerName: {fontSize: 15.5, fontWeight: '600', letterSpacing: -0.2, color: t.text, flexShrink: 1},
-  headerMetaRow: {flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 1},
-  headerMeta: {...typography.caption, color: t.textDim, fontSize: 11.5, flexShrink: 1},
+  headerText: {alignItems: 'center', maxWidth: '64%'},
+  // Small and quiet. The avatar above it is the identity; this labels it. A 15.5pt bold
+  // name beside a 30px avatar had the label shouting over the thing it labels.
+  headerNameRow: {flexDirection: 'row', alignItems: 'center', gap: 3},
+  headerName: {fontSize: 13, fontWeight: '500', letterSpacing: -0.1, color: t.text, flexShrink: 1},
+  headerMetaRow: {flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 2},
+  headerMeta: {...typography.caption, color: t.textDim, fontSize: 11, flexShrink: 1},
   headerState: {fontWeight: '400'},
   headerWarn: {
     width: 32,
