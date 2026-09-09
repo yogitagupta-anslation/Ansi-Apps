@@ -117,6 +117,13 @@ export function PeerProfileSheet({
   const trustConfirmed = verifiedPeerIds.includes(peerId);
   const isFavorite = favoritePeerIds.includes(peerId);
   const shared = sharedInterests(myInterests, peer.interests);
+  /** Green when you can talk to them, amber while that is being worked on, grey when not. */
+  const presenceTone =
+    peer.state === 'connected'
+      ? theme.ok
+      : peer.state === 'failed' || peer.state === 'disconnected'
+      ? theme.textDim
+      : theme.warn;
   const other = peer.interests.filter(
     i => !shared.some(s => s.toLowerCase() === i.toLowerCase()),
   );
@@ -146,86 +153,139 @@ export function PeerProfileSheet({
           {/* The grip. A sheet you dismiss by dragging needs something to say so. */}
           <View style={styles.grip} />
 
-          {/* Only Close up here. Favourite already has a place in the action row below,
-              next to block, where the two decisions you can make about a person sit
-              together — offering it twice on one card just asks which one is the real
-              button. */}
-          <View style={styles.cornerActions}>
-            <Touchable
-              scale={false}
-              onPress={onClose}
-              hitSlop={12}
-              style={styles.closeButton}
-              accessibilityLabel="Close">
-              <Icon name="close" color={theme.textDim} size={18} />
-            </Touchable>
-          </View>
+          {/* Absolutely placed, so a close affordance costs no vertical band.
+              It used to sit in the flow above the header, which pushed a 64px avatar
+              down and left an empty strip across the top of the card. The grip already
+              says the sheet can be dragged away; this is for anyone who taps rather than
+              drags, and for a screen reader. */}
+          <Touchable
+            scale={false}
+            onPress={onClose}
+            hitSlop={12}
+            style={styles.closeButton}
+            accessibilityRole="button"
+            accessibilityLabel="Close">
+            <Icon name="close" color={theme.textFaint} size={18} />
+          </Touchable>
 
+          {/*
+            Identity on the left, at row height — not a centred portrait.
+
+            A 64px avatar centred over a centred name is a poster, and this is a card you
+            opened to make a decision on: it should start the way the person appears
+            everywhere else in the app, which is a face on the left with their name beside
+            it. Centring also pushed the actions below the fold on a short phone.
+          */}
           <View style={styles.header}>
-            {/* The same face they have in Nearby and at the top of the thread. It was a
-                generic Bluetooth glyph here, so opening someone's card turned the person
-                you had been talking to into a radio symbol. */}
             <MascotAvatar
-              size={64}
+              size={48}
               tint={speakerTint(theme, peerId)}
               status={peer.state === 'connected' ? theme.ok : null}
             />
             <View style={styles.headerText}>
-              <AppText style={styles.name} numberOfLines={1}>
-                {peer.displayName ?? 'Someone you have met'}
-              </AppText>
+              <View style={styles.nameRow}>
+                <AppText style={styles.name} numberOfLines={1}>
+                  {peer.displayName ?? 'Someone you have met'}
+                </AppText>
+                {/* Verified reads better as a mark on the name than as a badge on a line
+                    of its own: it is a property of who this is, not a separate fact. */}
+                {peer.authenticated ? (
+                  <Icon
+                    name="shield"
+                    color={theme.tileGreenFg}
+                    size={13}
+                    strokeWidth={2.4}
+                  />
+                ) : null}
+              </View>
               {/* State and distance on one line, directly under the name — the two facts
-                  that decide whether you can talk to this person right now. The badges
-                  below are about who they are; this is about where they are. */}
-              <DenseText style={styles.presence} numberOfLines={1}>
+                  that decide whether you can talk to this person right now, in the colour
+                  that says it before the words are read. */}
+              <DenseText
+                style={[styles.presence, {color: presenceTone}]}
+                numberOfLines={1}>
                 {LINK_STATE_LABELS[peer.state]}
                 {peer.state === 'connected' && peer.rssi !== null
                   ? ` · ${proximityWord(peer.rssi)}`
                   : ''}
               </DenseText>
-              <View style={styles.badgeRow}>
-                {peer.authenticated && (
-                  <View style={styles.miniBadge}>
-                    <Icon name="shield" color={theme.tileGreenFg} size={11} strokeWidth={2.4} />
-                    <DenseText style={[styles.miniBadgeText, {color: theme.tileGreenFg}]}>
-                      Verified
-                    </DenseText>
-                  </View>
-                )}
-                <QualityBadge score={peer.metrics?.quality ?? null} />
-              </View>
             </View>
+            <QualityBadge score={peer.metrics?.quality ?? null} />
           </View>
 
 
           {/* Directly under the name, as drawn: one filled action and two round ones.
               A sheet you opened by tapping somebody has an obvious main verb, and it
               should not be at the bottom past everything else about them. */}
+          {/*
+            One filled verb and two quiet ones — or, with no verb, two labelled halves.
+
+            This card is opened from two places. From Nearby, "Open chat" is the whole
+            point and gets the fill. From inside the conversation there is nowhere to go,
+            so `onOpenChat` is absent — and the row used to render as two bare circles
+            floating against the left edge with the rest of the width empty, which is what
+            made the sheet look unfinished. With no primary, the remaining two share the
+            width and carry their labels, which also settles what a crossed-out circle
+            meant.
+          */}
           <View style={styles.actions}>
             {onOpenChat ? (
-              <Touchable scale={false} onPress={onOpenChat} style={styles.primaryAction}>
-                <Icon name="tabChats" color={theme.onAccent} size={15} strokeWidth={2} />
-                <DenseText style={styles.primaryActionText}>Open chat</DenseText>
-              </Touchable>
-            ) : null}
-            <Touchable
-              scale={false}
-              onPress={() => toggleFavoritePeer(peerId)}
-              style={styles.roundAction}
-              accessibilityLabel={isFavorite ? 'Remove from favourites' : 'Add to favourites'}>
-              <Icon
-                name={isFavorite ? 'starFilled' : 'star'}
-                color={isFavorite ? theme.tileAmberFg : theme.textDim}
-                size={17}
-              />
-            </Touchable>
-            <Touchable
-              scale={false}
-              onPress={blocked ? onUnblock : onBlock}
-              style={styles.roundAction}
-              accessibilityLabel={blocked ? 'Unblock' : 'Block'}>
-              <Icon name="block" color={theme.error} size={17} />
-            </Touchable>
+              <>
+                <Touchable scale={false} onPress={onOpenChat} style={styles.primaryAction}>
+                  <Icon name="tabChats" color={theme.onAccent} size={15} strokeWidth={2} />
+                  <DenseText style={styles.primaryActionText}>Open chat</DenseText>
+                </Touchable>
+                <Touchable
+                  scale={false}
+                  onPress={() => toggleFavoritePeer(peerId)}
+                  style={styles.roundAction}
+                  accessibilityRole="button"
+                  accessibilityLabel={
+                    isFavorite ? 'Remove from favourites' : 'Add to favourites'
+                  }>
+                  <Icon
+                    name={isFavorite ? 'starFilled' : 'star'}
+                    color={isFavorite ? theme.tileAmberFg : theme.textDim}
+                    size={17}
+                  />
+                </Touchable>
+                <Touchable
+                  scale={false}
+                  onPress={blocked ? onUnblock : onBlock}
+                  style={styles.roundAction}
+                  accessibilityRole="button"
+                  accessibilityLabel={blocked ? 'Unblock' : 'Block'}>
+                  <Icon name="block" color={theme.error} size={17} />
+                </Touchable>
+              </>
+            ) : (
+              <>
+                <Touchable
+                  scale={false}
+                  onPress={() => toggleFavoritePeer(peerId)}
+                  style={styles.wideAction}
+                  accessibilityRole="button">
+                  <Icon
+                    name={isFavorite ? 'starFilled' : 'star'}
+                    color={isFavorite ? theme.tileAmberFg : theme.textDim}
+                    size={16}
+                  />
+                  <DenseText style={styles.wideActionText}>
+                    {isFavorite ? 'Favourited' : 'Favourite'}
+                  </DenseText>
+                </Touchable>
+                <Touchable
+                  scale={false}
+                  onPress={blocked ? onUnblock : onBlock}
+                  style={styles.wideAction}
+                  accessibilityRole="button">
+                  <Icon name="block" color={theme.error} size={16} />
+                  <DenseText style={[styles.wideActionText, {color: theme.error}]}>
+                    {blocked ? 'Unblock' : 'Block'}
+                  </DenseText>
+                </Touchable>
+              </>
+            )}
           </View>
 
           {(() => {
@@ -309,9 +369,15 @@ export function PeerProfileSheet({
                   character with no ellipsis. */}
               <View style={styles.tagRow}>
                 {(shared.length > 0 ? shared : other).map(interest => (
-                  <View key={interest} style={styles.tag}>
-                    <Icon name="check" color={theme.textDim} size={11} strokeWidth={2.4} />
-                    <DenseText style={styles.tagText} maxFontSizeMultiplier={1}>
+                  <View
+                    key={interest}
+                    style={shared.length > 0 ? [styles.tag, styles.tagShared] : styles.tag}>
+                    {shared.length > 0 ? (
+                      <Icon name="check" color={theme.accent} size={12} strokeWidth={2.6} />
+                    ) : null}
+                    <DenseText
+                      style={shared.length > 0 ? styles.tagTextShared : styles.tagText}
+                      maxFontSizeMultiplier={1}>
                       {interest}
                     </DenseText>
                   </View>
@@ -487,34 +553,14 @@ const useStyles = makeStyles(t => ({
     paddingBottom: spacing.xl,
     maxHeight: '85%',
   },
-  cornerActions: {
-    flexDirection: 'row',
-    justifyContent: 'flex-end',
-    alignItems: 'center',
-    gap: spacing.xs,
-    marginBottom: -8,
-  },
-  header: {alignItems: 'center', gap: 10, paddingTop: 2, paddingBottom: 4},
-  avatar: {
-    width: 52,
-    height: 52,
-    borderRadius: 26,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  headerText: {alignItems: 'center', gap: 6},
-  name: {...typography.title, color: t.text, textAlign: 'center'},
-  presence: {fontSize: 13, lineHeight: 18, color: t.textDim, textAlign: 'center'},
-  badgeRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: spacing.xs,
-    flexWrap: 'wrap',
-  },
+  header: {flexDirection: 'row', alignItems: 'center', gap: 12, paddingRight: 30},
+  nameRow: {flexDirection: 'row', alignItems: 'center', gap: 6},
+  headerText: {flex: 1, gap: 3},
+  name: {fontSize: 19, fontWeight: '600', letterSpacing: -0.4, color: t.text, flexShrink: 1},
+  presence: {fontSize: 13, lineHeight: 18},
   miniBadge: {flexDirection: 'row', alignItems: 'center', gap: 3},
   miniBadgeText: {fontSize: 11, fontWeight: '700'},
-  closeButton: {padding: 4},
+  closeButton: {position: 'absolute', top: spacing.lg, right: spacing.lg, padding: 4, zIndex: 2},
 
   // Sits directly under the name, before anything else, because a warning placed after
   // the stats is a warning read after the decision has already been made.
@@ -555,17 +601,22 @@ const useStyles = makeStyles(t => ({
   // flexShrink: 0 — this sits in a flexWrap row; without it, a flex layout is allowed to
   // squeeze a chip narrower than its text needs before it wraps to the next line, which
   // can clip the last character or two with no ellipsis to show for it.
+  // A chip you can read at arm's length. 11px text in a 2px-tall pill was a label, not a
+  // thing you have in common with somebody standing next to you.
   tag: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
     borderWidth: 1,
     borderColor: t.border,
-    borderRadius: radius.xl,
-    paddingHorizontal: spacing.sm,
-    paddingVertical: 2,
+    borderRadius: radius.pill,
+    paddingHorizontal: 11,
+    paddingVertical: 6,
     flexShrink: 0,
   },
-  tagShared: {backgroundColor: t.accentSoft, borderColor: t.accent},
-  tagText: {color: t.textDim, fontSize: 11},
-  tagTextShared: {color: t.accent, fontWeight: '700'},
+  tagShared: {backgroundColor: t.accentSoft, borderColor: 'transparent'},
+  tagText: {color: t.textDim, fontSize: 12.5},
+  tagTextShared: {color: t.accent, fontSize: 12.5, fontWeight: '500'},
 
   grow: {flex: 1},
   fingerprintToggle: {
@@ -623,6 +674,19 @@ const useStyles = makeStyles(t => ({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  // The same button with its label on, for when there is no primary to sit beside.
+  wideAction: {
+    flex: 1,
+    height: 44,
+    borderRadius: radius.pill,
+    borderWidth: 1,
+    borderColor: t.border,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 7,
+  },
+  wideActionText: {fontSize: 14, fontWeight: '500', color: t.text},
   connRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -635,7 +699,9 @@ const useStyles = makeStyles(t => ({
   connLabel: {fontSize: 13.5, color: t.textDim, flex: 1},
   connValue: {fontSize: 13.5, color: t.text},
   connMono: {...typography.monoSmall, color: t.text},
-  alsoInto: {fontSize: 13, color: t.textDim, marginTop: 8},
+  // In the accent, quietly: it is still about what you have in common, just the half that
+  // did not overlap. As plain grey it read as a caption on the chips above it.
+  alsoInto: {fontSize: 13, lineHeight: 19, color: t.accentQuiet, marginTop: 10},
 
   fingerprintNote: {flexDirection: 'row', alignItems: 'flex-start', gap: 9},
   fingerprintHint: {...typography.caption, color: t.textDim, flex: 1},
