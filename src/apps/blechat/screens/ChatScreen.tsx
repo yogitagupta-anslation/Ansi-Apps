@@ -31,6 +31,7 @@ import {AppText, DenseText} from '../components/AppText';
 import {FadeIn, SendIn, Touchable} from '../components/Motion';
 import {Icon} from '../components/ui/Icon';
 import {classifyBleError, describeFailure} from '../ble/LinkErrors';
+import {sharedInterests} from '../config/interests';
 import {suggestionsFor} from '../config/suggestions';
 import {qualityLabel} from '../peers/LinkMetrics';
 import {avatarHue, elevation, radius, spacing, speakerTint, typography} from '../config/theme';
@@ -259,6 +260,43 @@ export function ChatScreen({route, navigation}: RootStackScreenProps<'Chat'>) {
   const connected = isGroup ? reachableMembers > 0 : peer?.state === 'connected';
 
   /**
+   * The moment the waiting ends, said once.
+   *
+   * A queue that empties silently looks the same as a queue that was never sent: the
+   * amber "3 queued" line simply disappears and the ticks change somewhere up the thread,
+   * which is not where anyone is looking. This is the one piece of good news this screen
+   * has, and it is worth four seconds of the reader's attention — after which it removes
+   * itself, because a permanent "back in range" is just a second connection indicator.
+   *
+   * Fired on the transition into range with something still waiting, not on every render
+   * while connected, so a stable link never shows it.
+   */
+  const [resumed, setResumed] = useState<number | null>(null);
+  const wasConnected = useRef(connected);
+  const queuedBeforeReconnect = useRef(queuedCount);
+  useEffect(() => {
+    if (!connected) {
+      wasConnected.current = false;
+      queuedBeforeReconnect.current = queuedCount;
+      return;
+    }
+    if (!wasConnected.current) {
+      wasConnected.current = true;
+      if (queuedBeforeReconnect.current > 0) {
+        setResumed(queuedBeforeReconnect.current);
+      }
+    }
+  }, [connected, queuedCount]);
+
+  useEffect(() => {
+    if (resumed === null) {
+      return;
+    }
+    const timer = setTimeout(() => setResumed(null), 4_000);
+    return () => clearTimeout(timer);
+  }, [resumed]);
+
+  /**
    * Whether the link is worth a line of its own.
    *
    * A group always says how many members are reachable, because that number changes what
@@ -477,6 +515,26 @@ export function ChatScreen({route, navigation}: RootStackScreenProps<'Chat'>) {
    * a one-tap "Okay!" addressed to everybody is a different decision from sending it to
    * one person, and not one to make on somebody's behalf.
    */
+  /**
+   * The thing you have in common, said as a sentence.
+   *
+   * Only ever offered on an empty thread: once there is a conversation, what you both
+   * like has stopped being the reason to talk. Null when there is no overlap — inventing
+   * a warmer line than the facts support is how an app starts sounding like a brochure.
+   */
+  const opener = useMemo(() => {
+    if (isGroup || messages.length > 0) {
+      return null;
+    }
+    const shared = sharedInterests(myInterests, peer?.interests ?? []);
+    if (shared.length === 0) {
+      return null;
+    }
+    const [first, second] = shared;
+    const what = second ? `${first} and ${second}` : first;
+    return `You both like ${what}. That's usually enough to start with.`;
+  }, [isGroup, messages.length, myInterests, peer?.interests]);
+
   const suggestions = useMemo(() => {
     if (isGroup) {
       return [];
@@ -770,10 +828,26 @@ export function ChatScreen({route, navigation}: RootStackScreenProps<'Chat'>) {
             </>
           )}
           ListEmptyComponent={
+            /*
+              The hardest moment in this app, given something to say.
+
+              An empty thread with somebody you have never spoken to is a blank page and
+              a stranger three metres away, and "No messages yet" is a caption on the
+              problem rather than help with it. What actually gets a first message sent
+              is a reason to send one — so the shared interest goes here, where it is the
+              answer to "what do I even say", with the openers a tap away in the composer
+              below. Where there is nothing in common to point at, the fallback is the one
+              genuinely reassuring fact: this goes straight to their phone.
+            */
             <View style={styles.empty}>
+              <AppText style={styles.emptyTitle}>
+                {isGroup
+                  ? `Nothing said in ${group?.name ?? 'this group'} yet`
+                  : `Say something to ${peer?.displayName ?? displayName}`}
+              </AppText>
               <AppText style={styles.emptyText}>
-                No messages yet.{'\n'}Anything you send travels directly over BLE to the
-                other phone.
+                {opener ??
+                  'Whatever you send goes straight to their phone over Bluetooth — no server in between.'}
               </AppText>
             </View>
           }
@@ -809,6 +883,16 @@ export function ChatScreen({route, navigation}: RootStackScreenProps<'Chat'>) {
             <DenseText style={styles.queuedText} numberOfLines={2}>
               {queuedCount} queued — they go out when{' '}
               {group?.name ?? peer?.displayName ?? displayName} is back in range
+            </DenseText>
+          </View>
+        )}
+
+        {resumed !== null && (
+          <View style={styles.resumedBanner}>
+            <Icon name="check" color={theme.ok} size={13} strokeWidth={2.6} />
+            <DenseText style={styles.resumedText} numberOfLines={2}>
+              Back in range — sending {resumed} waiting{' '}
+              {resumed === 1 ? 'message' : 'messages'}
             </DenseText>
           </View>
         )}
@@ -1116,6 +1200,22 @@ const useStyles = makeStyles(t => ({
     fontWeight: '600',
     flex: 1,
   },
+  // The same shape as the queued line it replaces, in green. Swapping the colour in place
+  // is what makes it read as the answer to that line rather than as a new notice.
+  resumedBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: 7,
+  },
+  resumedText: {
+    ...typography.caption,
+    color: t.ok,
+    fontSize: 11,
+    fontWeight: '600',
+    flex: 1,
+  },
   gap: {alignItems: 'center', marginVertical: spacing.sm},
   gapLabel: {
     ...typography.caption,
@@ -1129,7 +1229,16 @@ const useStyles = makeStyles(t => ({
     overflow: 'hidden',
   },
   empty: {flex: 1, justifyContent: 'center', alignItems: 'center', padding: spacing.xl},
-  emptyText: {color: t.textDim, textAlign: 'center', fontSize: 14},
+  emptyTitle: {
+    fontSize: 19,
+    fontWeight: '500',
+    letterSpacing: -0.3,
+    lineHeight: 25,
+    color: t.text,
+    textAlign: 'center',
+    marginBottom: 8,
+  },
+  emptyText: {color: t.textDim, textAlign: 'center', fontSize: 14, lineHeight: 21},
 
   unreadSeparator: {
     flexDirection: 'row',

@@ -133,7 +133,16 @@ export function ChatsScreen({navigation}: RootTabScreenProps<'Chats'>) {
     count: number;
   } | null>(null);
 
-  const reachableCount = peers.filter(p => p.state === 'connected').length;
+  /**
+   * How many of these conversations you could actually talk to this second.
+   *
+   * Counted over the rows on screen rather than over every connected peer: a stranger
+   * who is connected but has never said anything is not in this list, and including them
+   * made the subtitle disagree with the dots beside the names underneath it.
+   */
+  const hereNow = chats.filter(c => c.online).length;
+  /** People around you at all — the number that makes an empty Chats tab actionable. */
+  const aroundCount = peers.filter(p => p.state === 'connected').length;
 
   return (
     <Screen>
@@ -142,12 +151,19 @@ export function ChatsScreen({navigation}: RootTabScreenProps<'Chats'>) {
           <View style={styles.header}>
             <View style={styles.grow}>
               <AppText style={styles.title}>Chats</AppText>
+              {/* Who you could talk to right now, not an inventory. "4 conversations · 2
+                  peers reachable" made you do the arithmetic; the thing you came to find
+                  out is whether anybody in this list is actually here. */}
               <DenseText style={styles.subtitle} numberOfLines={1}>
                 {chats.length === 0
                   ? 'Nothing here yet'
-                  : `${chats.length} conversation${chats.length === 1 ? '' : 's'} · ${
-                      reachableCount
-                    } peer${reachableCount === 1 ? '' : 's'} reachable`}
+                  : hereNow === 0
+                  ? `Nobody here right now · ${chats.length} ${
+                      chats.length === 1 ? 'conversation' : 'conversations'
+                    }`
+                  : `${hereNow} of ${chats.length} ${
+                      chats.length === 1 ? 'person is' : 'people are'
+                    } here now`}
               </DenseText>
             </View>
             <Touchable
@@ -239,17 +255,47 @@ export function ChatsScreen({navigation}: RootTabScreenProps<'Chats'>) {
 
         <FadeIn index={3}>
           {chats.length === 0 ? (
+            /* An empty Chats tab is not a dead end — it is one tap from the screen that
+               fills it. The count is the part that makes the tap worth making: "there
+               are 3 people around you" is a reason, "connect to someone on Nearby" is an
+               instruction. */
             <EmptyState
               icon="chatBubble"
               title="No conversations yet"
-              detail="Connect to someone on Nearby to start chatting, or create a group."
+              detail={
+                aroundCount > 0
+                  ? `There ${aroundCount === 1 ? 'is' : 'are'} ${aroundCount} ${
+                      aroundCount === 1 ? 'person' : 'people'
+                    } around you. A chat stays here once you start it — even after they walk away.`
+                  : 'A chat stays here once you start it — even after they walk away.'
+              }
+              action={
+                <Touchable
+                  scale={false}
+                  onPress={() => navigation.navigate('Nearby')}
+                  style={styles.emptyButton}
+                  accessibilityRole="button"
+                  accessibilityLabel="See who's nearby">
+                  <Icon name="radar" color={theme.onAccent} size={15} strokeWidth={2} />
+                  <DenseText style={styles.emptyButtonText}>See who&apos;s nearby</DenseText>
+                </Touchable>
+              }
             />
           ) : (
             <Card padded={false} style={styles.listCard}>
               {visibleChats.length === 0 ? (
+                /* Why there is nothing, not just that there is nothing. A search box
+                   trains people to expect a directory behind it; this app has none, and
+                   the honest answer to "no results" is that the only phones it can find
+                   are the ones you have actually met. */
                 <View style={styles.searchEmpty}>
+                  <AppText style={styles.searchEmptyTitle} numberOfLines={2}>
+                    Nothing here called &ldquo;{query.trim()}&rdquo;
+                  </AppText>
                   <DenseText style={styles.searchEmptyText}>
-                    No chats match &quot;{query}&quot;.
+                    You&apos;ve chatted with {chats.length}{' '}
+                    {chats.length === 1 ? 'person' : 'people'}. There&apos;s no directory
+                    to search — only phones you&apos;ve actually met.
                   </DenseText>
                 </View>
               ) : (
@@ -528,6 +574,26 @@ const useStyles = makeStyles(t => ({
   },
   unreadText: {...typography.caption, color: '#ffffff', fontSize: 11, fontWeight: '700'},
 
-  searchEmpty: {padding: spacing.lg},
+  searchEmpty: {padding: spacing.lg, gap: 6},
+  searchEmptyTitle: {
+    fontSize: 16,
+    fontWeight: '500',
+    letterSpacing: -0.2,
+    lineHeight: 22,
+    color: t.text,
+  },
   searchEmptyText: {...typography.callout, color: t.textDim},
+
+  // The one action an empty Chats tab can offer. Filled, because it is the only thing
+  // on the screen to press.
+  emptyButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 7,
+    height: 44,
+    paddingHorizontal: 20,
+    borderRadius: radius.pill,
+    backgroundColor: t.accent,
+  },
+  emptyButtonText: {fontSize: 14.5, fontWeight: '500', color: t.onAccent},
 }));

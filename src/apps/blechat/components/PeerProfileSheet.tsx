@@ -6,6 +6,7 @@ import {makeStyles, useTheme} from '../theme/ThemeProvider';
 import {AppText, DenseText} from './AppText';
 import {Touchable} from './Motion';
 import {Icon} from './ui/Icon';
+import {LABELS as LINK_STATE_LABELS} from './ConnectionIndicator';
 import {QualityBadge} from './ui/QualityBadge';
 import {SignalBars} from './ui/Primitives';
 import {MascotAvatar} from './ui/Mascot';
@@ -31,6 +32,24 @@ function qualityWord(rssi: number): string {
     return 'Good signal';
   }
   return 'Weak signal';
+}
+
+/**
+ * The same reading, as distance rather than as radio.
+ *
+ * "−54 dBm" and "Strong signal" both describe the link; neither answers the question
+ * somebody actually has in front of this card, which is whether the person is at the next
+ * desk or across the room. The thresholds are the ones the tour already teaches — very
+ * close, in range, at the edge — so the words mean the same thing everywhere in the app.
+ */
+function proximityWord(rssi: number): string {
+  if (rssi >= -60) {
+    return 'very close';
+  }
+  if (rssi >= -80) {
+    return 'in range';
+  }
+  return 'at the edge of range';
 }
 
 /**
@@ -155,6 +174,15 @@ export function PeerProfileSheet({
               <AppText style={styles.name} numberOfLines={1}>
                 {peer.displayName ?? 'Someone you have met'}
               </AppText>
+              {/* State and distance on one line, directly under the name — the two facts
+                  that decide whether you can talk to this person right now. The badges
+                  below are about who they are; this is about where they are. */}
+              <DenseText style={styles.presence} numberOfLines={1}>
+                {LINK_STATE_LABELS[peer.state]}
+                {peer.state === 'connected' && peer.rssi !== null
+                  ? ` · ${proximityWord(peer.rssi)}`
+                  : ''}
+              </DenseText>
               <View style={styles.badgeRow}>
                 {peer.authenticated && (
                   <View style={styles.miniBadge}>
@@ -270,28 +298,6 @@ export function PeerProfileSheet({
             );
           })()}
 
-          <DenseText style={styles.sectionLabel}>CONNECTION</DenseText>
-
-          <View style={styles.connRow}>
-            <SignalBars rssi={peer.rssi} size="sm" />
-            <DenseText style={styles.connLabel}>Signal</DenseText>
-            <DenseText style={styles.connValue}>
-              {peer.rssi !== null ? qualityWord(peer.rssi) : 'Not measured'}
-            </DenseText>
-          </View>
-
-          <View style={[styles.connRow, styles.connRowLast]}>
-            <Icon name="clock" color={theme.textDim} size={15} strokeWidth={1.9} />
-            <DenseText style={styles.connLabel}>
-              {peer.state === 'connected' ? 'Connected for' : 'Last seen'}
-            </DenseText>
-            <DenseText style={styles.connMono}>
-              {peer.state === 'connected'
-                ? formatDuration(peer.metrics?.currentUptimeMs ?? 0)
-                : relativeTime(peer.lastSeen)}
-            </DenseText>
-          </View>
-
           {shared.length > 0 || other.length > 0 ? (
             <>
               <DenseText style={styles.sectionLabel}>
@@ -318,6 +324,57 @@ export function PeerProfileSheet({
               ) : null}
             </>
           ) : null}
+
+          {/* Who they are first, then the radio. What you have in common is the reason
+              to open this card at all; signal strength is the footnote to it, and having
+              the footnote above the reason is what made this read like a diagnostics
+              panel with a name at the top. */}
+          <DenseText style={styles.sectionLabel}>CONNECTION</DenseText>
+
+          <View style={styles.connRow}>
+            <SignalBars rssi={peer.rssi} size="sm" />
+            <DenseText style={styles.connLabel}>Signal</DenseText>
+            <DenseText style={styles.connValue}>
+              {peer.rssi !== null ? qualityWord(peer.rssi) : 'Not measured'}
+            </DenseText>
+            {/* The number behind the word. Anyone comparing two spots in a room, or
+                writing down what happened before a drop, needs the reading itself. */}
+            {peer.rssi !== null ? (
+              <DenseText style={[styles.connMono, {color: theme.textFaint}]}>
+                {peer.rssi} dBm
+              </DenseText>
+            ) : null}
+          </View>
+
+          {/*
+            How much goes out in one write.
+
+            The design called this "message size limit", which it is not: this app
+            fragments, so a long message is split across as many writes as it takes and
+            nothing is refused for length. What the number does say is how big each piece
+            on the wire is — the thing that decides whether a paragraph leaves in one
+            packet or seven — so it is named for that instead of for a limit that does
+            not exist.
+          */}
+          {peer.gatt?.mtu ? (
+            <View style={styles.connRow}>
+              <Icon name="link" color={theme.textDim} size={15} strokeWidth={1.9} />
+              <DenseText style={styles.connLabel}>Packet size</DenseText>
+              <DenseText style={styles.connMono}>{peer.gatt.mtu} bytes</DenseText>
+            </View>
+          ) : null}
+
+          <View style={[styles.connRow, styles.connRowLast]}>
+            <Icon name="clock" color={theme.textDim} size={15} strokeWidth={1.9} />
+            <DenseText style={styles.connLabel}>
+              {peer.state === 'connected' ? 'Connected for' : 'Last seen'}
+            </DenseText>
+            <DenseText style={styles.connMono}>
+              {peer.state === 'connected'
+                ? formatDuration(peer.metrics?.currentUptimeMs ?? 0)
+                : relativeTime(peer.lastSeen)}
+            </DenseText>
+          </View>
 
           <View style={styles.section}>
             <Touchable
@@ -447,6 +504,7 @@ const useStyles = makeStyles(t => ({
   },
   headerText: {alignItems: 'center', gap: 6},
   name: {...typography.title, color: t.text, textAlign: 'center'},
+  presence: {fontSize: 13, lineHeight: 18, color: t.textDim, textAlign: 'center'},
   badgeRow: {
     flexDirection: 'row',
     alignItems: 'center',

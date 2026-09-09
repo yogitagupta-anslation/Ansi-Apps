@@ -17,7 +17,6 @@ import {RippleStage} from '../components/ui/RippleStage';
 import {MascotAvatar} from '../components/ui/Mascot';
 import {FadeIn, Touchable} from '../components/Motion';
 import {bleChat} from '../services/BleChatService';
-import {openAppSettings} from '../ble/BLEPermissions';
 import {useAppStore} from '../state/appStore';
 import {
   INTEREST_CATALOGUE,
@@ -56,8 +55,12 @@ const TOUR: TourCopy[] = [
     body: 'Your phone finds theirs directly. No account, no phone number, and it works with the network down.',
   },
   {
-    title: 'About ten metres, and no further',
-    body: 'Roughly a room, a carriage, a queue. Walk closer and someone appears on their own. Walk away and they drop off.',
+    // "Ten metres" is a specification, and it is one this app cannot keep: BLE range
+    // swings with the phone, the pocket it is in and the wall in between. A room is the
+    // honest unit, it is the one people can picture, and it is the same phrase Nearby's
+    // empty state uses when nobody turns up.
+    title: "About a room's worth of range",
+    body: 'A carriage, a queue, a café. Walk closer and someone appears on their own. Walk away and they drop off.',
   },
   {
     title: 'Two things Android will ask',
@@ -178,11 +181,24 @@ export function RegisterScreen() {
 
   const advance = useCallback(() => {
     if (step < 3) {
+      /*
+        The primer promises the system dialog is next, so it has to be next.
+
+        The grant used to be requested lazily by the first scan instead — which put an
+        Android prompt on top of the Nearby screen a step and a half after the screen
+        that explained it, with the explanation already scrolled out of memory. Asking
+        here is the difference between a permission dialog with a reason and one that
+        ambushes you. Refusing it is not a dead end: the rest of onboarding continues,
+        and Nearby has its own screen for a refusal.
+      */
+      if (step === 2) {
+        requestPermission();
+      }
       setStep((step + 1) as Step);
       return;
     }
     void finish();
-  }, [step, finish]);
+  }, [step, finish, requestPermission]);
 
   return (
     <Screen edges={['top', 'bottom']}>
@@ -275,6 +291,21 @@ export function RegisterScreen() {
                     </View>
                   ))
                 : null}
+
+              {/* What Android is NOT being asked for.
+                  A dialog that says "find, connect to and determine the relative position
+                  of nearby devices" reads like a location grant to anybody who has used a
+                  phone before, and the app has no way to correct that impression once the
+                  system dialog is on screen. It has to be said here, immediately before
+                  it, or not at all. */}
+              {step === 2 ? (
+                <View style={styles.reassurance}>
+                  <Icon name="shield" size={15} color={theme.ok} strokeWidth={2} />
+                  <DenseText style={styles.reassuranceText}>
+                    No location, no contacts, no camera, no analytics.
+                  </DenseText>
+                </View>
+              ) : null}
             </FadeIn>
           ) : null}
 
@@ -403,54 +434,6 @@ export function RegisterScreen() {
             </FadeIn>
           ) : null}
 
-          {false ? (
-            <FadeIn>
-              <View style={styles.permissionCard}>
-                <View style={[styles.permissionTile, {backgroundColor: theme.accentSoft}]}>
-                  <Icon name="bluetooth" color={theme.accent} size={26} />
-                </View>
-                <AppText style={styles.permissionTitle}>
-                  {permission.state === 'granted'
-                    ? 'Bluetooth is ready'
-                    : 'Allow Bluetooth'}
-                </AppText>
-                <DenseText style={styles.permissionBody}>
-                  {permission.state === 'granted'
-                    ? 'Scanning and advertising are both permitted. You can start meeting people.'
-                    : permission.state === 'blocked'
-                    ? 'Permission was permanently refused, so only a trip to system settings can restore it.'
-                    : 'BLE Chat scans for nearby phones and advertises so they can find you. It never asks for your location.'}
-                </DenseText>
-
-                {permission.state === 'granted' ? (
-                  <View style={styles.permissionGranted}>
-                    <Icon name="check" color={theme.ok} size={15} strokeWidth={2.4} />
-                    <DenseText style={[styles.permissionGrantedText, {color: theme.ok}]}>
-                      Granted
-                    </DenseText>
-                  </View>
-                ) : (
-                  <Touchable
-                    scale={false}
-                    onPress={
-                      permission.state === 'blocked' ? openAppSettings : requestPermission
-                    }
-                    style={styles.permissionButton}>
-                    <DenseText style={styles.permissionButtonText}>
-                      {permission.state === 'blocked'
-                        ? 'Open system settings'
-                        : 'Allow Bluetooth'}
-                    </DenseText>
-                  </Touchable>
-                )}
-              </View>
-
-              <DenseText style={styles.permissionSkip}>
-                You can finish without it — the app will simply have nobody to talk to
-                until Bluetooth is allowed.
-              </DenseText>
-            </FadeIn>
-          ) : null}
         </ScrollView>
 
         <View style={styles.footer}>
@@ -501,13 +484,28 @@ export function RegisterScreen() {
                     ? 'Saving…'
                     : step === 3
                     ? 'Start chatting'
-                    : step === 2
-                    ? 'Got it'
                     : 'Continue'}
                 </AppText>
               </View>
             </Touchable>
           </View>
+
+          {/* A way past the dialog that says what declining costs, rather than a "Skip"
+              that hides it. Someone who is not ready to grant the radio can still look at
+              the app; they simply cannot reach anybody, and that is worth knowing before
+              the choice rather than after it. */}
+          {step === 2 && permission.state !== 'granted' ? (
+            <Touchable
+              scale={false}
+              onPress={() => setStep(3)}
+              hitSlop={8}
+              style={styles.notNow}
+              accessibilityRole="button">
+              <DenseText style={styles.notNowText}>
+                Not now — you can look, but not connect
+              </DenseText>
+            </Touchable>
+          ) : null}
         </View>
       </KeyboardAvoidingView>
     </Screen>
@@ -639,43 +637,18 @@ const useStyles = makeStyles(t => ({
   // ---- permission --------------------------------------------------------
   // No card, no icon tile. This step is one sentence and one button; wrapping it in a
   // bordered panel with a tinted glyph tile was three containers for that.
-  permissionCard: {alignItems: 'center', paddingTop: spacing.xl},
-  permissionTile: {
-    width: 56,
-    height: 56,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  permissionTitle: {...typography.title, color: t.text, marginTop: spacing.md},
-  permissionBody: {
-    ...typography.body,
-    color: t.textDim,
-    textAlign: 'center',
-    marginTop: 8,
-  },
-  permissionButton: {
-    marginTop: spacing.lg,
-    borderRadius: radius.pill,
-    borderWidth: 1,
-    borderColor: t.accent,
-    paddingHorizontal: spacing.xl,
-    paddingVertical: 11,
-  },
-  permissionButtonText: {...typography.callout, color: t.accent, fontWeight: '700'},
-  permissionGranted: {
+  // A reassurance sized like a footnote, not a banner. It sits immediately above the
+  // button that opens the system dialog, which is the only moment it can do any work.
+  reassurance: {
     flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    marginTop: spacing.lg,
+    alignItems: 'flex-start',
+    gap: 9,
+    marginTop: 22,
+    paddingTop: 20,
+    borderTopWidth: 1,
+    borderTopColor: t.divider,
   },
-  permissionGrantedText: {...typography.callout, fontWeight: '700'},
-  permissionSkip: {
-    ...typography.caption,
-    color: t.textFaint,
-    lineHeight: 16,
-    marginTop: spacing.md,
-    textAlign: 'center',
-  },
+  reassuranceText: {...typography.caption, color: t.textDim, flex: 1, lineHeight: 18},
 
   // ---- footer ------------------------------------------------------------
   footer: {
@@ -684,6 +657,8 @@ const useStyles = makeStyles(t => ({
     paddingBottom: spacing.lg + 4,
     backgroundColor: t.bg,
   },
+  notNow: {alignItems: 'center', paddingTop: 14},
+  notNowText: {...typography.caption, color: t.textFaint, textAlign: 'center'},
   privacyRow: {flexDirection: 'row', alignItems: 'flex-start', gap: 7, marginBottom: 12},
   privacy: {...typography.caption, color: t.textFaint, fontSize: 11, lineHeight: 15, flex: 1},
   footerButtons: {flexDirection: 'row', gap: spacing.sm},

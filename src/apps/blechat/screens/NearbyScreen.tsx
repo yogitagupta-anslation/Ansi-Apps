@@ -43,6 +43,15 @@ if (
   UIManager.setLayoutAnimationEnabledExperimental(true);
 }
 
+/**
+ * How long the opening sweep gets before the screen is willing to say the room is empty.
+ *
+ * Long enough to cover a couple of advertising intervals plus a scan-window miss — the
+ * BLE defaults put a beacon out every 1–2 seconds and a scan does not hear every one —
+ * and short enough that a genuinely empty room does not sit on a false promise.
+ */
+const FIRST_LOOK_MS = 5_000;
+
 type SortMode = 'match' | 'signal' | 'name' | 'recent';
 
 const SORTS: Array<{key: SortMode; label: string}> = [
@@ -106,6 +115,28 @@ export function NearbyScreen({navigation}: RootTabScreenProps<'Nearby'>) {
     useCallback(() => {
       bleChat.setScanIntensity('active');
       return () => bleChat.setScanIntensity('balanced');
+    }, []),
+  );
+
+  /**
+   * The opening sweep, held apart from an empty room.
+   *
+   * A phone advertises on its own schedule — a beacon every second or two — and a scan
+   * only hears one if it happens to be listening when it goes out. So for the first few
+   * seconds after this screen opens there is genuinely nothing to conclude, and the old
+   * behaviour concluded anyway: "Nobody here yet" appeared instantly, including with a
+   * second phone lying on the desk beside it. That is the single most damaging sentence
+   * this app can show, because it is the app's whole premise failing in front of you.
+   *
+   * Reset on every focus rather than once on mount: coming back to Nearby restarts the
+   * same sweep, and the same grace applies.
+   */
+  const [firstLook, setFirstLook] = useState(true);
+  useFocusEffect(
+    useCallback(() => {
+      setFirstLook(true);
+      const timer = setTimeout(() => setFirstLook(false), FIRST_LOOK_MS);
+      return () => clearTimeout(timer);
     }, []),
   );
   /**
@@ -695,6 +726,7 @@ export function NearbyScreen({navigation}: RootTabScreenProps<'Nearby'>) {
                 ? 'off'
                 : 'searching'
             }
+            firstLook={firstLook}
             queuedCount={queuedTotal}
             otherDevices={otherDevicesCount}
             onPrimary={() => {
