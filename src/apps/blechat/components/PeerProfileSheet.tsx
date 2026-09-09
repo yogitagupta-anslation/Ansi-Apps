@@ -6,8 +6,10 @@ import {makeStyles, useTheme} from '../theme/ThemeProvider';
 import {AppText, DenseText} from './AppText';
 import {Touchable} from './Motion';
 import {Icon} from './ui/Icon';
+import {LABELS as LINK_STATE_LABELS} from './ConnectionIndicator';
 import {QualityBadge} from './ui/QualityBadge';
 import {SignalBars} from './ui/Primitives';
+import {MascotAvatar} from './ui/Mascot';
 import {sharedInterests} from '../config/interests';
 import {relativeTime} from '../utils/time';
 import {formatDuration} from '../peers/LinkMetrics';
@@ -30,6 +32,24 @@ function qualityWord(rssi: number): string {
     return 'Good signal';
   }
   return 'Weak signal';
+}
+
+/**
+ * The same reading, as distance rather than as radio.
+ *
+ * "−54 dBm" and "Strong signal" both describe the link; neither answers the question
+ * somebody actually has in front of this card, which is whether the person is at the next
+ * desk or across the room. The thresholds are the ones the tour already teaches — very
+ * close, in range, at the edge — so the words mean the same thing everywhere in the app.
+ */
+function proximityWord(rssi: number): string {
+  if (rssi >= -60) {
+    return 'very close';
+  }
+  if (rssi >= -80) {
+    return 'in range';
+  }
+  return 'at the edge of range';
 }
 
 /**
@@ -126,14 +146,43 @@ export function PeerProfileSheet({
           {/* The grip. A sheet you dismiss by dragging needs something to say so. */}
           <View style={styles.grip} />
 
+          {/* Only Close up here. Favourite already has a place in the action row below,
+              next to block, where the two decisions you can make about a person sit
+              together — offering it twice on one card just asks which one is the real
+              button. */}
+          <View style={styles.cornerActions}>
+            <Touchable
+              scale={false}
+              onPress={onClose}
+              hitSlop={12}
+              style={styles.closeButton}
+              accessibilityLabel="Close">
+              <Icon name="close" color={theme.textDim} size={18} />
+            </Touchable>
+          </View>
+
           <View style={styles.header}>
-            <View style={[styles.avatar, {backgroundColor: speakerTint(theme, peerId) + '33'}]}>
-              <Icon name="bluetooth" color={speakerTint(theme, peerId)} size={22} />
-            </View>
+            {/* The same face they have in Nearby and at the top of the thread. It was a
+                generic Bluetooth glyph here, so opening someone's card turned the person
+                you had been talking to into a radio symbol. */}
+            <MascotAvatar
+              size={64}
+              tint={speakerTint(theme, peerId)}
+              status={peer.state === 'connected' ? theme.ok : null}
+            />
             <View style={styles.headerText}>
               <AppText style={styles.name} numberOfLines={1}>
                 {peer.displayName ?? 'Someone you have met'}
               </AppText>
+              {/* State and distance on one line, directly under the name — the two facts
+                  that decide whether you can talk to this person right now. The badges
+                  below are about who they are; this is about where they are. */}
+              <DenseText style={styles.presence} numberOfLines={1}>
+                {LINK_STATE_LABELS[peer.state]}
+                {peer.state === 'connected' && peer.rssi !== null
+                  ? ` · ${proximityWord(peer.rssi)}`
+                  : ''}
+              </DenseText>
               <View style={styles.badgeRow}>
                 {peer.authenticated && (
                   <View style={styles.miniBadge}>
@@ -146,26 +195,6 @@ export function PeerProfileSheet({
                 <QualityBadge score={peer.metrics?.quality ?? null} />
               </View>
             </View>
-            <Touchable
-              scale={false}
-              onPress={() => toggleFavoritePeer(peerId)}
-              hitSlop={12}
-              style={styles.closeButton}
-              accessibilityLabel={isFavorite ? 'Remove from favorites' : 'Add to favorites'}>
-              <Icon
-                name={isFavorite ? 'starFilled' : 'star'}
-                color={isFavorite ? theme.tileAmberFg : theme.textDim}
-                size={19}
-              />
-            </Touchable>
-            <Touchable
-              scale={false}
-              onPress={onClose}
-              hitSlop={12}
-              style={styles.closeButton}
-              accessibilityLabel="Close">
-              <Icon name="close" color={theme.textDim} size={18} />
-            </Touchable>
           </View>
 
 
@@ -269,39 +298,6 @@ export function PeerProfileSheet({
             );
           })()}
 
-          <DenseText style={styles.sectionLabel}>CONNECTION</DenseText>
-
-          <View style={styles.connRow}>
-            <SignalBars rssi={peer.rssi} size="sm" />
-            <DenseText style={styles.connLabel}>Signal</DenseText>
-            <DenseText style={styles.connValue}>
-              {peer.rssi !== null ? qualityWord(peer.rssi) : 'Not measured'}
-            </DenseText>
-          </View>
-
-          {/* "Message size limit", not MTU. It is the same negotiated number, said as
-              the thing it decides — how much fits in one go before a message has to be
-              split up. */}
-          {peer.gatt ? (
-            <View style={styles.connRow}>
-              <Icon name="inbox" color={theme.textDim} size={15} strokeWidth={1.9} />
-              <DenseText style={styles.connLabel}>Message size limit</DenseText>
-              <DenseText style={styles.connMono}>{peer.gatt.mtu} bytes</DenseText>
-            </View>
-          ) : null}
-
-          <View style={[styles.connRow, styles.connRowLast]}>
-            <Icon name="clock" color={theme.textDim} size={15} strokeWidth={1.9} />
-            <DenseText style={styles.connLabel}>
-              {peer.state === 'connected' ? 'Connected for' : 'Last seen'}
-            </DenseText>
-            <DenseText style={styles.connMono}>
-              {peer.state === 'connected'
-                ? formatDuration(peer.metrics?.currentUptimeMs ?? 0)
-                : relativeTime(peer.lastSeen)}
-            </DenseText>
-          </View>
-
           {shared.length > 0 || other.length > 0 ? (
             <>
               <DenseText style={styles.sectionLabel}>
@@ -328,6 +324,57 @@ export function PeerProfileSheet({
               ) : null}
             </>
           ) : null}
+
+          {/* Who they are first, then the radio. What you have in common is the reason
+              to open this card at all; signal strength is the footnote to it, and having
+              the footnote above the reason is what made this read like a diagnostics
+              panel with a name at the top. */}
+          <DenseText style={styles.sectionLabel}>CONNECTION</DenseText>
+
+          <View style={styles.connRow}>
+            <SignalBars rssi={peer.rssi} size="sm" />
+            <DenseText style={styles.connLabel}>Signal</DenseText>
+            <DenseText style={styles.connValue}>
+              {peer.rssi !== null ? qualityWord(peer.rssi) : 'Not measured'}
+            </DenseText>
+            {/* The number behind the word. Anyone comparing two spots in a room, or
+                writing down what happened before a drop, needs the reading itself. */}
+            {peer.rssi !== null ? (
+              <DenseText style={[styles.connMono, {color: theme.textFaint}]}>
+                {peer.rssi} dBm
+              </DenseText>
+            ) : null}
+          </View>
+
+          {/*
+            How much goes out in one write.
+
+            The design called this "message size limit", which it is not: this app
+            fragments, so a long message is split across as many writes as it takes and
+            nothing is refused for length. What the number does say is how big each piece
+            on the wire is — the thing that decides whether a paragraph leaves in one
+            packet or seven — so it is named for that instead of for a limit that does
+            not exist.
+          */}
+          {peer.gatt?.mtu ? (
+            <View style={styles.connRow}>
+              <Icon name="link" color={theme.textDim} size={15} strokeWidth={1.9} />
+              <DenseText style={styles.connLabel}>Packet size</DenseText>
+              <DenseText style={styles.connMono}>{peer.gatt.mtu} bytes</DenseText>
+            </View>
+          ) : null}
+
+          <View style={[styles.connRow, styles.connRowLast]}>
+            <Icon name="clock" color={theme.textDim} size={15} strokeWidth={1.9} />
+            <DenseText style={styles.connLabel}>
+              {peer.state === 'connected' ? 'Connected for' : 'Last seen'}
+            </DenseText>
+            <DenseText style={styles.connMono}>
+              {peer.state === 'connected'
+                ? formatDuration(peer.metrics?.currentUptimeMs ?? 0)
+                : relativeTime(peer.lastSeen)}
+            </DenseText>
+          </View>
 
           <View style={styles.section}>
             <Touchable
@@ -440,7 +487,14 @@ const useStyles = makeStyles(t => ({
     paddingBottom: spacing.xl,
     maxHeight: '85%',
   },
-  header: {flexDirection: 'row', alignItems: 'center', gap: spacing.md},
+  cornerActions: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    alignItems: 'center',
+    gap: spacing.xs,
+    marginBottom: -8,
+  },
+  header: {alignItems: 'center', gap: 10, paddingTop: 2, paddingBottom: 4},
   avatar: {
     width: 52,
     height: 52,
@@ -448,9 +502,16 @@ const useStyles = makeStyles(t => ({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  headerText: {flex: 1, gap: 4},
-  name: {...typography.title, color: t.text},
-  badgeRow: {flexDirection: 'row', alignItems: 'center', gap: spacing.xs, flexWrap: 'wrap'},
+  headerText: {alignItems: 'center', gap: 6},
+  name: {...typography.title, color: t.text, textAlign: 'center'},
+  presence: {fontSize: 13, lineHeight: 18, color: t.textDim, textAlign: 'center'},
+  badgeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.xs,
+    flexWrap: 'wrap',
+  },
   miniBadge: {flexDirection: 'row', alignItems: 'center', gap: 3},
   miniBadgeText: {fontSize: 11, fontWeight: '700'},
   closeButton: {padding: 4},

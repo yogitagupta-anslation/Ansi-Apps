@@ -31,6 +31,8 @@ import {AppText, DenseText} from '../components/AppText';
 import {FadeIn, SendIn, Touchable} from '../components/Motion';
 import {Icon} from '../components/ui/Icon';
 import {classifyBleError, describeFailure} from '../ble/LinkErrors';
+import {sharedInterests} from '../config/interests';
+import {suggestionsFor} from '../config/suggestions';
 import {qualityLabel} from '../peers/LinkMetrics';
 import {avatarHue, elevation, radius, spacing, speakerTint, typography} from '../config/theme';
 import {makeStyles, useTheme} from '../theme/ThemeProvider';
@@ -258,6 +260,55 @@ export function ChatScreen({route, navigation}: RootStackScreenProps<'Chat'>) {
   const connected = isGroup ? reachableMembers > 0 : peer?.state === 'connected';
 
   /**
+   * The moment the waiting ends, said once.
+   *
+   * A queue that empties silently looks the same as a queue that was never sent: the
+   * amber "3 queued" line simply disappears and the ticks change somewhere up the thread,
+   * which is not where anyone is looking. This is the one piece of good news this screen
+   * has, and it is worth four seconds of the reader's attention — after which it removes
+   * itself, because a permanent "back in range" is just a second connection indicator.
+   *
+   * Fired on the transition into range with something still waiting, not on every render
+   * while connected, so a stable link never shows it.
+   */
+  const [resumed, setResumed] = useState<number | null>(null);
+  const wasConnected = useRef(connected);
+  const queuedBeforeReconnect = useRef(queuedCount);
+  useEffect(() => {
+    if (!connected) {
+      wasConnected.current = false;
+      queuedBeforeReconnect.current = queuedCount;
+      return;
+    }
+    if (!wasConnected.current) {
+      wasConnected.current = true;
+      if (queuedBeforeReconnect.current > 0) {
+        setResumed(queuedBeforeReconnect.current);
+      }
+    }
+  }, [connected, queuedCount]);
+
+  useEffect(() => {
+    if (resumed === null) {
+      return;
+    }
+    const timer = setTimeout(() => setResumed(null), 4_000);
+    return () => clearTimeout(timer);
+  }, [resumed]);
+
+  /**
+   * Whether the link is worth a line of its own.
+   *
+   * A group always says how many members are reachable, because that number changes what
+   * happens when you send. One-to-one, silence means "fine": the avatar's dot carries
+   * "connected", and a poor link is the only healthy-looking state that still deserves
+   * warning about, since it is the one where a message may not make it.
+   */
+  const linkQuality = peer?.metrics?.quality ?? null;
+  const statusWorthSaying =
+    isGroup || !connected || (linkQuality !== null && linkQuality < 40);
+
+  /**
    * Grouped by calendar day. Without this, a conversation from last night reads as if it
    * happened moments ago — the screenshots showed 17:41 messages sitting under a 10:08
    * status bar with nothing to distinguish them.
@@ -456,6 +507,62 @@ export function ChatScreen({route, navigation}: RootStackScreenProps<'Chat'>) {
     openedWith.current = new Set(messages.map(m => m.id));
   }
 
+  /**
+   * What to offer above the composer right now.
+   *
+   * Openers on an empty thread, replies when theirs was the last word, and nothing when
+   * ours was — a suggestion to answer yourself is noise. Group threads are left alone:
+   * a one-tap "Okay!" addressed to everybody is a different decision from sending it to
+   * one person, and not one to make on somebody's behalf.
+   */
+  /**
+   * The thing you have in common, said as a sentence.
+   *
+   * Only ever offered on an empty thread: once there is a conversation, what you both
+   * like has stopped being the reason to talk. Null when there is no overlap — inventing
+   * a warmer line than the facts support is how an app starts sounding like a brochure.
+   */
+  const opener = useMemo(() => {
+    if (isGroup || messages.length > 0) {
+      return null;
+    }
+    const shared = sharedInterests(myInterests, peer?.interests ?? []);
+    if (shared.length === 0) {
+      return null;
+    }
+    const [first, second] = shared;
+    const what = second ? `${first} and ${second}` : first;
+    return `You both like ${what}. That's usually enough to start with.`;
+  }, [isGroup, messages.length, myInterests, peer?.interests]);
+
+  const suggestions = useMemo(() => {
+    if (isGroup) {
+      return [];
+    }
+    const last = messages.length > 0 ? messages[messages.length - 1] : null;
+    return suggestionsFor({
+      threadEmpty: messages.length === 0,
+      lastIncoming: last?.direction === 'incoming' ? last.text : null,
+    });
+  }, [messages, isGroup]);
+
+  /**
+   * The newest thing we sent, which is the only message that carries a receipt.
+   *
+   * Anything older has been overtaken: whether the message before last was delivered
+   * stops being news the moment another one goes out, and a column of "Delivered"
+   * running down the thread is read once and then never again.
+   */
+  const lastOutgoingId = useMemo(() => {
+    for (let i = messages.length - 1; i >= 0; i--) {
+      if (messages[i].direction === 'outgoing') {
+        return messages[i].id;
+      }
+    }
+    return null;
+  }, [messages]);
+
+  const [draft, setDraft] = useState<{text: string; token: number} | null>(null);
   const [profileVisible, setProfileVisible] = useState(false);
   const blockedPeerIds = useAppStore(st => st.blockedPeerIds);
 
@@ -479,11 +586,11 @@ export function ChatScreen({route, navigation}: RootStackScreenProps<'Chat'>) {
       {/*
         One header, not four strips.
 
-        The name, who it is, whether the link is up, how good it is and what MTU it
-        negotiated are all facts about the same conversation, so they belong in the same
-        block. They used to be a header, a pill bar, a retry banner and a queued banner
-        stacked above the first message — four chrome layers between opening a chat and
-        reading it.
+        The person is the title, centred, the way every messaging app the reader already
+        knows puts it — with a chevron to say the name opens them. Under it, only what
+        bears on the conversation: whether the link is up and how good it is. This used
+        to be a header, a pill bar, a retry banner and a queued banner stacked above the
+        first message — four chrome layers between opening a chat and reading it.
       */}
       <View style={styles.header}>
         <Touchable
@@ -501,11 +608,15 @@ export function ChatScreen({route, navigation}: RootStackScreenProps<'Chat'>) {
           onPress={() => (isGroup ? setMembersVisible(true) : setProfileVisible(true))}
           style={styles.headerIdentity}
           accessibilityLabel={isGroup ? 'Group members' : 'View profile'}>
+          {/* The face carries the identity and the name labels it — not the other way
+              round. At 30px against a 15.5pt bold name the two were competing, and the
+              name won, which is how a header ends up reading as a title with a small
+              picture stuck to it. */}
           {isGroup ? (
-            <GroupAvatar size={40} online={reachableMembers > 0} />
+            <GroupAvatar size={46} online={reachableMembers > 0} />
           ) : (
             <MascotAvatar
-              size={34}
+              size={46}
               tint={avatarHue(theme, peer?.peerId ?? displayName).fg}
               status={connected ? theme.ok : null}
             />
@@ -515,17 +626,27 @@ export function ChatScreen({route, navigation}: RootStackScreenProps<'Chat'>) {
               <AppText style={styles.headerName} numberOfLines={1}>
                 {group?.name ?? peer?.displayName ?? displayName}
               </AppText>
-              {/* Every handshake is authenticated or the link never reaches
-                  "connected" — this makes that proof visible rather than a silent
-                  precondition. */}
-              {!isGroup && peer?.authenticated ? (
-                <Icon name="shield" color={theme.ok} size={14} strokeWidth={2} />
-              ) : null}
+              {/* Just the chevron. The verified shield lived here too, and three marks
+                  on one short line — name, shield, chevron — is what made this row look
+                  crowded. Verification is not news on every glance at a thread: it is
+                  stated properly on the card this chevron opens, next to the security
+                  code that backs it up. */}
+              <Icon name="chevronRight" color={theme.textFaint} size={12} strokeWidth={2.4} />
             </View>
 
-            {/* Line two carries everything the status pill bar used to: state first and
-                in its own colour, then the quality word, then the negotiated MTU, then
-                the bars. Nothing was dropped — it stopped being a separate strip. */}
+            {/*
+              Line two, only when it has something to say.
+              
+              "Connected · Excellent" in green under every healthy conversation is a
+              status bar reporting that nothing is wrong — read once, then never again,
+              while taking a third of the header and shouting in the one colour reserved
+              for good news. The dot on the avatar already says the link is up.
+              
+              So this appears when the link is NOT fine: down, coming up, or connected
+              but poor enough that a message might not go. Then it is worth the space,
+              and its colour means something because it is not always there.
+            */}
+            {statusWorthSaying ? (
             <View style={styles.headerMetaRow}>
               {isGroup ? (
                 <DenseText style={styles.headerMeta} numberOfLines={1}>
@@ -555,15 +676,27 @@ export function ChatScreen({route, navigation}: RootStackScreenProps<'Chat'>) {
                     {connected && qualityLabel(peer?.metrics?.quality ?? null)
                       ? ' \u00b7 ' + qualityLabel(peer?.metrics?.quality ?? null)
                       : ''}
-                    {peer?.gatt ? ' \u00b7 MTU ' + peer.gatt.mtu : ''}
                   </DenseText>
+                  {/* Bars, not numbers. "MTU 517" used to sit in this line: a fact
+                      about the transport rather than about the person, carried already
+                      by the peer sheet and Diagnostics. What belongs above a thread is
+                      whether it will send. */}
                   <SignalBars rssi={peer?.rssi ?? null} size="sm" />
                 </>
               )}
             </View>
+            ) : null}
           </View>
         </Touchable>
 
+        {/* One group, not two loose children.
+        
+            The identity is absolutely positioned so it can centre on the screen, which
+            leaves the row laying out only the buttons — and with space-between and three
+            children the middle one was placed dead centre, directly behind the avatar.
+            The encryption warning was on screen and invisible. Both right-hand controls
+            belong in one cluster. */}
+        <View style={styles.headerActions}>
         {/* The encryption warning keeps its own affordance rather than folding into the
             overflow menu: "anyone in range can read this" is not a setting. */}
         {!isGroup ? (
@@ -606,6 +739,7 @@ export function ChatScreen({route, navigation}: RootStackScreenProps<'Chat'>) {
             </Touchable>
           )
         )}
+        </View>
       </View>
 
       {/*
@@ -676,6 +810,7 @@ export function ChatScreen({route, navigation}: RootStackScreenProps<'Chat'>) {
                   message={item}
                   onRetry={onRetry}
                   onLongPress={onMessageActions}
+                  showReceipt={item.id === lastOutgoingId}
                   // Only in a group: in a one-to-one chat the header already names the
                   // only person who can be sending.
                   senderName={
@@ -693,10 +828,26 @@ export function ChatScreen({route, navigation}: RootStackScreenProps<'Chat'>) {
             </>
           )}
           ListEmptyComponent={
+            /*
+              The hardest moment in this app, given something to say.
+
+              An empty thread with somebody you have never spoken to is a blank page and
+              a stranger three metres away, and "No messages yet" is a caption on the
+              problem rather than help with it. What actually gets a first message sent
+              is a reason to send one — so the shared interest goes here, where it is the
+              answer to "what do I even say", with the openers a tap away in the composer
+              below. Where there is nothing in common to point at, the fallback is the one
+              genuinely reassuring fact: this goes straight to their phone.
+            */
             <View style={styles.empty}>
+              <AppText style={styles.emptyTitle}>
+                {isGroup
+                  ? `Nothing said in ${group?.name ?? 'this group'} yet`
+                  : `Say something to ${peer?.displayName ?? displayName}`}
+              </AppText>
               <AppText style={styles.emptyText}>
-                No messages yet.{'\n'}Anything you send travels directly over BLE to the
-                other phone.
+                {opener ??
+                  'Whatever you send goes straight to their phone over Bluetooth — no server in between.'}
               </AppText>
             </View>
           }
@@ -736,6 +887,16 @@ export function ChatScreen({route, navigation}: RootStackScreenProps<'Chat'>) {
           </View>
         )}
 
+        {resumed !== null && (
+          <View style={styles.resumedBanner}>
+            <Icon name="check" color={theme.ok} size={13} strokeWidth={2.6} />
+            <DenseText style={styles.resumedText} numberOfLines={2}>
+              Back in range — sending {resumed} waiting{' '}
+              {resumed === 1 ? 'message' : 'messages'}
+            </DenseText>
+          </View>
+        )}
+
         {/*
           You can keep typing while they are out of range.
 
@@ -759,7 +920,8 @@ export function ChatScreen({route, navigation}: RootStackScreenProps<'Chat'>) {
                   peer?.displayName ?? displayName
                 } is back in range.`
           }
-          disabledReason="Say hi on Nearby first — there is nobody to address this to yet."
+          suggestions={suggestions}
+          draft={draft}
           tone={!isGroup && peer ? dotColor(peer.state, theme) : undefined}
           onSend={onSend}
         />
@@ -790,6 +952,22 @@ export function ChatScreen({route, navigation}: RootStackScreenProps<'Chat'>) {
           }
           setActionsFor(null);
         }}
+        /**
+         * Editing an unsent message: take it out of the thread and put the words back
+         * in the composer. Nothing was on the other phone to correct, so this is the
+         * whole of what "edit" can honestly mean here — and it is what the person
+         * wanted anyway, which is to send different words.
+         */
+        onEdit={
+          actionsFor && conversationId
+            ? () => {
+                const text = actionsFor.text;
+                bleChat.messages.deleteLocal(conversationId, actionsFor.id);
+                setDraft({text, token: Date.now()});
+                setActionsFor(null);
+              }
+            : undefined
+        }
       />
 
       {isGroup && group && (
@@ -942,22 +1120,48 @@ const useStyles = makeStyles(t => ({
   header: {
     flexDirection: 'row',
     alignItems: 'center',
+    // The identity sits on top of this row rather than in it, so the row only has to
+    // hold the buttons apart — space-between, with nothing competing for the middle.
+    justifyContent: 'space-between',
     gap: 12,
     paddingLeft: spacing.md,
     paddingRight: spacing.lg,
     paddingTop: 10,
-    paddingBottom: 14,
+    paddingBottom: 12,
+    // Room for a 46px avatar with its label underneath, rather than squeezing both into
+    // the height of a toolbar.
+    minHeight: 92,
     backgroundColor: t.bg,
     borderBottomWidth: 1,
     borderBottomColor: t.divider,
   },
-  headerIconButton: {padding: 4},
-  headerIdentity: {flex: 1, flexDirection: 'row', alignItems: 'center', gap: 11},
-  headerText: {flex: 1, minWidth: 0},
-  headerNameRow: {flexDirection: 'row', alignItems: 'center', gap: 5},
-  headerName: {...typography.headline, color: t.text, flexShrink: 1},
+  headerIconButton: {padding: 4, zIndex: 2},
+  headerActions: {flexDirection: 'row', alignItems: 'center', gap: 10, zIndex: 2},
+  /**
+   * The person, centred — the way every messaging app the user already knows does it.
+   *
+   * Absolutely positioned rather than laid out between the buttons, because a flexed
+   * middle column centres itself between the side clusters, not in the screen: add one
+   * icon on the right and the name drifts left. Pinning it to the full width and letting
+   * the buttons sit on top keeps the name centred on the phone no matter what flanks it.
+   */
+  headerIdentity: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    alignItems: 'center',
+    // Real air between the face and its label, which is most of what made the old
+    // header feel cramped.
+    gap: 6,
+    paddingVertical: 2,
+  },
+  headerText: {alignItems: 'center', maxWidth: '64%'},
+  // Small and quiet. The avatar above it is the identity; this labels it. A 15.5pt bold
+  // name beside a 30px avatar had the label shouting over the thing it labels.
+  headerNameRow: {flexDirection: 'row', alignItems: 'center', gap: 3},
+  headerName: {fontSize: 13, fontWeight: '500', letterSpacing: -0.1, color: t.text, flexShrink: 1},
   headerMetaRow: {flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 2},
-  headerMeta: {...typography.caption, color: t.textDim, fontSize: 12, flexShrink: 1},
+  headerMeta: {...typography.caption, color: t.textDim, fontSize: 11, flexShrink: 1},
   headerState: {fontWeight: '400'},
   headerWarn: {
     width: 32,
@@ -996,6 +1200,22 @@ const useStyles = makeStyles(t => ({
     fontWeight: '600',
     flex: 1,
   },
+  // The same shape as the queued line it replaces, in green. Swapping the colour in place
+  // is what makes it read as the answer to that line rather than as a new notice.
+  resumedBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: 7,
+  },
+  resumedText: {
+    ...typography.caption,
+    color: t.ok,
+    fontSize: 11,
+    fontWeight: '600',
+    flex: 1,
+  },
   gap: {alignItems: 'center', marginVertical: spacing.sm},
   gapLabel: {
     ...typography.caption,
@@ -1009,7 +1229,16 @@ const useStyles = makeStyles(t => ({
     overflow: 'hidden',
   },
   empty: {flex: 1, justifyContent: 'center', alignItems: 'center', padding: spacing.xl},
-  emptyText: {color: t.textDim, textAlign: 'center', fontSize: 14},
+  emptyTitle: {
+    fontSize: 19,
+    fontWeight: '500',
+    letterSpacing: -0.3,
+    lineHeight: 25,
+    color: t.text,
+    textAlign: 'center',
+    marginBottom: 8,
+  },
+  emptyText: {color: t.textDim, textAlign: 'center', fontSize: 14, lineHeight: 21},
 
   unreadSeparator: {
     flexDirection: 'row',

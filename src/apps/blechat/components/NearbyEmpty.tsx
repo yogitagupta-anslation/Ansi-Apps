@@ -21,11 +21,22 @@ export type NearbyEmptyKind = 'off' | 'blocked' | 'searching';
 
 export function NearbyEmpty({
   kind,
+  firstLook = false,
   queuedCount,
   otherDevices,
   onPrimary,
 }: {
   kind: NearbyEmptyKind;
+  /**
+   * The opening sweep is still running.
+   *
+   * "Nobody here yet" is a verdict, and for the first couple of seconds after the screen
+   * opens there is nothing to base it on: a phone advertises on its own schedule, and a
+   * scan has to happen to be listening at the moment it does. Reporting an empty room
+   * before the radio has had a chance to hear one is what makes the app look broken to
+   * two people standing next to each other.
+   */
+  firstLook?: boolean;
   /** Messages waiting in the outbox — only mentioned when there are any. */
   queuedCount: number;
   /** Non-chat Bluetooth devices in range: proof the radio is sweeping. */
@@ -39,21 +50,29 @@ export function NearbyEmpty({
     return (
       <View style={styles.root}>
         <RippleStage size={150} />
-        <AppText style={styles.title}>Nobody here yet</AppText>
+        <AppText style={styles.title}>
+          {firstLook ? 'Looking around' : 'Nobody here yet'}
+        </AppText>
         <DenseText style={styles.body}>
-          Anyone who opens BLE Chat within about a room&apos;s distance turns up on their
-          own.
+          {firstLook
+            ? 'First look takes a few seconds. Phones announce themselves on their own schedule.'
+            : "Anyone who opens BLE Chat within about a room's distance turns up on their own."}
         </DenseText>
-        <Touchable
-          scale={false}
-          onPress={onPrimary}
-          style={styles.ghostButton}
-          accessibilityRole="button"
-          accessibilityLabel="Look again">
-          <Icon name="radar" size={14} color={theme.text} strokeWidth={2} />
-          <DenseText style={styles.ghostLabel}>Look again</DenseText>
-        </Touchable>
-        {otherDevices > 0 ? (
+        {/* No "Look again" while the first look is still happening: restarting a scan
+            that has not finished costs one of Android's five starts per thirty seconds
+            and makes discovery slower, not faster. */}
+        {firstLook ? null : (
+          <Touchable
+            scale={false}
+            onPress={onPrimary}
+            style={styles.ghostButton}
+            accessibilityRole="button"
+            accessibilityLabel="Look again">
+            <Icon name="radar" size={14} color={theme.text} strokeWidth={2} />
+            <DenseText style={styles.ghostLabel}>Look again</DenseText>
+          </Touchable>
+        )}
+        {!firstLook && otherDevices > 0 ? (
           <Footnote icon="info" tone={theme.textDim}>
             {otherDevices} other Bluetooth device{otherDevices === 1 ? '' : 's'} in range —
             headphones, watches, that sort of thing. Nothing to chat with.

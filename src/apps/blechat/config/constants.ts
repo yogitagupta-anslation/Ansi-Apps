@@ -98,6 +98,22 @@ export const RETRANSMIT_BUFFER_MS = 15_000;
 export const DEFAULT_ATT_MTU = 23;
 export const ATT_HEADER_SIZE = 3;
 
+/**
+ * The largest value a single GATT attribute can hold, ever.
+ *
+ * A separate limit from the MTU and easy to miss because of it: negotiating 517 buys
+ * 514 bytes of ATT payload, but an attribute value is capped at 512 by the Bluetooth
+ * spec no matter what the MTU says. Android enforces it in the GATT client, before
+ * anything reaches the radio, so an oversized write is refused instantly and
+ * identically on every device — which is exactly how this presented. Frames were built
+ * at 514 bytes and every single one was rejected; two bytes over the line.
+ *
+ * react-native-ble-plx calls the pre-Android-13 write API, which returns a bare false,
+ * so the reason never surfaced: the library reported "Operation was rejected" for a
+ * length error. A native client calling the API 33+ overload named it in one line.
+ */
+export const GATT_MAX_ATTR_LEN = 512;
+
 /** MTU we ask for after connecting (Android caps at 517). */
 export const REQUESTED_MTU = 512;
 

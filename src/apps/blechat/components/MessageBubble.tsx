@@ -22,6 +22,15 @@ interface Props {
    * every incoming message is from the person named in the header.
    */
   senderName?: string;
+  /**
+   * True only for the newest outgoing message in the thread.
+   *
+   * The receipt belongs under that one and nowhere else. Repeating "Delivered" beside
+   * every bubble turns a status into wallpaper — you stop reading it, which is the
+   * opposite of what a receipt is for — and it puts a word next to the message you are
+   * trying to read. One line, at the bottom, where the eye already is after sending.
+   */
+  showReceipt?: boolean;
   /** Stable per-peer colour, so the eye can follow one speaker down the thread. */
   senderTint?: string;
 }
@@ -75,20 +84,36 @@ function isWaiting(status: ChatMessage['status']): boolean {
   return status === 'pending';
 }
 
+/**
+ * The colour of the receipt, decided by what is BEHIND it.
+ *
+ * A filled bubble is not a page. `ok` is #0F7B54 and `error` is #B42318 — greens and
+ * reds chosen to carry meaning against the app's near-white ground — and both were being
+ * painted onto a #4C3FE0 bubble, where they read as mud. The delivered state was the
+ * worst of it: dark green on violet, on the message you most want to check.
+ *
+ * So on the filled bubble everything is white, and the state is carried by the mark
+ * itself — one tick sent, two delivered. Semantic colour is kept for the bubbles that
+ * are NOT filled: a waiting or failed message is drawn as an outline on the page, where
+ * amber and red are legible and mean what they always mean.
+ */
 function statusColor(status: ChatMessage['status'], t: Theme): string {
   if (status === 'failed') {
+    // Failed messages render as an outlined bubble on the page, not a filled one.
     return t.error;
   }
-  if (status === 'received') {
-    return t.ok;
-  }
   if (isWaiting(status)) {
-    // On the dashed bubble there is no accent behind the text, so the accent-dim tone
-    // would be near-invisible. Amber, matching every other "waiting on the radio" state.
+    // Also an outline — dashed — so amber reads here as it does everywhere else.
     return t.warn;
   }
-  // Ticks only ever render on the outgoing, accent-filled bubble.
-  return t.onAccentDim;
+  /**
+   * `bubbleOutMeta`, not `onAccentDim`. The outgoing bubble holds #4C3FE0 in BOTH
+   * themes while the accent itself lifts to a pale violet in dark mode — so the
+   * on-accent token is near-black there, and using it would put dark ink on a dark
+   * violet bubble the moment the theme flipped. The theme carries a separate token for
+   * this bubble precisely because of that.
+   */
+  return t.bubbleOutMeta;
 }
 
 function clock(timestamp: number): string {
@@ -106,6 +131,7 @@ export function MessageBubble({
   onLongPress,
   senderName,
   senderTint,
+  showReceipt = false,
 }: Props) {
   const styles = useStyles();
   const theme = useTheme();
@@ -202,11 +228,19 @@ export function MessageBubble({
                 strokeWidth={2.4}
                 color={statusColor(message.status, theme)}
               />
-              <AppText
-                style={[styles.tick, {color: statusColor(message.status, theme)}]}
-                numberOfLines={1}>
-                {STATUS_TEXT[message.status]}
-              </AppText>
+              {/*
+                The word only where it is doing work. A message that is waiting or has
+                failed needs explaining, and it sits on an outlined bubble with room for
+                it. Sent and delivered are carried by the mark — one tick or two — with
+                the receipt line under the last message saying it in full.
+              */}
+              {isWaiting(message.status) || message.status === 'failed' ? (
+                <AppText
+                  style={[styles.tick, {color: statusColor(message.status, theme)}]}
+                  numberOfLines={1}>
+                  {STATUS_TEXT[message.status]}
+                </AppText>
+              ) : null}
             </View>
           </LandIn>
         ) : null}
@@ -219,6 +253,17 @@ export function MessageBubble({
     </View>
   );
 
+  // Only for states that have actually settled: a message still on its way is already
+  // saying so inside its own bubble, and two live labels for one message is noise.
+  const receipt =
+    showReceipt &&
+    outgoing &&
+    (message.status === 'sending' ||
+      message.status === 'sent' ||
+      message.status === 'received')
+      ? STATUS_TEXT[message.status]
+      : null;
+
   return (
     <View style={[styles.row, outgoing ? styles.rowOut : styles.rowIn]}>
       <TouchableOpacity
@@ -229,6 +274,13 @@ export function MessageBubble({
         onLongPress={onLongPress ? () => onLongPress(message) : undefined}>
         {body}
       </TouchableOpacity>
+      {receipt ? (
+        <LandIn token={receipt}>
+          <AppText style={styles.receiptLine} numberOfLines={1}>
+            {receipt}
+          </AppText>
+        </LandIn>
+      ) : null}
     </View>
   );
 }
@@ -236,6 +288,15 @@ export function MessageBubble({
 const useStyles = makeStyles(t => ({
   row: {paddingHorizontal: spacing.lg, marginVertical: spacing.xs},
   rowOut: {alignItems: 'flex-end'},
+  // Small, quiet, and outside the bubble — a note about the message rather than part of
+  // it. Sits under the last one only.
+  receiptLine: {
+    ...typography.caption,
+    fontSize: 11,
+    color: t.textFaint,
+    marginTop: 3,
+    marginRight: 2,
+  },
   rowIn: {alignItems: 'flex-start'},
   bubble: {
     maxWidth: '78%',
