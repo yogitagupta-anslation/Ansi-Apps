@@ -1,4 +1,4 @@
-import React, {useState} from 'react';
+import React, {useEffect, useRef, useState} from 'react';
 import {ScrollView, TextInput, TouchableOpacity, View} from 'react-native';
 import {radius, spacing, typography} from '../config/theme';
 import {makeStyles, useTheme} from '../theme/ThemeProvider';
@@ -16,6 +16,12 @@ interface Props {
    * in the way.
    */
   suggestions?: readonly string[];
+  /**
+   * Text handed back to the field — an unsent message taken out of the thread to be
+   * edited. Carries a token rather than being watched by value, so re-editing the same
+   * text twice still lands.
+   */
+  draft?: {text: string; token: number} | null;
   /**
    * The link is down, but the message will still be kept and sent later.
    *
@@ -38,6 +44,7 @@ interface Props {
 export function MessageInput({
   enabled,
   suggestions,
+  draft,
   queueing = false,
   queueingReason,
   onSend,
@@ -47,6 +54,14 @@ export function MessageInput({
   const styles = useStyles();
   const theme = useTheme();
   const [text, setText] = useState('');
+  const lastDraft = useRef<number | null>(null);
+
+  useEffect(() => {
+    if (draft && draft.token !== lastDraft.current) {
+      lastDraft.current = draft.token;
+      setText(draft.text);
+    }
+  }, [draft]);
 
   const submit = () => {
     const trimmed = text.trim();

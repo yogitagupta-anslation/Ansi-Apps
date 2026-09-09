@@ -10,9 +10,16 @@ import React from 'react';
 import {Text, TextInput} from 'react-native';
 import TestRenderer, {act} from 'react-test-renderer';
 
+import {SafeAreaProvider} from 'react-native-safe-area-context';
+
 import {MessageInput} from '../components/MessageInput';
 import {OPENERS, suggestionsFor} from '../config/suggestions';
 import {ThemeProvider} from '../theme/ThemeProvider';
+
+const METRICS = {
+  frame: {x: 0, y: 0, width: 390, height: 844},
+  insets: {top: 47, left: 0, right: 0, bottom: 34},
+};
 
 describe('what to suggest', () => {
   it('opens a conversation that has not started', () => {
@@ -100,5 +107,73 @@ describe('the chips in the composer', () => {
   it('offers nothing when there is nobody to send to', async () => {
     const {shown} = await render({enabled: false, suggestions: ['Okay!']});
     expect(shown).not.toContain('Okay!');
+  });
+});
+
+/**
+ * Editing, and the line it must not cross.
+ *
+ * There is no edit packet in the protocol. Changing a message the other phone already
+ * has would leave two people reading different words with no way to tell — so the option
+ * exists only while the message is still ours, and the test that matters is the one
+ * asserting it is absent the rest of the time.
+ */
+describe('editing a message', () => {
+  const base = {
+    id: 'm1',
+    conversationId: 'p',
+    originId: 'p',
+    senderId: 'me',
+    destinationId: 'p',
+    text: 'hello',
+    timestamp: Date.now(),
+    receivedAt: Date.now(),
+    direction: 'outgoing' as const,
+    protocolVersion: 1,
+    ttl: 1,
+    hopCount: 0,
+    retryCount: 0,
+  };
+
+  async function labels(status: string) {
+    const {MessageActionsSheet} = require('../components/MessageActionsSheet');
+    let tree!: TestRenderer.ReactTestRenderer;
+    await act(async () => {
+      tree = TestRenderer.create(
+        <SafeAreaProvider initialMetrics={METRICS}>
+        <ThemeProvider mode="light">
+          <MessageActionsSheet
+            message={{...base, status}}
+            onClose={() => undefined}
+            onCopy={() => undefined}
+            onRetry={() => undefined}
+            onDelete={() => undefined}
+            onEdit={() => undefined}
+          />
+        </ThemeProvider>
+        </SafeAreaProvider>,
+      );
+    });
+    return tree.root
+      .findAllByType(Text)
+      .map(n => (typeof n.props.children === 'string' ? n.props.children : ''))
+      .join(' | ');
+  }
+
+  it('is offered while the message is still on this phone', async () => {
+    expect(await labels('pending')).toContain('Edit');
+    expect(await labels('failed')).toContain('Edit');
+  });
+
+  it('is never offered once the other phone has it', async () => {
+    expect(await labels('sent')).not.toContain('Edit');
+    expect(await labels('received')).not.toContain('Edit');
+  });
+
+  it('shows what happened to the message, with times', async () => {
+    const shown = await labels('received');
+    expect(shown).toContain('Written');
+    expect(shown).toContain('Left this phone');
+    expect(shown).toContain('Their phone confirmed it');
   });
 });

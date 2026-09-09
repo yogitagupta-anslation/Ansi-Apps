@@ -492,6 +492,7 @@ export function ChatScreen({route, navigation}: RootStackScreenProps<'Chat'>) {
     return null;
   }, [messages]);
 
+  const [draft, setDraft] = useState<{text: string; token: number} | null>(null);
   const [profileVisible, setProfileVisible] = useState(false);
   const blockedPeerIds = useAppStore(st => st.blockedPeerIds);
 
@@ -803,6 +804,7 @@ export function ChatScreen({route, navigation}: RootStackScreenProps<'Chat'>) {
                 } is back in range.`
           }
           suggestions={suggestions}
+          draft={draft}
           tone={!isGroup && peer ? dotColor(peer.state, theme) : undefined}
           onSend={onSend}
         />
@@ -833,6 +835,22 @@ export function ChatScreen({route, navigation}: RootStackScreenProps<'Chat'>) {
           }
           setActionsFor(null);
         }}
+        /**
+         * Editing an unsent message: take it out of the thread and put the words back
+         * in the composer. Nothing was on the other phone to correct, so this is the
+         * whole of what "edit" can honestly mean here — and it is what the person
+         * wanted anyway, which is to send different words.
+         */
+        onEdit={
+          actionsFor && conversationId
+            ? () => {
+                const text = actionsFor.text;
+                bleChat.messages.deleteLocal(conversationId, actionsFor.id);
+                setDraft({text, token: Date.now()});
+                setActionsFor(null);
+              }
+            : undefined
+        }
       />
 
       {isGroup && group && (
