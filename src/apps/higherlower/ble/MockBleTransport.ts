@@ -1,6 +1,8 @@
 import { Difficulty } from '../types/game';
 import { judge, makeTarget, parGuesses } from '../game/engine';
 import { AiBrain, createAi, GuessLike } from '../game/ai';
+import { makeRoomCode } from './advertisement';
+import { DEFAULT_CAPACITY } from './constants';
 import { decode, encode, Msg } from './protocol';
 import { BleState, BleTransport, DiscoveredRoom, RoomInfo, Unsubscribe } from './transport';
 
@@ -24,11 +26,6 @@ function pick<T>(items: readonly T[]): T {
 
 function randomBetween([lo, hi]: [number, number]): number {
   return lo + Math.random() * (hi - lo);
-}
-
-export function makeRoomCode(): string {
-  const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'.split('');
-  return Array.from({ length: 4 }, () => pick(alphabet)).join('');
 }
 
 interface SimPeer {
@@ -59,6 +56,7 @@ interface SimPeer {
 export class MockBleTransport implements BleTransport {
   readonly deviceId = `dev-${Math.random().toString(36).slice(2, 8)}`;
   readonly label = 'Simulated BLE';
+  readonly simulated = true;
 
   private state: BleState = 'off';
   private stateSubs = new Set<(s: BleState) => void>();
@@ -135,7 +133,7 @@ export class MockBleTransport implements BleTransport {
   }
 
   private addPeer(): void {
-    if (this.peers.length >= 3) return;
+    if (this.peers.length >= (this.room?.capacity ?? DEFAULT_CAPACITY) - 1) return;
     const peer = this.spawnPeer();
     this.peers.push(peer);
     this.deliver({ t: 'hello', id: peer.id, nm: peer.name }, peer.id);
@@ -164,6 +162,10 @@ export class MockBleTransport implements BleTransport {
     };
   }
 
+  async setCapacity(capacity: number): Promise<void> {
+    if (this.room) this.room = { ...this.room, capacity };
+  }
+
   async startHosting(room: RoomInfo): Promise<void> {
     this.room = room;
     this.hosting = true;
@@ -186,11 +188,16 @@ export class MockBleTransport implements BleTransport {
         if (cancelled) return;
         const taken = this.scanRooms.map((r) => r.hostName);
         const free = PEER_NAMES.filter((n) => !taken.includes(n));
+        const capacity = DEFAULT_CAPACITY;
+        const players = 1 + Math.floor(Math.random() * 3);
         this.scanRooms.push({
           id: `room-${Math.random().toString(36).slice(2, 8)}`,
           code: makeRoomCode(),
           hostName: free.length ? pick(free) : `Player ${this.scanRooms.length + 1}`,
-          players: 1 + Math.floor(Math.random() * 3),
+          players,
+          capacity,
+          full: players >= capacity,
+          playing: false,
           rssi: -45 - Math.floor(Math.random() * 40),
           range: pick(SIM_RANGES),
         });
@@ -226,6 +233,7 @@ export class MockBleTransport implements BleTransport {
       code: found?.code ?? makeRoomCode(),
       hostName: found?.hostName ?? 'Host',
       range: found?.range ?? { min: 1, max: 100 },
+      capacity: found?.capacity ?? DEFAULT_CAPACITY,
     };
     this.hosting = false;
     this.simRoundQueued = false;
@@ -237,8 +245,16 @@ export class MockBleTransport implements BleTransport {
 
     this.later(() => {
       this.setState('connected');
+      const host = this.peers[0];
+      const room = this.room;
+      if (host && room) {
+        this.deliver(
+          { t: 'room', ct: room.code, hn: room.hostName, cap: room.capacity, lo: room.range.min, hi: room.range.max },
+          host.id,
+        );
+      }
       this.peers.forEach((p, i) => {
-        this.deliver({ t: 'hello', id: p.id, nm: p.name }, p.id);
+        this.deliver({ t: 'hello', id: p.id, nm: p.name, ...(i === 0 ? { h: true } : {}) }, p.id);
         this.later(
           () => this.deliver({ t: 'rdy', id: p.id, r: true }, p.id),
           700 + i * 500 + Math.random() * 1200,
@@ -262,7 +278,7 @@ export class MockBleTransport implements BleTransport {
    * simulated ones react to it directly -- a 'go' starts them guessing, a 'win'
    * or 'end' stops them.
    */
-  async send(msg: Msg): Promise<void> {
+  async send(msg: Msg, _to?: string): Promise<void> {
     encode(msg); // surfaces oversized payloads exactly as a real link would
 
     if (msg.t === 'go') {

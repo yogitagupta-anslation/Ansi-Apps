@@ -20,24 +20,26 @@ import {
   dotColor,
   LABELS as LINK_STATE_LABELS,
 } from '../components/ConnectionIndicator';
-import {GroupAvatar, InitialAvatar, SignalBars} from '../components/ui/Primitives';
+import {GroupAvatar, SignalBars} from '../components/ui/Primitives';
+import {MascotAvatar} from '../components/ui/Mascot';
 import {MessageBubble} from '../components/MessageBubble';
 import {MessageInput} from '../components/MessageInput';
+import {MessageActionsSheet} from '../components/MessageActionsSheet';
 import {Screen} from '../components/ui/Screen';
 import {PeerProfileSheet} from '../components/PeerProfileSheet';
 import {AppText, DenseText} from '../components/AppText';
 import {FadeIn, SendIn, Touchable} from '../components/Motion';
 import {Icon} from '../components/ui/Icon';
-import {describeFailure} from '../ble/LinkErrors';
+import {classifyBleError, describeFailure} from '../ble/LinkErrors';
 import {qualityLabel} from '../peers/LinkMetrics';
-import {elevation, radius, spacing, speakerTint, typography} from '../config/theme';
+import {avatarHue, elevation, radius, spacing, speakerTint, typography} from '../config/theme';
 import {makeStyles, useTheme} from '../theme/ThemeProvider';
 import {bleChat} from '../services/BleChatService';
 import {useAppStore, useMessages} from '../state/appStore';
 import type {ChatMessage} from '../types/Message';
 import type {Peer} from '../types/Peer';
 import type {Group} from '../messaging/Groups';
-import type {RootStackScreenProps} from '../navigation/types';
+import type {RootStackParamList, RootStackScreenProps} from '../navigation/types';
 
 /**
  * A short confirmation tick, not a buzz — kept to the few moments an action genuinely
@@ -143,7 +145,18 @@ function dayLabel(timestamp: number): string {
 export function ChatScreen({route, navigation}: RootStackScreenProps<'Chat'>) {
   const styles = useStyles();
   const theme = useTheme();
-  const {peerId, groupId, displayName} = route.params;
+  /**
+   * Read defensively, because this screen is opened from a list that can go stale.
+   *
+   * A peer can drop out of range, be forgotten, or lose its identity between the tap
+   * that opened this screen and the moment it mounts. None of that is a reason to fail:
+   * the thread is stored locally and is worth showing on its own, with the composer
+   * reporting that there is nobody to send to. Destructuring `route.params` directly
+   * threw when a route arrived without them at all.
+   */
+  const params = route.params ?? ({displayName: 'Chat'} as RootStackParamList['Chat']);
+  const {peerId, groupId} = params;
+  const displayName = params.displayName ?? 'Chat';
 
   // Exactly one of the two is set; everything below branches on which.
   const conversationId = groupId ?? peerId ?? null;
@@ -266,18 +279,57 @@ export function ChatScreen({route, navigation}: RootStackScreenProps<'Chat'>) {
     return out;
   }, [messages]);
 
+  /**
+   * Keep the newest message in view.
+   *
+   * `scrollToLocation` asks a virtualised list to jump to an index it may not have
+   * measured yet, and React Native answers that with an invariant — thrown, not
+   * returned. This runs from onContentSizeChange, which is a layout callback rather
+   * than a render, so no error boundary is in the way: on a release build the throw
+   * reached the global handler and ended the process. Opening a conversation with
+   * anything in it closed the app.
+   *
+   * Guarded here for the synchronous throw, and paired with onScrollToIndexFailed on
+   * the list below for the case where the list reports the failure instead.
+   */
   const scrollToEnd = useCallback(() => {
     const lastSection = sections.length - 1;
     if (lastSection < 0) {
       return;
     }
-    listRef.current?.scrollToLocation({
-      sectionIndex: lastSection,
-      itemIndex: Math.max(0, sections[lastSection].data.length - 1),
-      viewPosition: 1,
-      animated: false,
-    });
+    try {
+      listRef.current?.scrollToLocation({
+        sectionIndex: lastSection,
+        itemIndex: Math.max(0, sections[lastSection].data.length - 1),
+        viewPosition: 1,
+        animated: false,
+      });
+    } catch {
+      // Not measured that far yet. The fallback below handles it on the next frame.
+      scrollToBottomSafely();
+    }
   }, [sections]);
+
+  /**
+   * The one scroll that cannot fail: straight to the bottom of what is rendered.
+   *
+   * No index, so nothing to be out of range — which is exactly what makes it the right
+   * answer when an index-based scroll has just been refused.
+   */
+  const scrollToBottomSafely = useCallback(() => {
+    requestAnimationFrame(() => {
+      try {
+        const responder = (
+          listRef.current as unknown as {
+            getScrollResponder?: () => {scrollToEnd?: (o: {animated: boolean}) => void} | null;
+          } | null
+        )?.getScrollResponder?.();
+        responder?.scrollToEnd?.({animated: false});
+      } catch {
+        // The list is gone or has nothing to scroll. Nothing to recover from.
+      }
+    });
+  }, []);
 
   const [showJumpButton, setShowJumpButton] = useState(false);
   const NEAR_BOTTOM_PX = 120;
@@ -293,7 +345,9 @@ export function ChatScreen({route, navigation}: RootStackScreenProps<'Chat'>) {
       tick();
       const send = groupId
         ? bleChat.messages.sendToGroup(groupId, text)
-        : bleChat.messages.send(peerId!, text);
+        : peerId
+        ? bleChat.messages.send(peerId, text)
+        : Promise.reject(new Error('This conversation has no peer to send to'));
       send.catch(err => {
         Alert.alert(
           'Send failed',
@@ -314,35 +368,22 @@ export function ChatScreen({route, navigation}: RootStackScreenProps<'Chat'>) {
     [conversationId],
   );
 
-  const onMessageActions = useCallback(
-    (message: ChatMessage) => {
-      const options: Array<{
-        text: string;
-        style?: 'default' | 'cancel' | 'destructive';
-        onPress?: () => void;
-      }> = [
-        {text: 'Copy text', onPress: () => Clipboard.setString(message.text)},
-      ];
-      if (message.direction === 'outgoing' && message.status === 'failed') {
-        options.push({text: 'Retry', onPress: () => onRetry(message)});
-      }
-      options.push({
-        text: 'Delete for me',
-        style: 'destructive',
-        onPress: () => {
-          if (conversationId) {
-            bleChat.messages.deleteLocal(conversationId, message.id);
-          }
-        },
-      });
-      options.push({text: 'Cancel', style: 'cancel'});
-      // Deliberately titled "for me": there is no server copy to remove, and the other
-      // side already has the bytes — pretending otherwise is exactly the kind of claim
-      // this app avoids making about its own guarantees.
-      Alert.alert('Message', undefined, options);
-    },
-    [conversationId, onRetry],
-  );
+  /**
+   * Long-press on a message.
+   *
+   * A sheet rather than an Alert: the design lifts the message itself above the menu,
+   * which is what makes it obvious WHICH message is about to be acted on — an alert
+   * titled "Message" over a thread of them is a guess.
+   *
+   * Reactions are deliberately not here. The frame shows a row of five, but nothing in
+   * the protocol carries one — a reaction has to reach the other phone to mean anything,
+   * and a row of buttons that changed only this screen would be a feature that quietly
+   * does not work.
+   */
+  const [actionsFor, setActionsFor] = useState<ChatMessage | null>(null);
+  const onMessageActions = useCallback((message: ChatMessage) => {
+    setActionsFor(message);
+  }, []);
 
   const onBlockPeer = useCallback(() => {
     if (!peer?.peerId) {
@@ -359,7 +400,9 @@ export function ChatScreen({route, navigation}: RootStackScreenProps<'Chat'>) {
           text: 'Block',
           style: 'destructive',
           onPress: () => {
-            bleChat.peerManager.blockPeer(peer.peerId!);
+            if (peer?.peerId) {
+              bleChat.peerManager.blockPeer(peer.peerId);
+            }
             navigation.goBack();
           },
         },
@@ -420,12 +463,14 @@ export function ChatScreen({route, navigation}: RootStackScreenProps<'Chat'>) {
     if (!peer?.linkId) {
       return;
     }
-    bleChat.peerManager.connect(peer.linkId).catch(err =>
-      Alert.alert(
-        'Connection failed',
-        err instanceof Error ? err.message : String(err),
-      ),
-    );
+    bleChat.peerManager.connect(peer.linkId).catch(err => {
+      // Cancelling is not something to report back as a failure; see NearbyScreen.
+      const failure = classifyBleError(err, 'connecting');
+      if (failure.reason === 'Cancelled') {
+        return;
+      }
+      Alert.alert('Could not connect', describeFailure(failure.toFailure()));
+    });
   }, [peer]);
 
   return (
@@ -459,11 +504,10 @@ export function ChatScreen({route, navigation}: RootStackScreenProps<'Chat'>) {
           {isGroup ? (
             <GroupAvatar size={40} online={reachableMembers > 0} />
           ) : (
-            <InitialAvatar
-              name={peer?.displayName ?? displayName}
-              seed={peer?.peerId ?? displayName}
-              size={40}
-              online={connected}
+            <MascotAvatar
+              size={34}
+              tint={avatarHue(theme, peer?.peerId ?? displayName).fg}
+              status={connected ? theme.ok : null}
             />
           )}
           <View style={styles.headerText}>
@@ -657,6 +701,12 @@ export function ChatScreen({route, navigation}: RootStackScreenProps<'Chat'>) {
             </View>
           }
           onContentSizeChange={scrollToEnd}
+          /**
+           * Required whenever scrollToLocation is used without getItemLayout. Without
+           * it React Native throws an invariant instead of reporting the miss, and the
+           * throw comes from a layout callback where nothing can catch it.
+           */
+          onScrollToIndexFailed={scrollToBottomSafely}
         />
 
         {showJumpButton && (
@@ -686,21 +736,61 @@ export function ChatScreen({route, navigation}: RootStackScreenProps<'Chat'>) {
           </View>
         )}
 
+        {/*
+          You can keep typing while they are out of range.
+
+          The composer used to be disabled whenever the link was down, which was gating a
+          capability the transport already has: `MessageService.send` checks `canReach`
+          and puts the message in the outbox as "pending", then delivers it for real when
+          the link returns. Refusing the keystrokes made the app look less capable than it
+          is, and — worse — turned a peer walking into the next room into a dead end.
+
+          It stays disabled for a peer we have never completed a handshake with: there is
+          no peerId to address, so there would be nothing to queue against.
+        */}
         <MessageInput
           placeholder={`Message ${group?.name ?? peer?.displayName ?? displayName}`}
-          enabled={connected}
-          disabledReason={
+          enabled={isGroup || peer?.peerId != null}
+          queueing={!connected}
+          queueingReason={
             isGroup
-              ? 'No group member is reachable. Messages will be queued until one is.'
-              : peer
-              ? LINK_STATE_LABELS[peer.state] +
-                ' - messages can only be sent over a live link.'
-              : 'This peer is not connected.'
+              ? 'No member is in range. Messages wait here and send themselves when one is.'
+              : `You can keep typing. Messages send themselves when ${
+                  peer?.displayName ?? displayName
+                } is back in range.`
           }
+          disabledReason="Say hi on Nearby first — there is nobody to address this to yet."
           tone={!isGroup && peer ? dotColor(peer.state, theme) : undefined}
           onSend={onSend}
         />
       </View>
+
+      <MessageActionsSheet
+        message={actionsFor}
+        onClose={() => setActionsFor(null)}
+        onCopy={() => {
+          if (actionsFor) {
+            try {
+              Clipboard.setString(actionsFor.text);
+            } catch (err) {
+              Alert.alert('Could not copy', 'This phone would not let the app use the clipboard.');
+            }
+          }
+          setActionsFor(null);
+        }}
+        onRetry={() => {
+          if (actionsFor) {
+            onRetry(actionsFor);
+          }
+          setActionsFor(null);
+        }}
+        onDelete={() => {
+          if (actionsFor && conversationId) {
+            bleChat.messages.deleteLocal(conversationId, actionsFor.id);
+          }
+          setActionsFor(null);
+        }}
+      />
 
       {isGroup && group && (
         <GroupMembersSheet
@@ -723,7 +813,11 @@ export function ChatScreen({route, navigation}: RootStackScreenProps<'Chat'>) {
             setProfileVisible(false);
             onBlockPeer();
           }}
-          onUnblock={() => bleChat.peerManager.unblockPeer(peer.peerId!)}
+          onUnblock={() => {
+            if (peer.peerId) {
+              bleChat.peerManager.unblockPeer(peer.peerId);
+            }
+          }}
         />
       )}
       </View>
@@ -842,18 +936,18 @@ function GroupMembersSheet({
 const useStyles = makeStyles(t => ({
   safe: {flex: 1, backgroundColor: t.bg},
   flex: {flex: 1},
-  // Surface-coloured, with a hairline under it: the header is the one piece of chrome
-  // left above the thread, so it separates itself by being a different plane rather
-  // than by stacking more strips.
+  // On the page, with a hairline under it. It used to be a second plane in `surface`,
+  // which made the top of every thread a slab of a different colour before a single
+  // message; the hairline alone does the separating now.
   header: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 11,
+    gap: 12,
     paddingLeft: spacing.md,
     paddingRight: spacing.lg,
-    paddingTop: spacing.sm,
-    paddingBottom: spacing.md,
-    backgroundColor: t.surface,
+    paddingTop: 10,
+    paddingBottom: 14,
+    backgroundColor: t.bg,
     borderBottomWidth: 1,
     borderBottomColor: t.divider,
   },
@@ -861,16 +955,10 @@ const useStyles = makeStyles(t => ({
   headerIdentity: {flex: 1, flexDirection: 'row', alignItems: 'center', gap: 11},
   headerText: {flex: 1, minWidth: 0},
   headerNameRow: {flexDirection: 'row', alignItems: 'center', gap: 5},
-  headerName: {
-    fontSize: 17,
-    fontWeight: '700',
-    letterSpacing: -0.2,
-    color: t.text,
-    flexShrink: 1,
-  },
-  headerMetaRow: {flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 1},
-  headerMeta: {...typography.caption, color: t.textDim, fontSize: 11, flexShrink: 1},
-  headerState: {fontWeight: '700'},
+  headerName: {...typography.headline, color: t.text, flexShrink: 1},
+  headerMetaRow: {flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 2},
+  headerMeta: {...typography.caption, color: t.textDim, fontSize: 12, flexShrink: 1},
+  headerState: {fontWeight: '400'},
   headerWarn: {
     width: 32,
     height: 32,

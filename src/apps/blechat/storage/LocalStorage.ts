@@ -10,6 +10,7 @@ import {
   peerIdFromPublicKey,
   publicKeyToHex,
 } from '../crypto/Identity';
+import {sanitiseLanguages} from '../config/languages';
 import {sanitiseInterests} from '../config/interests';
 import {LINK_BUDGET_DEFAULT, LINK_BUDGET_MAX} from '../config/constants';
 import {bytesToHex} from '../utils/bytes';
@@ -62,6 +63,7 @@ export interface AppSettings {
    * gives nobody a reason to start talking. See src/config/interests.ts.
    */
   interests: string[];
+  languages: string[];
   /**
    * True once the user has actually chosen a name.
    *
@@ -122,6 +124,7 @@ export interface KnownPeer {
 export const DEFAULT_SETTINGS: AppSettings = {
   displayName: '',
   interests: [],
+  languages: [],
   profileComplete: false,
   themeMode: 'system',
   autoStartScanning: true,
@@ -325,6 +328,7 @@ class LocalStorageService {
           // Bounded on the way in as well as on the way out: this file survives app
           // upgrades, so it can hold anything an older build wrote.
           interests: sanitiseInterests(stored.interests),
+          languages: sanitiseLanguages(stored.languages),
           // Clamped on load: this file survives upgrades and can hold anything an older
           // build wrote, including a budget beyond what is sane to attempt.
           maxConnections: Math.min(

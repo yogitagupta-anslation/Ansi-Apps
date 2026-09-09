@@ -35,6 +35,8 @@ export interface Peer {
   displayName: string | null;
   /** Interests this peer shared during the handshake. Empty until then. */
   interests: string[];
+  /** Languages this peer shared during the handshake. Empty until then. */
+  languages: string[];
   linkId: LinkId | null;
   role: LinkRole | null;
   state: LinkState;

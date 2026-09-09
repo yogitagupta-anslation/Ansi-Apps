@@ -73,6 +73,13 @@ export interface HelloPayload {
    * because every byte of it is chosen by the other phone.
    */
   interests?: string[];
+  /**
+   * Languages this peer speaks.
+   *
+   * Optional for the same reason interests are: a build without them still interoperates.
+   * Sanitised and bounded on receipt — every byte is the other phone's choice.
+   */
+  languages?: string[];
   capabilities: Record<string, boolean>;
   /**
    * X25519 public key, hex — fresh for this link, never the identity key.

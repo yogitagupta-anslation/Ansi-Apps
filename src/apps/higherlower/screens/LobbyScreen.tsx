@@ -3,15 +3,18 @@ import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import Screen from '../components/Screen';
 import Button from '../components/Button';
+import Stepper from '../components/Stepper';
 import BleStatusBadge from '../components/BleStatusBadge';
 import ModifierPicker from '../components/ModifierPicker';
 import SegmentedControl from '../components/SegmentedControl';
 import OptionGrid from '../components/OptionGrid';
 import { bleStatusLabel, useBle } from '../ble/BleProvider';
+import { MAX_CAPACITY, MIN_CAPACITY } from '../ble/constants';
 import { useSettings } from '../settings/SettingsProvider';
 import { parGuesses } from '../game/engine';
 import { modifierById, multiplayerSafe } from '../game/modifiers';
 import { RaceMode } from '../types/game';
+import { plural } from '../util/format';
 import { Palette, fonts, radius, spacing } from '../theme/tokens';
 import { useTheme, useThemedStyles } from '../theme/ThemeProvider';
 
@@ -44,16 +47,37 @@ const MODES: { value: RaceMode; label: string; hint: string }[] = [
 export default function LobbyScreen({ onLeave, onStart, onRoundStarted }: LobbyScreenProps) {
   const { colors } = useTheme();
   const styles = useThemedStyles(makeStyles);
-  const { room, role, players, state, allReady, setReady, leaveRoom, onMessage } = useBle();
-  const { range, mode, setMode, modifiers, toggleModifierId, matchRounds, setMatchRounds } = useSettings();
+  const {
+    room,
+    role,
+    players,
+    state,
+    capacity,
+    full,
+    error,
+    setCapacity,
+    setReady,
+    setPlaying,
+    leaveRoom,
+    onMessage,
+  } = useBle();
+  const { range, mode, setMode, modifiers, toggleModifierId, matchRounds, setMatchRounds, setMaxPlayers } =
+    useSettings();
 
   const isHost = role === 'host';
   const you = players.find((p) => p.isYou);
-  // The room's range is whatever the host advertised; ours only applies if we
-  // are the one hosting.
+  // The room's range is whatever the host opened it with; ours only applies if
+  // we are the one hosting.
   const roundRange = room?.range ?? range;
   const shared = multiplayerSafe(modifiers);
   const readyCount = players.filter((p) => p.ready).length;
+  const waiting = players.filter((p) => !p.isYou && !p.ready);
+
+  // Back in the lobby the door opens again: a round that has finished should
+  // not keep a friend who arrived late standing outside.
+  useEffect(() => {
+    if (isHost) setPlaying(false);
+  }, [isHost, setPlaying]);
 
   // Clients follow the host into the round the moment 'go' lands.
   useEffect(() => {
@@ -70,7 +94,24 @@ export default function LobbyScreen({ onLeave, onStart, onRoundStarted }: LobbyS
     onLeave();
   };
 
+  const changeCapacity = (next: number) => {
+    setCapacity(next);
+    setMaxPlayers(next); // so the next room you host opens the same size
+  };
+
+  const start = () => {
+    // Shut the door before the round opens: a phone that connects mid-race
+    // would have no target and nothing to guess at.
+    setPlaying(true);
+    onStart();
+  };
+
   const enoughPlayers = players.length >= 2;
+  const startLabel = !enoughPlayers
+    ? 'Waiting for players…'
+    : waiting.length > 0
+      ? `Start anyway (${waiting.length} not ready)`
+      : 'Start game';
 
   return (
     <Screen
@@ -80,12 +121,7 @@ export default function LobbyScreen({ onLeave, onStart, onRoundStarted }: LobbyS
       headerRight={<BleStatusBadge label={bleStatusLabel(state, players.length - 1)} live={state === 'connected'} />}
       footer={
         isHost ? (
-          <Button
-            label={enoughPlayers ? 'Start game' : 'Waiting for players…'}
-            icon="play"
-            onPress={onStart}
-            disabled={!enoughPlayers || !allReady}
-          />
+          <Button label={startLabel} icon="play" onPress={start} disabled={!enoughPlayers} />
         ) : (
           <Button
             label={you?.ready ? 'Ready — waiting for host' : "I'm ready"}
@@ -101,14 +137,23 @@ export default function LobbyScreen({ onLeave, onStart, onRoundStarted }: LobbyS
         <Text style={styles.codeLabel}>ROOM CODE</Text>
         <Text style={styles.code}>{room?.code ?? '––––'}</Text>
         <Text style={styles.codeHint}>
-          {isHost ? 'Nearby players will see this in their scan list' : 'You are connected to this room'}
+          {isHost
+            ? 'Read this out — the others type it on their Join screen'
+            : 'You are connected to this room'}
         </Text>
       </View>
+
+      {error ? (
+        <View style={styles.error}>
+          <Ionicons name="alert-circle-outline" size={16} color={colors.danger} />
+          <Text style={styles.errorText}>{error}</Text>
+        </View>
+      ) : null}
 
       <View style={styles.rosterHeader}>
         <Text style={styles.sectionLabel}>PLAYERS</Text>
         <Text style={styles.sectionMeta}>
-          {readyCount} / {players.length} ready
+          {players.length} / {capacity} here · {readyCount} ready
         </Text>
       </View>
 
@@ -127,7 +172,9 @@ export default function LobbyScreen({ onLeave, onStart, onRoundStarted }: LobbyS
               </Text>
               <Text style={styles.playerRole}>{player.isHost ? 'Host' : 'Player'}</Text>
             </View>
-            {player.ready ? (
+            {player.isHost ? (
+              <Text style={styles.waitingText}>holds the start</Text>
+            ) : player.ready ? (
               <View style={styles.readyPill}>
                 <Ionicons name="checkmark" size={12} color={colors.correct} />
                 <Text style={styles.readyText}>READY</Text>
@@ -138,17 +185,34 @@ export default function LobbyScreen({ onLeave, onStart, onRoundStarted }: LobbyS
           </View>
         ))}
 
-        {players.length < 4 ? (
+        {full ? (
+          <View style={[styles.player, styles.slot]}>
+            <Ionicons name="lock-closed-outline" size={14} color={colors.textMuted} />
+            <Text style={styles.slotText}>Room is full — nobody else can join</Text>
+          </View>
+        ) : (
           <View style={[styles.player, styles.slot]}>
             <ActivityIndicator size="small" color={colors.textMuted} />
-            <Text style={styles.slotText}>Listening for more phones…</Text>
+            <Text style={styles.slotText}>
+              Listening for {plural(capacity - players.length, 'more phone')}…
+            </Text>
           </View>
-        ) : null}
+        )}
       </View>
 
       {isHost ? (
         <>
-          <Text style={styles.sectionLabel}>MODE</Text>
+          <Stepper
+            label="Room size"
+            hint="How many phones may join, yours included"
+            value={capacity}
+            min={Math.max(MIN_CAPACITY, players.length)}
+            max={MAX_CAPACITY}
+            onChange={changeCapacity}
+            display={`${players.length} / ${capacity}`}
+          />
+
+          <Text style={[styles.sectionLabel, styles.spacedLabel]}>MODE</Text>
           <OptionGrid
             options={MODES.map((m) => ({ value: m.value, title: m.label, subtitle: m.hint }))}
             value={mode}
@@ -172,7 +236,8 @@ export default function LobbyScreen({ onLeave, onStart, onRoundStarted }: LobbyS
         <View style={styles.settings}>
           <Text style={styles.sectionLabel}>THE HOST DECIDES</Text>
           <Text style={styles.settingNote}>
-            Range, mode and modifiers arrive with the round — you will see them on the board.
+            Room size, range, mode and modifiers are all theirs. The rules arrive with the round — you will see them on
+            the board.
           </Text>
         </View>
       )}
@@ -202,7 +267,7 @@ export default function LobbyScreen({ onLeave, onStart, onRoundStarted }: LobbyS
               </Text>
             </View>
             <Text style={styles.settingNote}>
-              Your range comes from Settings and is sent to every player when the round starts.
+              The range was fixed from Settings when you opened the room, and travels to every player with the round.
             </Text>
           </>
         ) : null}
@@ -238,6 +303,25 @@ const makeStyles = (colors: Palette) => StyleSheet.create({
     color: colors.textMuted,
     fontSize: 11,
     marginTop: spacing.xs,
+    paddingHorizontal: spacing.md,
+    textAlign: 'center',
+  },
+  error: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: spacing.sm,
+    padding: spacing.md,
+    borderRadius: radius.md,
+    backgroundColor: colors.panel,
+    borderWidth: 1,
+    borderColor: colors.danger,
+    marginBottom: spacing.md,
+  },
+  errorText: {
+    color: colors.textSecondary,
+    fontSize: 12,
+    lineHeight: 18,
+    flex: 1,
   },
   rosterHeader: {
     flexDirection: 'row',

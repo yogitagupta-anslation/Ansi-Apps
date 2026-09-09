@@ -1,0 +1,935 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>:root{color-scheme:light dark}body{margin:0}img{max-width:100%}[hidden]{display:none!important}</style>
+</head>
+<body>
+<title>BLE Chat Demo Reel</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Manrope:wght@400;500;600;700&display=swap">
+<style>
+/* ------------------------------------------------------------------
+   Everything inside the phone uses BLE Chat's own tokens, lifted from
+   src/apps/blechat/config/theme.ts, and its own copy. Nothing here is
+   a restyle of the app.
+   ------------------------------------------------------------------ */
+:root{
+  --stage:#EFEEEA; --stage-2:#E4E3DE; --stage-ink:#25242C; --stage-dim:#6B6975; --rail:#D5D3CC;
+
+  --bg:#FBFBF9; --surface:#FFFFFF; --surfaceAlt:#F2F1EC;
+  --border:#E4E3DE; --divider:#EDECE7;
+  --text:#17171A; --textDim:#6E6E76; --textFaint:#8E8D95;
+  --accent:#4C3FE0; --accentSoft:rgba(76,63,224,.10); --onAccent:#FFFFFF;
+  --ok:#0F7B54; --warn:#A8620E; --error:#B42318;
+  --dash:#D6D5CE; --bubbleIn:#F2F1EC; --bubbleInText:#17171A;
+  --bubbleMeta:rgba(23,23,26,.55); --bubbleOutMeta:rgba(255,255,255,.72);
+  --sheet:#FFFFFF; --scrim:rgba(23,23,26,.42);
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --stage:#111016; --stage-2:#191821; --stage-ink:#EDECF2; --stage-dim:#8F8D9C; --rail:#2A2833;
+  }
+}
+:root[data-theme="dark"]{
+  --stage:#111016; --stage-2:#191821; --stage-ink:#EDECF2; --stage-dim:#8F8D9C; --rail:#2A2833;
+}
+/* The app's dark palette, applied to the PHONE only when the reel taps Dark. */
+.phone.dark{
+  --bg:#0C0C0E; --surface:#18181B; --surfaceAlt:#1E1E22;
+  --border:#26262B; --divider:#1E1E22;
+  --text:#F4F4F5; --textDim:#9A9AA3; --textFaint:#71717A;
+  --accent:#8B7CF6; --accentSoft:rgba(139,124,246,.16); --onAccent:#18181B;
+  --ok:#34D399; --warn:#FBBF24; --error:#F87171;
+  --dash:#3F3F46; --bubbleIn:#1E1E22; --bubbleInText:#F4F4F5;
+  --bubbleMeta:rgba(244,244,245,.5);
+  --sheet:#18181B; --scrim:rgba(4,4,6,.66);
+}
+
+*{box-sizing:border-box}
+body{
+  background:var(--stage);color:var(--stage-ink);
+  font-family:Manrope,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+  min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;
+  gap:20px;padding:28px 20px 36px;
+}
+.masthead{display:flex;flex-direction:column;align-items:center;gap:6px;text-align:center}
+.masthead h1{font-family:"Space Grotesk",Manrope,sans-serif;font-size:19px;font-weight:600;letter-spacing:-.4px;margin:0}
+.masthead p{margin:0;font-size:12.5px;color:var(--stage-dim);max-width:56ch;line-height:1.5}
+.deck{display:flex;flex-direction:column;align-items:center;gap:13px}
+
+.phone{
+  position:relative;width:390px;height:800px;flex:none;background:var(--bg);
+  border-radius:44px;border:1px solid var(--stage-2);
+  box-shadow:0 0 0 9px #0b0a0f, 0 30px 70px -24px rgba(0,0,0,.55);
+  overflow:hidden;font-size:15px;color:var(--text);
+  transition:background .4s ease,color .4s ease;
+}
+@media (max-width:460px){ .phone{width:340px;height:697px;border-radius:38px} }
+
+.status{
+  position:relative;z-index:3;height:44px;display:flex;align-items:center;justify-content:space-between;
+  padding:0 26px 0 30px;font-size:13px;font-weight:600;color:var(--text);font-variant-numeric:tabular-nums;
+}
+.status .right{display:flex;align-items:center;gap:6px}
+.status svg{display:block}
+.viewport{position:relative;height:calc(100% - 44px - 62px);overflow:hidden}
+.tabbar{
+  position:relative;z-index:3;height:62px;border-top:1px solid var(--divider);
+  display:flex;align-items:center;background:var(--bg);
+  transition:background .4s ease,border-color .4s ease,opacity .3s ease;
+}
+.tabbar.hidden{opacity:0}
+.tab{flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;color:var(--textFaint);transition:color .2s}
+.tab.on{color:var(--accent)}
+.tab span{font-size:10.5px;font-weight:600}
+
+.screen{
+  position:absolute;inset:0;background:var(--bg);display:flex;flex-direction:column;
+  opacity:0;pointer-events:none;transform:translateX(14px);
+  transition:opacity .26s ease,transform .3s cubic-bezier(.22,.9,.28,1);
+}
+.screen.on{opacity:1;transform:none;pointer-events:auto;z-index:2}
+.screen.back{transform:translateX(-10px)}
+
+.head{padding:12px 18px 4px}
+.h1{font-family:"Space Grotesk",Manrope,sans-serif;font-size:28px;font-weight:600;letter-spacing:-1px;line-height:1.05;margin:0;color:var(--text)}
+.sub{display:flex;align-items:center;gap:8px;margin-top:7px;font-size:13.5px;color:var(--textDim)}
+.dot{width:7px;height:7px;border-radius:50%;background:var(--ok)}
+.dot.warm{background:var(--warn)}
+.headrow{display:flex;align-items:flex-start;justify-content:space-between;gap:10px}
+.rule{font-size:11px;font-weight:700;letter-spacing:1.1px;color:var(--textDim);padding:18px 18px 8px}
+.body{flex:1;overflow:hidden}
+
+/* ---------- onboarding ---------- */
+.ob{flex:1;display:flex;flex-direction:column;padding:26px 26px 26px}
+.ob .art{
+  flex:1;display:flex;align-items:center;justify-content:center;min-height:0;
+}
+.ob h3{font-family:"Space Grotesk",Manrope,sans-serif;font-size:27px;line-height:1.12;font-weight:600;letter-spacing:-.9px;margin:0 0 12px;color:var(--text);text-wrap:balance}
+.ob p{margin:0;font-size:14.5px;line-height:1.5;color:var(--textDim)}
+.obfoot{display:flex;align-items:center;justify-content:space-between;gap:14px;padding-top:24px}
+.count{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;color:var(--textFaint);letter-spacing:.5px}
+.btn{
+  height:46px;border-radius:23px;background:var(--accent);color:var(--onAccent);
+  display:flex;align-items:center;justify-content:center;gap:8px;
+  font-size:15px;font-weight:600;padding:0 26px;
+}
+.btn.ghost{background:transparent;color:var(--textDim);font-weight:500;padding:0 6px}
+.btn.wide{flex:1}
+.btn.press{transform:scale(.97);transition:transform .12s ease}
+
+.orbit{position:relative;width:190px;height:190px}
+.orb-ring{position:absolute;inset:0;border-radius:50%;border:1px solid var(--border)}
+.orb-ring.mid{inset:34px;border-color:var(--border)}
+.orb-core{
+  position:absolute;left:50%;top:50%;width:66px;height:66px;margin:-33px 0 0 -33px;border-radius:50%;
+  background:var(--accent);display:flex;align-items:center;justify-content:center;
+}
+.orb-core i{display:block;width:9px;height:9px;border-radius:50%;background:#fff;box-shadow:16px 0 0 #fff}
+.orb-pulse{position:absolute;left:50%;top:50%;width:66px;height:66px;margin:-33px 0 0 -33px;border-radius:50%;border:1.5px solid var(--accent);animation:sweep 2.8s ease-out infinite}
+.orb-peer{position:absolute;width:30px;height:30px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:#fff}
+@keyframes sweep{0%{transform:scale(1);opacity:.7}100%{transform:scale(2.7);opacity:0}}
+
+.permcard{display:flex;gap:13px;padding:15px;border:1px solid var(--border);border-radius:14px;background:var(--surface);margin-top:11px}
+.permcard b{display:block;font-size:14.5px;font-weight:600;color:var(--text)}
+.permcard small{display:block;font-size:13px;color:var(--textDim);margin-top:3px;line-height:1.45}
+
+.stepbar{display:flex;gap:6px;padding:2px 26px 0}
+.stepbar i{flex:1;height:3px;border-radius:2px;background:var(--border)}
+.stepbar i.on{background:var(--accent)}
+.steplabel{font-size:11px;font-weight:700;letter-spacing:1.1px;color:var(--textDim);padding:16px 26px 0}
+
+.nameinput{
+  margin-top:18px;height:54px;border-radius:14px;background:var(--surfaceAlt);
+  display:flex;align-items:center;padding:0 17px;font-size:19px;font-weight:600;color:var(--text);
+  letter-spacing:-.3px;transition:box-shadow .18s ease;
+}
+.nameinput.focus{box-shadow:inset 0 0 0 1.5px var(--accent)}
+.nameinput .ph{color:var(--textFaint);font-weight:500}
+.hint{font-size:12.5px;color:var(--textDim);margin-top:11px;line-height:1.45}
+
+.chips{display:flex;flex-wrap:wrap;gap:8px;margin-top:16px}
+.chip{
+  border:1px solid var(--border);border-radius:999px;padding:8px 14px;
+  font-size:13px;color:var(--text);display:flex;align-items:center;gap:6px;
+  transition:background .18s ease,border-color .18s ease,color .18s ease;
+}
+.chip.on{background:var(--accent);border-color:var(--accent);color:var(--onAccent);font-weight:600}
+.chip .tickmark{display:none}
+.chip.on .tickmark{display:block}
+
+/* ---------- people ---------- */
+.person{display:flex;align-items:center;gap:13px;padding:13px 18px;border-top:1px solid var(--divider)}
+.avatar{width:44px;height:44px;border-radius:50%;flex:none;display:flex;align-items:center;justify-content:center;font-family:"Space Grotesk",Manrope,sans-serif;font-weight:600;font-size:16px}
+.who{flex:1;min-width:0}
+.name{font-size:15px;font-weight:600;color:var(--text);letter-spacing:-.2px}
+.meta{font-size:12.5px;color:var(--textDim);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.meta .shared{color:var(--accent);font-weight:600}
+.meta .working{color:var(--warn);font-weight:600}
+.pill{border:1px solid var(--border);border-radius:999px;padding:6px 13px;font-size:12.5px;font-weight:600;color:var(--text);white-space:nowrap}
+.pill.solid{background:var(--accent);border-color:var(--accent);color:var(--onAccent)}
+.bars{display:flex;align-items:flex-end;gap:2px;height:15px}
+.bars i{width:3px;border-radius:1px;background:var(--border)}
+.bars i.lit{background:var(--ok)}
+.progressline{height:2px;background:var(--warn);width:0;transition:width .55s ease;margin:0 18px}
+
+.empty{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;padding:0 40px;text-align:center}
+.empty h4{font-family:"Space Grotesk",Manrope,sans-serif;font-size:20px;font-weight:600;margin:0;color:var(--text)}
+.empty p{margin:0;font-size:13.5px;line-height:1.5;color:var(--textDim)}
+
+/* ---------- chat ---------- */
+.chathead{display:flex;align-items:center;gap:11px;padding:10px 16px 12px;border-bottom:1px solid var(--divider)}
+.chathead .name{font-size:16px}
+.chathead .meta{font-size:12px}
+.back-caret{color:var(--text);flex:none}
+.thread{flex:1;padding:14px 16px 8px;display:flex;flex-direction:column;gap:9px;justify-content:flex-end;overflow:hidden}
+.daymark{align-self:center;font-size:11px;font-weight:600;letter-spacing:.6px;color:var(--textFaint);padding:2px 0 6px}
+.row{display:flex;max-width:100%}
+.row.out{justify-content:flex-end}
+.bubble{max-width:76%;padding:9px 13px 7px;border-radius:17px;font-size:14.5px;line-height:1.35;animation:pop .28s cubic-bezier(.2,.9,.3,1.12) both}
+@keyframes pop{from{opacity:0;transform:translateY(8px) scale(.96)}to{opacity:1;transform:none}}
+.row.in .bubble{background:var(--bubbleIn);color:var(--bubbleInText);border-bottom-left-radius:6px}
+.row.out .bubble{background:#4C3FE0;color:#fff;border-bottom-right-radius:6px}
+.stamp{display:flex;align-items:center;gap:4px;justify-content:flex-end;margin-top:3px;font-size:10.5px;font-variant-numeric:tabular-nums}
+.row.in .stamp{color:var(--bubbleMeta);justify-content:flex-start}
+.row.out .stamp{color:var(--bubbleOutMeta)}
+.bubble.queued{background:transparent;color:var(--text);border:1.5px dashed var(--dash)}
+.bubble.queued .stamp{color:var(--warn)}
+.bubble.lifted{transform:scale(1.04);box-shadow:0 12px 28px -10px rgba(0,0,0,.45);transition:transform .2s ease,box-shadow .2s ease}
+.typing{display:flex;gap:4px;align-items:center;padding:11px 15px}
+.typing i{width:6px;height:6px;border-radius:50%;background:var(--textFaint);animation:blip 1.05s infinite}
+.typing i:nth-child(2){animation-delay:.16s}
+.typing i:nth-child(3){animation-delay:.32s}
+@keyframes blip{0%,60%,100%{opacity:.32;transform:translateY(0)}30%{opacity:1;transform:translateY(-3px)}}
+.composer{display:flex;align-items:center;gap:10px;padding:10px 14px 14px;border-top:1px solid var(--divider)}
+.field{flex:1;min-height:42px;border-radius:21px;background:var(--surfaceAlt);display:flex;align-items:center;padding:0 16px;font-size:14.5px;color:var(--text);transition:box-shadow .18s ease}
+.field.focus{box-shadow:0 0 0 2px var(--accentSoft), inset 0 0 0 1px var(--accent)}
+.field .ph{color:var(--textFaint)}
+.caret{display:inline-block;width:1.5px;height:17px;background:var(--accent);margin-left:1px;animation:blink .95s steps(1) infinite;vertical-align:-3px}
+@keyframes blink{0%,50%{opacity:1}51%,100%{opacity:0}}
+.send{width:42px;height:42px;border-radius:50%;flex:none;background:var(--accent);display:flex;align-items:center;justify-content:center;color:var(--onAccent);transition:transform .14s ease}
+.send.press{transform:scale(.88)}
+
+/* ---------- lists ---------- */
+.lrow{display:flex;align-items:center;gap:13px;padding:12px 18px;border-top:1px solid var(--divider)}
+.disc{width:34px;height:34px;border-radius:50%;flex:none;background:var(--accentSoft);display:flex;align-items:center;justify-content:center;color:var(--accent);font-size:15px}
+.lrow .label{flex:1;min-width:0}
+.lrow .label b{display:block;font-size:14.5px;font-weight:500;color:var(--text);letter-spacing:-.1px}
+.lrow .label small{display:block;font-size:12.5px;color:var(--textDim);margin-top:2px;line-height:1.4}
+.chev{color:var(--textFaint);flex:none}
+.switch{width:44px;height:26px;border-radius:13px;background:var(--accent);position:relative;flex:none;transition:background .2s}
+.switch.off{background:var(--border)}
+.switch::after{content:"";position:absolute;top:3px;left:21px;width:20px;height:20px;border-radius:50%;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.25);transition:left .2s ease}
+.switch.off::after{left:3px}
+.identity{display:flex;flex-direction:column;align-items:center;padding:20px 0 22px;gap:8px}
+.mascot{width:64px;height:64px;border-radius:50%;background:var(--accent);display:flex;align-items:center;justify-content:center}
+.mascot i{display:block;width:9px;height:9px;border-radius:50%;background:#fff;box-shadow:16px 0 0 #fff}
+.identity .nm{font-size:20px;font-weight:600;letter-spacing:-.3px;color:var(--text)}
+.code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11.5px;color:var(--textDim);letter-spacing:.6px}
+.themes{display:flex;gap:10px;padding:4px 18px 6px}
+.tcell{flex:1;display:flex;flex-direction:column;align-items:center;gap:7px}
+.tcard{width:100%;height:64px;border-radius:10px;border:1px solid var(--border);padding:8px;display:flex;flex-direction:column;gap:6px;justify-content:space-between}
+.tcard.sel{border:1.5px solid var(--accent)}
+.tbar{height:5px;border-radius:3px;width:70%}
+.taccent{height:9px;border-radius:4px;width:100%;background:var(--accent)}
+.tlabel{font-size:11.5px;color:var(--textDim)}
+
+/* diagnostics */
+.tabsrow{display:flex;gap:6px;padding:12px 18px 4px}
+.dtab{flex:1;text-align:center;padding:9px 0;border-radius:10px;font-size:13px;font-weight:600;color:var(--textDim);background:var(--surfaceAlt)}
+.dtab.on{background:var(--surface);color:var(--text);box-shadow:0 1px 3px rgba(0,0,0,.08)}
+.tiles{display:grid;grid-template-columns:1fr 1fr;gap:9px;padding:12px 18px}
+.tile{border:1px solid var(--border);border-radius:12px;padding:11px 13px;background:var(--surface)}
+.tile small{display:block;font-size:11px;font-weight:600;letter-spacing:.5px;color:var(--textDim)}
+.tile b{display:block;font-size:15px;font-weight:600;margin-top:4px;color:var(--text);font-variant-numeric:tabular-nums}
+.tile b.good{color:var(--ok)}
+.logline{display:flex;gap:9px;padding:4px 18px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:10.5px;line-height:1.5}
+.logline span{color:var(--textFaint);flex:none}
+.logline em{font-style:normal;color:var(--textDim)}
+
+/* sheet */
+.scrim{position:absolute;inset:0;background:var(--scrim);opacity:0;pointer-events:none;transition:opacity .22s ease;z-index:4}
+.scrim.on{opacity:1}
+.sheet{position:absolute;left:0;right:0;bottom:0;z-index:5;background:var(--sheet);border-radius:24px 24px 0 0;padding:10px 20px 26px;transform:translateY(102%);transition:transform .32s cubic-bezier(.2,.9,.28,1);border-top:1px solid var(--border)}
+.sheet.on{transform:none}
+.grip{width:36px;height:4px;border-radius:2px;background:var(--border);margin:0 auto 15px}
+.quote{font-size:14px;color:var(--text);background:var(--surfaceAlt);border-radius:12px;padding:11px 13px;line-height:1.35}
+.timeline{display:flex;flex-direction:column;margin:13px 0 5px}
+.tl{display:flex;align-items:center;gap:11px;padding:7px 0}
+.tl .tick{width:18px;display:flex;justify-content:center;color:var(--ok)}
+.tl b{flex:1;font-size:13.5px;font-weight:500;color:var(--text)}
+.tl span{font-size:12px;color:var(--textDim);font-variant-numeric:tabular-nums}
+.act{display:flex;align-items:center;gap:11px;padding:12px 0;border-top:1px solid var(--divider);font-size:14.5px;color:var(--text)}
+.act.danger{color:var(--error)}
+.act .ic{width:20px;display:flex;justify-content:center;color:var(--textDim)}
+.act.danger .ic{color:var(--error)}
+
+.tap{
+  position:absolute;z-index:9;width:34px;height:34px;margin:-17px 0 0 -17px;border-radius:50%;
+  background:rgba(76,63,224,.20);border:1.5px solid rgba(76,63,224,.55);
+  left:50%;top:50%;opacity:0;pointer-events:none;
+  transition:left .36s cubic-bezier(.38,.03,.2,1),top .36s cubic-bezier(.38,.03,.2,1),opacity .16s linear,transform .16s ease;
+}
+.phone.dark .tap{background:rgba(139,124,246,.22);border-color:rgba(139,124,246,.6)}
+.tap.show{opacity:1}
+.tap.hit{transform:scale(.7)}
+.tap.hold{transform:scale(1.28);background:rgba(76,63,224,.3)}
+
+.caption{display:flex;align-items:baseline;gap:10px;min-height:20px;font-size:13px;color:var(--stage-dim);text-align:center}
+.caption b{font-family:"Space Grotesk",Manrope,sans-serif;font-weight:600;color:var(--stage-ink);font-size:13.5px}
+.railwrap{width:390px;max-width:100%;height:3px;border-radius:2px;background:var(--rail);overflow:hidden}
+.railfill{height:100%;width:0;background:#4C3FE0;border-radius:2px}
+
+@media (prefers-reduced-motion: reduce){
+  .screen,.tap,.sheet,.scrim,.progressline{transition-duration:.01ms}
+  .bubble{animation:none}
+  .orb-pulse,.typing i,.caret{animation:none}
+}
+</style>
+
+<div class="masthead">
+  <h1>BLE Chat</h1>
+  <p>First launch to first conversation. Two phones in Bluetooth range — no account, no server, no signal needed.</p>
+</div>
+
+<div class="deck">
+  <div class="phone" id="phone">
+    <div class="status">
+      <span id="clock">9:41</span>
+      <span class="right">
+        <svg width="15" height="11" viewBox="0 0 15 11" fill="currentColor" aria-hidden="true"><path d="M7.5 10.5 0 3.2A10.6 10.6 0 0 1 7.5 0 10.6 10.6 0 0 1 15 3.2Z" opacity=".95"/></svg>
+        <svg width="22" height="11" viewBox="0 0 22 11" fill="none" aria-hidden="true">
+          <rect x=".6" y=".6" width="18" height="9.8" rx="2.6" stroke="currentColor" stroke-width="1.1" opacity=".5"/>
+          <rect x="2.2" y="2.2" width="14.8" height="6.6" rx="1.5" fill="currentColor"/>
+          <path d="M20.4 4v3c.9-.3 1.3-.8 1.3-1.5S21.3 4.3 20.4 4Z" fill="currentColor" opacity=".5"/>
+        </svg>
+      </span>
+    </div>
+
+    <div class="viewport" id="viewport">
+
+      <!-- ===== TOUR ===== -->
+      <section class="screen on" id="s-tour">
+        <div class="ob">
+          <div class="art">
+            <div class="orbit">
+              <div class="orb-ring"></div><div class="orb-ring mid"></div>
+              <div class="orb-pulse"></div>
+              <div class="orb-core"><i></i></div>
+              <div class="orb-peer" id="tour-peer" style="background:#22D3EE;color:#083344;right:6px;top:26px;opacity:0;transition:opacity .5s">J</div>
+            </div>
+          </div>
+          <h3 id="tour-title">Talk to the people around you</h3>
+          <p id="tour-body">Your phone finds theirs directly. No account, no phone number, and it works with the network down.</p>
+          <div class="obfoot">
+            <span class="count" id="tour-count">01 / 03</span>
+            <div style="display:flex;align-items:center;gap:10px">
+              <div class="btn ghost" id="tour-skip">Skip</div>
+              <div class="btn" id="tour-next">Next</div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ===== PERMISSIONS ===== -->
+      <section class="screen" id="s-perm">
+        <div class="ob">
+          <div style="padding-top:10px">
+            <h3>Two things Android will ask</h3>
+            <p>Here's what each one is for, before the system dialog shows up.</p>
+            <div class="permcard">
+              <div class="disc">◎</div>
+              <div><b>Find nearby devices</b><small>So you can see who's around, and they can see you.</small></div>
+            </div>
+            <div class="permcard">
+              <div class="disc">∞</div>
+              <div><b>Connect to devices</b><small>So a message has something to travel over once you have found someone.</small></div>
+            </div>
+          </div>
+          <div class="art"></div>
+          <div class="obfoot">
+            <span class="count">03 / 03</span>
+            <div class="btn" id="perm-next">Allow both</div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ===== NAME ===== -->
+      <section class="screen" id="s-name">
+        <div class="stepbar"><i class="on"></i><i></i><i></i></div>
+        <div class="steplabel">NAME</div>
+        <div class="ob" style="padding-top:12px">
+          <div>
+            <h3>How you'll show up</h3>
+            <p>A stranger will not start a conversation with "Phone-143".</p>
+            <div class="nameinput" id="nameinput"><span class="ph" id="nametext">Your name</span></div>
+            <div class="hint">Sent in the handshake and carried in the advertisement — kept short because the scan response is only 31 bytes.</div>
+          </div>
+          <div class="art"></div>
+          <div class="obfoot"><span class="count">01 / 03</span><div class="btn wide" id="name-next">Next</div></div>
+        </div>
+      </section>
+
+      <!-- ===== INTERESTS ===== -->
+      <section class="screen" id="s-interests">
+        <div class="stepbar"><i class="on"></i><i class="on"></i><i></i></div>
+        <div class="steplabel">INTERESTS</div>
+        <div class="ob" style="padding-top:12px">
+          <div>
+            <h3>Something to talk about</h3>
+            <p>Shared with everyone you connect to, and highlighted when they match.</p>
+            <div class="chips" id="chips"></div>
+          </div>
+          <div class="art"></div>
+          <div class="obfoot"><span class="count" id="chip-count">0 of 6</span><div class="btn wide" id="int-next">Next</div></div>
+        </div>
+      </section>
+
+      <!-- ===== NEARBY ===== -->
+      <section class="screen" id="s-nearby">
+        <div class="head">
+          <div class="headrow">
+            <h2 class="h1">Nearby</h2>
+            <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" style="color:var(--textDim)" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+          </div>
+          <div class="sub"><i class="dot" id="nearby-dot"></i><span id="nearby-count">Looking around</span></div>
+        </div>
+        <div class="body" id="nearby-body">
+          <div class="empty" id="nearby-empty">
+            <div class="orbit" style="width:150px;height:150px">
+              <div class="orb-ring"></div><div class="orb-ring mid"></div>
+              <div class="orb-pulse" style="width:52px;height:52px;margin:-26px 0 0 -26px"></div>
+              <div class="orb-core" style="width:52px;height:52px;margin:-26px 0 0 -26px"><i style="box-shadow:13px 0 0 #fff"></i></div>
+            </div>
+            <h4>Nobody here yet</h4>
+            <p>Anyone who opens BLE Chat within about a room's distance turns up on their own.</p>
+          </div>
+          <div id="nearby-list" hidden>
+            <div class="rule" style="padding-top:8px">IN RANGE</div>
+            <div class="person" id="person-jais">
+              <div class="avatar" style="background:#CFFAFE;color:#155E75">J</div>
+              <div class="who">
+                <div class="name">Jaismeet</div>
+                <div class="meta" id="jais-meta"><span class="shared">Coding · Hiking in common</span></div>
+              </div>
+              <div class="bars" aria-hidden="true"><i class="lit" style="height:5px"></i><i class="lit" style="height:8px"></i><i class="lit" style="height:11px"></i><i class="lit" style="height:15px"></i></div>
+              <div class="pill solid" id="jais-action">Say hi</div>
+            </div>
+            <div class="progressline" id="jais-progress"></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ===== CHAT ===== -->
+      <section class="screen" id="s-chat">
+        <div class="chathead">
+          <svg class="back-caret" width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m14.5 5-7 7 7 7"/></svg>
+          <div class="avatar" style="width:36px;height:36px;font-size:14px;background:#CFFAFE;color:#155E75">J</div>
+          <div class="who">
+            <div class="name">Jaismeet</div>
+            <div class="meta" id="chat-state">Connected · strong signal</div>
+          </div>
+          <div class="bars" aria-hidden="true"><i class="lit" style="height:5px"></i><i class="lit" style="height:8px"></i><i class="lit" style="height:11px"></i><i class="lit" style="height:15px"></i></div>
+        </div>
+        <div class="thread" id="thread"></div>
+        <div class="composer">
+          <div class="field" id="field"><span class="ph" id="field-text">Message Jaismeet</span></div>
+          <div class="send" id="send">
+            <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 19V5"/><path d="m5.5 11.5 6.5-6.5 6.5 6.5"/></svg>
+          </div>
+        </div>
+      </section>
+
+      <!-- ===== CHATS ===== -->
+      <section class="screen" id="s-chats">
+        <div class="head">
+          <div class="headrow">
+            <h2 class="h1">Chats</h2>
+            <div class="disc" style="width:38px;height:38px">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+            </div>
+          </div>
+          <div class="sub" style="margin-top:5px"><span>1 conversation</span></div>
+        </div>
+        <div class="body" style="padding-top:12px">
+          <div class="person">
+            <div class="avatar" style="background:#CFFAFE;color:#155E75">J</div>
+            <div class="who">
+              <div class="name">Jaismeet</div>
+              <div class="meta">great</div>
+            </div>
+            <span style="font-size:11.5px;color:var(--textFaint)">now</span>
+          </div>
+        </div>
+      </section>
+
+      <!-- ===== PROFILE ===== -->
+      <section class="screen" id="s-profile">
+        <div class="head"><h2 class="h1">Profile</h2></div>
+        <div class="body">
+          <div class="identity">
+            <div class="mascot"><i></i></div>
+            <div class="nm">YG</div>
+            <div class="code">67fe b2fd bd87 4bca</div>
+          </div>
+          <div class="lrow"><div class="disc">★</div><div class="label"><b>My interests</b><small>Coding · Hiking · Movies</small></div><span class="chev">›</span></div>
+          <div class="lrow"><div class="disc">◎</div><div class="label"><b>Being found</b><small>Discoverable · scanning on</small></div><span class="chev">›</span></div>
+          <div class="lrow" id="row-appearance"><div class="disc">☀</div><div class="label"><b>Appearance</b><small id="appearance-value">Light</small></div><span class="chev" id="appearance-chev">›</span></div>
+          <div id="appearance-expand" hidden>
+            <div class="themes">
+              <div class="tcell" id="tcell-light"><div class="tcard sel" style="background:#FBFBF9"><div class="tbar" style="background:#E4E3DE"></div><div class="taccent"></div></div><span class="tlabel">Light</span></div>
+              <div class="tcell" id="tcell-dark"><div class="tcard" style="background:#18181B"><div class="tbar" style="background:#3F3F46"></div><div class="taccent"></div></div><span class="tlabel">Dark</span></div>
+              <div class="tcell"><div class="tcard" style="background:linear-gradient(105deg,#FBFBF9 50%,#18181B 50%)"><div class="tbar" style="background:#9A9AA3"></div><div class="taccent"></div></div><span class="tlabel">System</span></div>
+            </div>
+          </div>
+          <div class="lrow"><div class="disc">⌘</div><div class="label"><b>Privacy &amp; security</b><small>App lock off · 0 blocked</small></div><span class="chev">›</span></div>
+          <div class="lrow"><div class="disc">‹›</div><div class="label"><b>Advanced</b></div><span class="chev">›</span></div>
+        </div>
+      </section>
+
+      <!-- ===== BEING FOUND ===== -->
+      <section class="screen" id="s-found">
+        <div class="head" style="display:flex;align-items:center;gap:8px">
+          <svg class="back-caret" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m14.5 5-7 7 7 7"/></svg>
+          <h2 class="h1">Being found</h2>
+        </div>
+        <div class="body">
+          <div class="rule">THEM FINDING YOU</div>
+          <div class="lrow"><div class="disc">◉</div><div class="label"><b>Let people find me</b><small>Your name and interests go out in a broadcast anyone in range can hear</small></div><span class="switch"></span></div>
+          <div class="rule">YOU FINDING THEM</div>
+          <div class="lrow"><div class="disc">◎</div><div class="label"><b>Look for people automatically</b><small>Starts as soon as Bluetooth is available</small></div><span class="switch"></span></div>
+          <div class="lrow"><div class="disc">∞</div><div class="label"><b>Say hi automatically</b><small>Connect to everyone found, up to the limit below</small></div><span class="switch" id="sw-sayhi"></span></div>
+          <div class="rule">AT ONCE</div>
+          <div class="lrow">
+            <div class="disc">⚇</div>
+            <div class="label"><b>People at the same time</b><small>Bluetooth chips hold a handful of links</small></div>
+            <div style="display:flex;align-items:center;gap:8px">
+              <span class="pill" id="step-minus" style="width:30px;height:30px;padding:0;border-radius:50%;display:flex;align-items:center;justify-content:center">−</span>
+              <b id="step-value" style="font-size:15px;min-width:14px;text-align:center">6</b>
+              <span class="pill" style="width:30px;height:30px;padding:0;border-radius:50%;display:flex;align-items:center;justify-content:center">+</span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ===== PRIVACY ===== -->
+      <section class="screen" id="s-privacy">
+        <div class="head" style="display:flex;align-items:center;gap:8px">
+          <svg class="back-caret" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m14.5 5-7 7 7 7"/></svg>
+          <h2 class="h1">Privacy</h2>
+        </div>
+        <div class="body">
+          <div class="rule">THIS PHONE</div>
+          <div class="lrow"><div class="disc">⌘</div><div class="label"><b>Lock the app</b><small>Anyone holding this phone can read your conversations</small></div><span class="switch off" id="sw-lock"></span></div>
+          <div class="rule">WHAT THIS PHONE HOLDS</div>
+          <div class="lrow"><div class="disc">⛨</div><div class="label"><b>Message storage</b><small>Encrypted, key held by secure hardware. The key cannot be read out of the device, only used by it.</small></div></div>
+          <div class="rule">SECURITY HISTORY</div>
+          <div class="lrow"><div class="label"><small>Nothing to report. Identity changes, refused handshakes and verification decisions are recorded here as they happen.</small></div></div>
+        </div>
+      </section>
+
+      <!-- ===== DIAGNOSTICS ===== -->
+      <section class="screen" id="s-diag">
+        <div class="head" style="display:flex;align-items:center;gap:8px">
+          <svg class="back-caret" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m14.5 5-7 7 7 7"/></svg>
+          <div>
+            <h2 class="h1" style="font-size:26px">Diagnostics</h2>
+            <div class="sub" style="margin-top:4px;font-size:12px">YG · 1 live link</div>
+          </div>
+        </div>
+        <div class="tabsrow">
+          <div class="dtab on">Link</div><div class="dtab">Traffic</div><div class="dtab" id="dtab-logs">Logs</div>
+        </div>
+        <div class="body">
+          <div class="tiles">
+            <div class="tile"><small>ROLE</small><b>Central</b></div>
+            <div class="tile"><small>MTU</small><b>517</b></div>
+            <div class="tile"><small>SIGNAL</small><b class="good">−48 dBm</b></div>
+            <div class="tile"><small>DELIVERED</small><b class="good">3 of 3</b></div>
+          </div>
+          <div class="rule" style="padding-top:8px">RECENT</div>
+          <div class="logline"><span>18:22:06</span><em>[Router] ACK from Jaismeet</em></div>
+          <div class="logline"><span>18:22:05</span><em>[Router] TX MSG 4f21c8 on c:6C:45:78</em></div>
+          <div class="logline"><span>18:21:58</span><em>[PeerManager] handshake complete · verified</em></div>
+          <div class="logline"><span>18:21:57</span><em>[Central] negotiated MTU 517</em></div>
+          <div class="logline"><span>18:21:56</span><em>[Transport] discovered Jaismeet rssi=−48</em></div>
+        </div>
+      </section>
+
+      <div class="scrim" id="scrim"></div>
+
+      <div class="sheet" id="sheet">
+        <div class="grip"></div>
+        <div class="quote">hello</div>
+        <div class="timeline">
+          <div class="tl"><span class="tick">✓</span><b>Written</b><span>18:22:04</span></div>
+          <div class="tl"><span class="tick">✓</span><b>Left this phone</b><span>18:22:05</span></div>
+          <div class="tl"><span class="tick">✓</span><b>Jaismeet's phone confirmed it</b><span>18:22:06</span></div>
+        </div>
+        <div class="act"><span class="ic">⧉</span>Copy text</div>
+        <div class="act"><span class="ic">↻</span>Try sending again</div>
+        <div class="act danger"><span class="ic">🗑</span>Delete for me</div>
+      </div>
+
+      <div class="tap" id="tap"></div>
+    </div>
+
+    <div class="tabbar hidden" id="tabbar">
+      <div class="tab on" id="tab-nearby">
+        <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="2.6" fill="currentColor" stroke="none"/></svg>
+        <span>Nearby</span>
+      </div>
+      <div class="tab" id="tab-chats">
+        <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linejoin="round" aria-hidden="true"><path d="M4 5.5h16v11H9.5L5.5 20v-3.5H4Z"/></svg>
+        <span>Chats</span>
+      </div>
+      <div class="tab" id="tab-you">
+        <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" aria-hidden="true"><circle cx="12" cy="8" r="3.6"/><path d="M5.5 19.5c1.2-3.4 3.6-5 6.5-5s5.3 1.6 6.5 5"/></svg>
+        <span>You</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="caption"><b id="cap-title">First launch</b><span id="cap-note">what the app is, before it asks for anything</span></div>
+  <div class="railwrap"><div class="railfill" id="railfill"></div></div>
+</div>
+
+<script>
+(() => {
+  const $ = id => document.getElementById(id);
+  const phone = $('phone'), viewport = $('viewport'), tap = $('tap');
+  const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  /* ---------- human timing ----------
+     Nothing here runs on a round number. People do not tap on a metronome, do
+     not type at a constant rate, and pause to read before answering. Every
+     duration is a base value with jitter on top, so no two runs are the same. */
+  const rand  = (lo, hi) => lo + Math.random() * (hi - lo);
+  const jit   = (ms, pct = .16) => ms * (1 + rand(-pct, pct));
+  const flat  = ms => new Promise(r => setTimeout(r, reduce ? Math.min(ms, 180) : ms));
+  const sleep = ms => flat(jit(ms));
+
+  /* ---------- clock creeps forward like a real one ---------- */
+  let mins = 9 * 60 + 41;
+  const setClock = () => $('clock').textContent =
+    Math.floor(mins / 60) + ':' + String(mins % 60).padStart(2, '0');
+
+  /* ---------- tap indicator ---------- */
+  async function point(el, {hold = false} = {}){
+    if (!el) return;
+    const a = el.getBoundingClientRect(), b = viewport.getBoundingClientRect();
+    // Land near the middle, not dead centre — a thumb is not a cursor.
+    tap.style.left = (a.left - b.left + a.width  / 2 + rand(-7, 7)) + 'px';
+    tap.style.top  = (a.top  - b.top  + a.height / 2 + rand(-5, 5)) + 'px';
+    tap.style.transitionDuration = reduce ? '1ms' : Math.round(rand(230, 400)) + 'ms';
+    tap.classList.add('show');
+    await flat(reduce ? 30 : rand(250, 400));   // travel
+    await flat(reduce ? 0  : rand(40, 110));    // the beat before the finger lands
+    tap.classList.add(hold ? 'hold' : 'hit');
+    await flat(hold ? 660 : rand(110, 175));
+    tap.classList.remove('hit');
+    if (!hold) tap.classList.remove('show');
+  }
+  const release = () => tap.classList.remove('hold', 'show');
+
+  /* ---------- typing that reads as typing ---------- */
+  async function type(node, text, from = ''){
+    node.classList.remove('ph');
+    let buf = from;
+    for (const ch of text){
+      buf += ch;
+      node.innerHTML = buf + '<span class="caret"></span>';
+      // Slower after a space — the next word is still being thought of.
+      await flat(reduce ? 0 : ch === ' ' ? rand(130, 240) : rand(55, 125));
+    }
+    return buf;
+  }
+  async function backspace(node, buf, n){
+    for (let i = 0; i < n; i++){
+      buf = buf.slice(0, -1);
+      node.innerHTML = buf + '<span class="caret"></span>';
+      await flat(reduce ? 0 : rand(70, 120));
+    }
+    return buf;
+  }
+
+  /* ---------- screens ---------- */
+  let current = $('s-tour');
+  function show(id, {back = false} = {}){
+    const next = $(id);
+    if (next === current) return;
+    current.classList.remove('on');
+    current.classList.toggle('back', !back);
+    next.classList.remove('back');
+    next.classList.add('on');
+    current = next;
+  }
+  const tabs = on => ['nearby','chats','you'].forEach(t => $('tab-' + t).classList.toggle('on', t === on));
+  const caption = (t, n) => { $('cap-title').textContent = t; $('cap-note').textContent = n; };
+  const press = el => { el.classList.add('press'); setTimeout(() => el.classList.remove('press'), 150); };
+
+  /* ---------- interests ---------- */
+  const INTERESTS = ['Coding','Hiking','Movies','Music','Football','Cooking','Reading','Travel','Gym'];
+  $('chips').innerHTML = INTERESTS.map((c, i) =>
+    `<div class="chip" id="chip-${i}"><svg class="tickmark" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="m4.5 12.5 5 5 10-11"/></svg>${c}</div>`).join('');
+
+  /* ---------- thread ---------- */
+  const thread = $('thread');
+  let msgs = [], typingNow = false;
+  const TICK = {
+    'Sending':'<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><path d="M12 4v4"/><path d="M12 16v4" opacity=".45"/><path d="M4 12h4" opacity=".7"/><path d="M16 12h4" opacity=".3"/></svg>',
+    'Sent':'<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="m4.5 12.5 5 5 10-11"/></svg>',
+    'Delivered':'<svg width="15" height="12" viewBox="0 0 30 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="m2 12.5 5 5 10-11"/><path d="m12 15.5 2 2 10-11"/></svg>',
+    'Waiting to send':'<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></svg>'
+  };
+  function render(){
+    thread.innerHTML = (msgs.length ? '<div class="daymark">TODAY</div>' : '') +
+      msgs.map(m => {
+        const cls = m.state === 'Waiting to send' ? ' queued' : '';
+        const stamp = m.dir === 'out'
+          ? `<div class="stamp">${m.t}${m.state ? ' · ' + m.state + (TICK[m.state] || '') : ''}</div>`
+          : `<div class="stamp">${m.t}</div>`;
+        return `<div class="row ${m.dir}" data-id="${m.id}"><div class="bubble${cls}">${m.text}${stamp}</div></div>`;
+      }).join('') +
+      (typingNow ? '<div class="row in"><div class="bubble" style="padding:0"><div class="typing"><i></i><i></i><i></i></div></div></div>' : '');
+  }
+  render();
+
+  /* Send one message and walk it through its three states.
+     `slip` mistypes the tail, pauses, and corrects it — the one detail that
+     separates a person typing from a script printing. */
+  async function send(text, stamp, slip){
+    const field = $('field'), ft = $('field-text');
+    await point(field);
+    field.classList.add('focus');
+    await sleep(260);
+    if (slip){
+      let buf = await type(ft, slip);
+      await sleep(300);                                  // spotting it
+      buf = await backspace(ft, buf, slip.length - text.length + 1);
+      await type(ft, text.slice(buf.length), buf);
+    } else {
+      await type(ft, text);
+    }
+    await sleep(320);                                    // reading it back
+    await point($('send'));
+    press($('send'));
+    ft.textContent = 'Message Jaismeet'; ft.classList.add('ph'); field.classList.remove('focus');
+    const id = 'm' + msgs.length;
+    msgs.push({id, dir:'out', text, t:stamp, state:'Sending'});
+    render();
+    await sleep(700);
+    msgs.at(-1).state = 'Sent'; render();
+    await sleep(750);
+    msgs.at(-1).state = 'Delivered'; render();
+    return id;
+  }
+  /* They see it, think, then answer. */
+  async function reply(text, stamp, think){
+    typingNow = true; render();
+    await sleep(think);
+    typingNow = false;
+    msgs.push({id:'m' + msgs.length, dir:'in', text, t:stamp});
+    render();
+  }
+
+  /* ---------- the reel ---------- */
+  const RUN = 62000;
+  async function reel(){
+    // ---- Act 1: first launch --------------------------------------------
+    $('tabbar').classList.add('hidden');
+    caption('First launch', 'what the app is, before it asks for anything');
+    show('s-tour');
+    $('tour-title').textContent = 'Talk to the people around you';
+    $('tour-body').textContent = 'Your phone finds theirs directly. No account, no phone number, and it works with the network down.';
+    $('tour-count').textContent = '01 / 03';
+    $('tour-peer').style.opacity = 0;
+    await sleep(2600);
+
+    await point($('tour-next')); press($('tour-next'));
+    $('tour-title').textContent = 'About ten metres, and no further';
+    $('tour-body').textContent = 'Roughly a room, a carriage, a queue. Walk closer and someone appears on their own. Walk away and they drop off.';
+    $('tour-count').textContent = '02 / 03';
+    $('tour-peer').style.opacity = 1;
+    caption('Range', 'a room, a carriage, a queue — not a city');
+    await sleep(2500);
+
+    await point($('tour-next')); press($('tour-next'));
+    show('s-perm');
+    caption('Permissions, explained first', 'each one named the way Android names it');
+    await sleep(2700);
+
+    await point($('perm-next')); press($('perm-next'));
+    show('s-name');
+    caption('Your name', 'the difference between a device list and a people list');
+    await sleep(900);
+    await point($('nameinput'));
+    $('nameinput').classList.add('focus');
+    await sleep(260);
+    await type($('nametext'), 'YG');
+    await sleep(600);
+    await point($('name-next')); press($('name-next'));
+    $('nameinput').classList.remove('focus');
+
+    show('s-interests');
+    caption('Interests', 'they travel in the handshake and light up on a match');
+    await sleep(800);
+    let picked = 0;
+    for (const i of [0, 1, 2]){                     // Coding, Hiking, Movies
+      await point($('chip-' + i));
+      $('chip-' + i).classList.add('on');
+      $('chip-count').textContent = (++picked) + ' of 6';
+      await sleep(260);
+    }
+    await sleep(500);
+    await point($('int-next')); press($('int-next'));
+
+    // ---- Act 2: finding Jaismeet ----------------------------------------
+    mins = 18 * 60 + 21; setClock();
+    $('tabbar').classList.remove('hidden');
+    tabs('nearby'); show('s-nearby');
+    $('nearby-empty').hidden = false; $('nearby-list').hidden = true;
+    $('nearby-count').textContent = 'Looking around';
+    $('nearby-dot').classList.add('warm');
+    caption('Looking around', 'the radio starts as soon as it can');
+    await sleep(2200);
+
+    $('nearby-empty').hidden = true; $('nearby-list').hidden = false;
+    $('nearby-count').textContent = '1 person around you';
+    $('nearby-dot').classList.remove('warm');
+    caption('Jaismeet, in range', 'shared interests marked in the accent');
+    await sleep(2100);
+
+    await point($('jais-action'));
+    $('jais-meta').innerHTML = '<span class="working">Saying hello…</span>';
+    $('jais-action').outerHTML = '<div class="pill" id="jais-action">Cancel</div>';
+    $('jais-progress').style.width = '40%';
+    caption('Handshake', 'keys exchanged on first contact');
+    await sleep(900);
+    $('jais-progress').style.width = '100%';
+    await sleep(700);
+    $('jais-meta').innerHTML = '<span class="shared">Coding · Hiking in common</span>';
+    $('jais-action').outerHTML = '<div class="pill solid" id="jais-action">Open</div>';
+    $('jais-progress').style.width = '0%';
+    await sleep(700);
+
+    // ---- Act 3: the conversation ----------------------------------------
+    await point($('person-jais'));
+    show('s-chat');
+    msgs = []; render();
+    caption('Conversation', 'opened from the person, not a contact list');
+    await sleep(800);
+
+    mins = 18 * 60 + 22; setClock();
+    const first = await send('hello', '18:22');
+    caption('Sending → Sent → Delivered', 'each step is a real transport event');
+    await sleep(700);
+
+    await reply('hi', '18:22', 1500);
+    caption('Reply', 'over Bluetooth alone — no server in the middle');
+    await sleep(800);
+
+    await send('how are you', '18:23', 'how are yoy');
+    await sleep(600);
+    await reply('great', '18:23', 1700);
+    await sleep(900);
+
+    // press and hold
+    const bubble = document.querySelector(`[data-id="${first}"] .bubble`);
+    bubble.classList.add('lifted');
+    await point(bubble, {hold:true});
+    $('scrim').classList.add('on'); $('sheet').classList.add('on');
+    release();
+    caption('Press and hold', 'every step it took, with times');
+    await sleep(2600);
+    $('scrim').classList.remove('on'); $('sheet').classList.remove('on');
+    bubble.classList.remove('lifted');
+    await sleep(600);
+
+    // out of range, queued
+    msgs.push({id:'mq', dir:'out', text:'see you at the gate', t:'18:24', state:'Waiting to send'});
+    render();
+    $('chat-state').textContent = 'Out of range · will retry';
+    caption('Out of range', 'held on this phone until he is back');
+    await sleep(2000);
+
+    // ---- Act 4: settings -------------------------------------------------
+    await point($('tab-chats'));
+    tabs('chats'); show('s-chats');
+    caption('Chats', 'threads survive a dropped link');
+    await sleep(1600);
+
+    await point($('tab-you'));
+    tabs('you'); show('s-profile');
+    caption('Profile', 'the name and interests you just chose');
+    await sleep(1700);
+
+    await point(document.querySelectorAll('#s-profile .lrow')[1]);
+    show('s-found');
+    caption('Being found', 'who can see you, and who you look for');
+    await sleep(1400);
+    await point($('sw-sayhi'));
+    $('sw-sayhi').classList.add('off');
+    await sleep(500);
+    await point($('step-minus'));
+    $('step-value').textContent = '5';
+    await sleep(900);
+
+    show('s-profile', {back:true}); await flat(240);
+    await point(document.querySelectorAll('#s-profile .lrow')[3]);
+    show('s-privacy');
+    caption('Privacy', 'the honest answer about where your keys live');
+    await sleep(2000);
+
+    show('s-profile', {back:true}); await flat(240);
+    await point($('row-appearance'));
+    $('appearance-expand').hidden = false; $('appearance-chev').textContent = '⌄';
+    await sleep(600);
+    await point($('tcell-dark'));
+    phone.classList.add('dark');
+    $('appearance-value').textContent = 'Dark';
+    $('tcell-dark').querySelector('.tcard').classList.add('sel');
+    $('tcell-light').querySelector('.tcard').classList.remove('sel');
+    caption('Dark', 'one palette swap, every screen');
+    await sleep(1700);
+
+    await point(document.querySelectorAll('#s-profile .lrow')[4]);
+    show('s-diag');
+    caption('Diagnostics', 'what the radio actually did, in plain words');
+    await sleep(2400);
+
+    // ---- reset for the loop ---------------------------------------------
+    show('s-profile', {back:true}); await flat(200);
+    $('appearance-expand').hidden = true; $('appearance-chev').textContent = '›';
+    $('appearance-value').textContent = 'Light';
+    $('tcell-light').querySelector('.tcard').classList.add('sel');
+    $('tcell-dark').querySelector('.tcard').classList.remove('sel');
+    phone.classList.remove('dark');
+    $('sw-sayhi').classList.remove('off'); $('step-value').textContent = '6';
+    $('chat-state').textContent = 'Connected · strong signal';
+    INTERESTS.forEach((_, i) => $('chip-' + i).classList.remove('on'));
+    $('chip-count').textContent = '0 of 6';
+    $('nametext').textContent = 'Your name'; $('nametext').classList.add('ph');
+    mins = 9 * 60 + 41; setClock();
+    msgs = []; render();
+  }
+
+  /* ---------- progress rail ---------- */
+  const fill = $('railfill');
+  let t0 = performance.now();
+  (function frame(now){
+    fill.style.width = (((now - t0) % RUN) / RUN * 100).toFixed(2) + '%';
+    requestAnimationFrame(frame);
+  })(performance.now());
+
+  (async function loop(){
+    for(;;){ t0 = performance.now(); await reel(); await flat(600); }
+  })();
+})();
+</script>
+
+</body>
+</html>

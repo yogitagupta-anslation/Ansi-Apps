@@ -32,6 +32,24 @@ interface PresenceNative {
     count: number,
   ): Promise<boolean>;
   clearMessageNotification(conversationKey: string): Promise<boolean>;
+  getLastExitReason(): Promise<LastExit | null>;
+}
+
+/**
+ * How the process died last time, straight from Android.
+ *
+ * The one thing the app cannot work out for itself: a native crash, an ANR or a
+ * low-memory kill leave nothing running to write anything down, so without asking the
+ * system the app wakes up believing it was started normally.
+ */
+export interface LastExit {
+  /** Already in words — "Native crash", "Stopped responding", "Killed to free memory". */
+  reason: string;
+  description: string;
+  at: number;
+  status: number;
+  /** True for a crash or an ANR; false for the OS reclaiming memory or the user closing it. */
+  wasCrash: boolean;
 }
 
 const native: PresenceNative | undefined = (
@@ -156,5 +174,23 @@ export async function clearNotification(conversationId: string): Promise<void> {
     await native.clearMessageNotification(conversationId);
   } catch {
     // Nothing to recover from: a stale notification is a cosmetic problem.
+  }
+}
+
+/**
+ * Why the app closed last time, if the OS still remembers.
+ *
+ * Null when there is nothing recorded or Android is older than 11 — an unanswered
+ * question rather than an all-clear, and the UI says so.
+ */
+export async function getLastExitReason(): Promise<LastExit | null> {
+  if (!native?.getLastExitReason) {
+    return null;
+  }
+  try {
+    return await native.getLastExitReason();
+  } catch (err) {
+    logger.warn(TAG, `could not read the last exit reason: ${String(err)}`);
+    return null;
   }
 }

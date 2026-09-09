@@ -1,31 +1,36 @@
 import { MockBleTransport } from './MockBleTransport';
+import { centralAvailable, NativeBleTransport } from './NativeBleTransport';
+import { peripheralAvailable } from './peripheral';
 import { BleTransport } from './transport';
 
 export * from './protocol';
 export * from './transport';
-export { makeRoomCode } from './MockBleTransport';
+export { makeRoomCode, normalizeCode } from './advertisement';
+export {
+  DEFAULT_CAPACITY,
+  MAX_CAPACITY,
+  MIN_CAPACITY,
+} from './constants';
 
 /**
  * Builds the link the multiplayer screens talk to.
  *
- * Today that is always the simulator, which is what makes Multiplayer playable
- * in Expo Go with no second phone. Wiring the real radio means adding a driver
- * next to MockBleTransport that implements `BleTransport` and returning it here
- * when the native modules are present:
+ * Two phones in the same room get the real radio: the host advertises a GATT
+ * service and the joiners connect to it. That needs native code on both halves
+ * of the link -- react-native-ble-plx for the central side, the BlePeripheral
+ * module for the side that advertises -- so it only exists in a dev build.
  *
- *   1. Central side (scan / connect / subscribe): react-native-ble-plx.
- *   2. Peripheral side (advertise / accept writes): ble-plx cannot advertise, so
- *      the host needs a peripheral module such as react-native-ble-advertiser.
- *   3. One service UUID for the game, two characteristics: host->peers notify,
- *      peers->host write. `send` writes; `onMessage` fans notifications out.
- *   4. Request an MTU of 185 after connecting so a whole protocol message fits
- *      in one packet -- see MAX_PAYLOAD in protocol.ts.
- *   5. Both need a dev build plus runtime permissions: BLUETOOTH_SCAN,
- *      BLUETOOTH_ADVERTISE and BLUETOOTH_CONNECT on Android 12+, and
- *      NSBluetoothAlwaysUsageDescription on iOS.
- *
- * Nothing above this file knows which one it got.
+ * Launched from Expo Go there is no native radio to talk to, and rather than
+ * show a Multiplayer tab that can only fail, the simulator stands in: the same
+ * screens, the same protocol, opponents played by the solo AI. Everything above
+ * this file is identical either way, and `transport.simulated` is what the UI
+ * uses to say so out loud instead of pretending.
  */
 export function createTransport(): BleTransport {
-  return new MockBleTransport();
+  return nativeBleAvailable() ? new NativeBleTransport() : new MockBleTransport();
+}
+
+/** Both halves of the link have to be present; one alone cannot host a game. */
+export function nativeBleAvailable(): boolean {
+  return peripheralAvailable() && centralAvailable();
 }

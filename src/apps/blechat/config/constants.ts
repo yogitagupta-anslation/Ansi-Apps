@@ -107,6 +107,21 @@ export const REASSEMBLY_TIMEOUT_MS = 30_000;
 /** Handshake must complete within this window or the link is torn down. */
 export const HANDSHAKE_TIMEOUT_MS = 15_000;
 
+/**
+ * How long the higher-numbered identity waits before dialling anyway.
+ *
+ * Both phones see each other at the same moment and both dial, which on Android's stack
+ * collapses into one ACL link being torn down under the other — the link comes up, the
+ * stack drops it a millisecond later, and the greeting is refused because the connection
+ * it was written to no longer exists. Only one side should dial. Which side is decided by
+ * comparing identities, so the two phones always agree without exchanging anything.
+ *
+ * This is the fallback for when the other side never dials — an older build, or a phone
+ * that cannot advertise. Long enough for a real connection to have got going, short
+ * enough not to read as the app doing nothing.
+ */
+export const SIMULTANEOUS_DIAL_GRACE_MS = 3_000;
+
 /** How long we wait for an application-level ACK before marking a message failed. */
 export const ACK_TIMEOUT_MS = 20_000;
 
@@ -159,6 +174,55 @@ export const CONNECT_RETRY_BASE_DELAY_MS = 600;
 export const CONNECT_RETRY_MAX_DELAY_MS = 4_000;
 /** Android needs a moment after cancelling before the stack will accept a new attempt. */
 export const CONNECT_TEARDOWN_SETTLE_MS = 250;
+
+/**
+ * How long to let the GATT client settle after subscribing, before writing to it.
+ *
+ * Enabling notifications writes the CCCD, and the handshake's first write went out in
+ * the same millisecond that write completed — which Android refuses, because its busy
+ * flag is cleared from the completion callback rather than before it. A short pause
+ * turns a guaranteed first-attempt failure into a clean one.
+ */
+export const NOTIFY_SETTLE_MS = 180;
+
+/**
+ * Android refuses a sixth scan start inside thirty seconds.
+ *
+ * The limit is the platform's, not a guess: `startScan` fails with "Cannot start
+ * scanning operation" and the app is left not scanning at all. Pausing the scan around
+ * every connection makes it easy to reach — a handful of connect attempts is enough —
+ * and the failure looks to the user like the app has simply stopped finding anybody.
+ */
+export const SCAN_STARTS_PER_WINDOW = 5;
+export const SCAN_START_WINDOW_MS = 30_000;
+/** A little past the window edge, so a deferred start is not refused by a millisecond. */
+export const SCAN_START_MARGIN_MS = 750;
+
+/** Backoff between retries of a write the GATT client refused to start. */
+export const GATT_BUSY_RETRY_MS = 70;
+
+/**
+ * How many times to re-offer a refused write.
+ *
+ * Generous, because each wait is short and the alternative is dropping a frame that the
+ * radio never saw. A peer that is genuinely gone fails elsewhere — on the disconnect,
+ * not here.
+ */
+export const GATT_BUSY_MAX_RETRIES = 6;
+
+/**
+ * How long the radio stays off scanning after a link comes up.
+ *
+ * The handshake's first write happens in the moment right after a connection is
+ * established, and a scan running across that write is what Android refuses — the code
+ * already paused scanning for the connect itself for exactly this reason, then restarted
+ * it one line too early, in the `finally`, so the quiet window ended just before the
+ * operation that needed it most.
+ *
+ * Long enough to cover a handshake that goes normally, short enough that discovery is
+ * not noticeably held up when it does.
+ */
+export const POST_CONNECT_SCAN_QUIET_MS = 4_000;
 
 /**
  * How far ahead the outbound sequence number is persisted.

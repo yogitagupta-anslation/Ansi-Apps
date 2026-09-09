@@ -1,9 +1,10 @@
-import React from 'react';
-import {Text, View, type ViewStyle} from 'react-native';
+import React, {useEffect, useRef} from 'react';
+import {Animated, Easing, Text, View, type ViewStyle} from 'react-native';
 import {avatarHue, avatarInitial, radius, spacing, typography} from '../../config/theme';
 import {makeStyles, useTheme} from '../../theme/ThemeProvider';
 import {AppText, DenseText} from '../AppText';
 import {Icon, type IconName} from './Icon';
+import {useReduceMotion} from '../Motion';
 
 /**
  * Small presentational building blocks shared by the redesigned screens.
@@ -299,12 +300,58 @@ export function StatCard({
   tint: readonly [string, string];
 }) {
   const styles = useStyles();
+  const reduced = useReduceMotion();
+  const flash = useRef(new Animated.Value(0)).current;
+  const previous = useRef(value);
+
+  /**
+   * A tick when the number moves.
+   *
+   * These counters update while you watch them, and a figure that changes silently from
+   * 41 to 42 is a change you will miss — which matters here, because the question this
+   * screen answers is usually "is anything happening at all?". A brief lift and a fading
+   * wash behind the value says yes without a log line.
+   *
+   * Only on an increase: these are monotonic counters, so a decrease means they were
+   * reset, and animating a reset would suggest traffic that did not happen.
+   */
+  useEffect(() => {
+    const rose = value > previous.current;
+    previous.current = value;
+    if (!rose || reduced) {
+      return;
+    }
+    flash.setValue(1);
+    const anim = Animated.timing(flash, {
+      toValue: 0,
+      duration: 620,
+      easing: Easing.out(Easing.quad),
+      // Drives backgroundColor as well as transform, which the native driver cannot.
+      useNativeDriver: false,
+    });
+    anim.start();
+    return () => anim.stop();
+  }, [value, reduced, flash]);
+
   return (
     <View style={styles.statCard}>
       <View style={[styles.statIcon, {backgroundColor: tint[1]}]}>
         <Text style={[styles.statGlyph, {color: tint[0]}]}>{glyph}</Text>
       </View>
       <View style={styles.statText}>
+        <Animated.View
+          style={[
+            styles.statFlash,
+            {
+              backgroundColor: tint[1],
+              opacity: flash,
+              transform: [
+                {scaleX: flash.interpolate({inputRange: [0, 1], outputRange: [0.8, 1]})},
+              ],
+            },
+          ]}
+          pointerEvents="none"
+        />
         <DenseText style={styles.statValue} numberOfLines={1} adjustsFontSizeToFit>
           {String(value)}
         </DenseText>
@@ -439,6 +486,14 @@ const useStyles = makeStyles(t => ({
   tileValue: {...typography.caption, color: t.text, marginTop: 2},
   mono: {fontFamily: 'monospace'},
 
+  statFlash: {
+    position: 'absolute',
+    left: -4,
+    right: -4,
+    top: -2,
+    height: 22,
+    borderRadius: radius.sm,
+  },
   statCard: {
     flexDirection: 'row',
     alignItems: 'center',

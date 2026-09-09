@@ -2,9 +2,18 @@ import React from 'react';
 import {Pressable, ScrollView, StyleSheet, Text, View} from 'react-native';
 import {darkTheme} from '../config/theme';
 import {logger} from '../utils/logger';
+import {saveCrash} from '../utils/crashLog';
 
 interface Props {
   children: React.ReactNode;
+  /**
+   * Where "Go back" leads, when this boundary guards one screen rather than the app.
+   *
+   * A boundary around the whole navigator can only offer "try again", because there is
+   * nowhere else to be. A boundary around a single screen can put the user back where
+   * they came from, which is the difference between a dead end and a stumble.
+   */
+  onBack?: () => void;
 }
 
 interface State {
@@ -43,6 +52,7 @@ export class ErrorBoundary extends React.Component<Props, State> {
   componentDidCatch(error: Error, info: React.ErrorInfo): void {
     try {
       logger.error('App', `render crash: ${error.message}\n${info.componentStack ?? ''}`);
+      saveCrash('render', error, info.componentStack ?? undefined);
     } catch {
       // The logger itself depending on broken state is exactly the case this must survive.
     }
@@ -54,13 +64,27 @@ export class ErrorBoundary extends React.Component<Props, State> {
 
   render(): React.ReactNode {
     if (this.state.error) {
-      return <CrashScreen error={this.state.error} onReset={this.reset} />;
+      return (
+        <CrashScreen
+          error={this.state.error}
+          onReset={this.reset}
+          onBack={this.props.onBack}
+        />
+      );
     }
     return this.props.children;
   }
 }
 
-function CrashScreen({error, onReset}: {error: Error; onReset: () => void}) {
+function CrashScreen({
+  error,
+  onReset,
+  onBack,
+}: {
+  error: Error;
+  onReset: () => void;
+  onBack?: () => void;
+}) {
   return (
     <View style={styles.safe}>
       <Text style={styles.title}>Something went wrong</Text>
@@ -76,6 +100,11 @@ function CrashScreen({error, onReset}: {error: Error; onReset: () => void}) {
       <Pressable testID="errorBoundaryRetry" onPress={onReset} style={styles.button}>
         <Text style={styles.buttonText}>Try again</Text>
       </Pressable>
+      {onBack ? (
+        <Pressable testID="errorBoundaryBack" onPress={onBack} style={styles.button}>
+          <Text style={styles.buttonText}>Go back</Text>
+        </Pressable>
+      ) : null}
     </View>
   );
 }

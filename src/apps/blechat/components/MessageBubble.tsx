@@ -1,11 +1,12 @@
 import React from 'react';
 import {TouchableOpacity, View} from 'react-native';
-import {spacing, typography} from '../config/theme';
+import {radius, spacing, typography} from '../config/theme';
 import {makeStyles, useTheme} from '../theme/ThemeProvider';
 import type {Theme} from '../config/theme';
 import type {ChatMessage} from '../types/Message';
 import {AppText} from './AppText';
 import {LandIn} from './Motion';
+import {Icon, type IconName} from './ui/Icon';
 
 interface Props {
   message: ChatMessage;
@@ -30,7 +31,7 @@ interface Props {
  * "Sent" means a BLE write completed. "Delivered" means the peer returned an ACK.
  */
 const STATUS_TEXT: Record<ChatMessage['status'], string> = {
-  pending: 'Queued',
+  pending: 'Waiting to send',
   sending: 'Sending',
   sent: 'Sent',
   received: 'Delivered',
@@ -38,13 +39,28 @@ const STATUS_TEXT: Record<ChatMessage['status'], string> = {
 };
 
 /**
- * Delivery ticks, with the same meaning the rest of the stack uses:
- *   ...  queued, nothing on the radio yet
- *   ✓    the BLE write completed
- *   ✓✓   the peer returned an application-level ACK
- *   !    the write threw, or no ACK arrived
- * A single tick is never shown for an unacknowledged message, so the second tick always
- * means the other phone really has it.
+ * An icon per state, so the receipt reads without being read.
+ *
+ * A clock for something not yet on its way, an upward arrow while it is going, a tick
+ * once it has left, a double tick once the other phone confirmed it, and a warning when
+ * it did not arrive. The word stays beside it — the difference between "sent" and
+ * "delivered" is exactly the thing a glyph alone cannot express.
+ */
+const STATUS_ICON: Record<ChatMessage['status'], IconName> = {
+  pending: 'clock',
+  sending: 'arrowUp',
+  sent: 'check',
+  received: 'checkDouble',
+  failed: 'alert',
+};
+
+/**
+ * The mark beside a delivery state.
+ *
+ * One tick means it left this phone; two mean the other phone confirmed it. That is the
+ * distinction the whole receipt exists for, and it is expressed as one tick versus two
+ * rather than in the words — "sent" and "delivered" are what a reader needs, and the
+ * protocol's own vocabulary for the confirmation is not.
  */
 const STATUS_TICK: Record<ChatMessage['status'], string> = {
   pending: '···',
@@ -54,12 +70,22 @@ const STATUS_TICK: Record<ChatMessage['status'], string> = {
   failed: '!',
 };
 
+/** Written but not yet on the radio — the state the dashed bubble draws. */
+function isWaiting(status: ChatMessage['status']): boolean {
+  return status === 'pending';
+}
+
 function statusColor(status: ChatMessage['status'], t: Theme): string {
   if (status === 'failed') {
     return t.error;
   }
   if (status === 'received') {
     return t.ok;
+  }
+  if (isWaiting(status)) {
+    // On the dashed bubble there is no accent behind the text, so the accent-dim tone
+    // would be near-invisible. Amber, matching every other "waiting on the radio" state.
+    return t.warn;
   }
   // Ticks only ever render on the outgoing, accent-filled bubble.
   return t.onAccentDim;
@@ -90,6 +116,10 @@ export function MessageBubble({
       style={[
         styles.bubble,
         outgoing ? styles.out : styles.in,
+        // Nothing has gone out yet, so the bubble is not filled in yet either. A dashed
+        // outline says "written, not sent" at a glance — where a solid accent bubble
+        // with a small grey word under it says "sent" first and corrects itself second.
+        outgoing && isWaiting(message.status) && styles.queued,
         message.status === 'failed' && styles.failed,
       ]}>
       {/*
@@ -106,7 +136,12 @@ export function MessageBubble({
         </AppText>
       ) : null}
 
-      <AppText style={[styles.text, outgoing ? styles.textOut : styles.textIn]}>
+      <AppText
+        style={[
+          styles.text,
+          outgoing ? styles.textOut : styles.textIn,
+          outgoing && isWaiting(message.status) && {color: theme.textDim},
+        ]}>
         {message.text}
       </AppText>
 
@@ -123,9 +158,8 @@ export function MessageBubble({
             <AppText
               style={[styles.tick, {color: statusColor(message.status, theme)}]}
               numberOfLines={1}>
-              {(message.deliveredTo?.length ?? 0)}/{message.recipientCount ?? 0}
-              {' '}
-              {STATUS_TICK[message.status]}
+              {message.deliveredTo?.length ?? 0} of {message.recipientCount ?? 0}{' '}
+              delivered
             </AppText>
           </LandIn>
         ) : outgoing && message.status === 'sending' && message.fragmentProgress ? (
@@ -148,23 +182,32 @@ export function MessageBubble({
                 ]}
               />
             </View>
+            {/* The bar says how far; the count of frames underneath it is a fact about
+                the transport, not about the message, and belongs in Diagnostics. */}
             <AppText style={styles.progressLabel} numberOfLines={1}>
-              Sending {message.fragmentProgress.sent}/{message.fragmentProgress.total}
+              Sending
             </AppText>
           </View>
         ) : outgoing ? (
           // The tick AND the word. A tick alone is a guess on the reader's part, and the
-          // difference between "sent" (a BLE write completed) and "delivered" (the peer
-          // acknowledged it) is exactly the thing a tick cannot express.
-          // One tick is a completed BLE write; two is an application ACK. Keying the
-          // landing animation on the status means each tick appears at the moment its
-          // own event arrived — no timer ever advances it.
+          // difference between "sent" (it left this phone) and "delivered" (the other
+          // phone has it) is exactly the thing a tick cannot express. Keying the landing
+          // animation on the status means each mark appears at the moment its own event
+          // arrived — no timer ever advances it.
           <LandIn token={message.status}>
-            <AppText
-              style={[styles.tick, {color: statusColor(message.status, theme)}]}
-              numberOfLines={1}>
-              {STATUS_TICK[message.status]} {STATUS_TEXT[message.status]}
-            </AppText>
+            <View style={styles.receipt}>
+              <Icon
+                name={STATUS_ICON[message.status]}
+                size={11}
+                strokeWidth={2.4}
+                color={statusColor(message.status, theme)}
+              />
+              <AppText
+                style={[styles.tick, {color: statusColor(message.status, theme)}]}
+                numberOfLines={1}>
+                {STATUS_TEXT[message.status]}
+              </AppText>
+            </View>
           </LandIn>
         ) : null}
         {outgoing && message.status === 'failed' && (
@@ -201,26 +244,20 @@ const useStyles = makeStyles(t => ({
     minWidth: 96,
     // A larger radius with one corner tucked in: the tucked corner is what makes a
     // bubble read as coming FROM a side rather than floating.
-    borderRadius: 20,
-    paddingVertical: 11,
+    borderRadius: radius.xl,
+    paddingVertical: 10,
     paddingHorizontal: 14,
   },
-  out: {backgroundColor: t.bubbleOut, borderBottomRightRadius: 6},
-  in: {
-    backgroundColor: t.bubbleIn,
-    borderBottomLeftRadius: 6,
-    borderWidth: 1,
-    borderColor: t.divider,
-    // Barely there, and only on the incoming bubble: it is the one that shares a colour
-    // with the thread behind it, so it needs the lift to separate at all.
-    shadowColor: '#000',
-    shadowOpacity: t.isDark ? 0 : 0.04,
-    shadowRadius: 2,
-    shadowOffset: {width: 0, height: 1},
-  },
+  out: {backgroundColor: t.bubbleOut, borderBottomRightRadius: radius.sm},
+  queued: {backgroundColor: 'transparent', borderWidth: 1.5, borderStyle: 'dashed', borderColor: t.dash},
+  // A fill, never a border. The incoming bubble used to be white with a hairline and a
+  // shadow because it shared a colour with the thread behind it; giving it the sunk grey
+  // instead separates it with no outline at all — and on dark, a hairline round a bubble
+  // is louder than the bubble.
+  in: {backgroundColor: t.bubbleIn, borderBottomLeftRadius: radius.sm},
   failed: {borderWidth: 1, borderColor: t.error},
-  sender: {...typography.caption, fontWeight: '700', marginBottom: 3},
-  text: {...typography.body, lineHeight: 21},
+  sender: {...typography.caption, fontWeight: '500', marginBottom: 3},
+  text: {...typography.body},
   // An incoming bubble is light in light mode, so white text would be invisible.
   textOut: {color: t.bubbleOutText},
   textIn: {color: t.bubbleInText},
@@ -233,10 +270,12 @@ const useStyles = makeStyles(t => ({
     flexWrap: 'wrap',
     gap: spacing.xs,
   },
-  time: {...typography.caption, fontSize: 10},
-  metaOut: {color: t.onAccentDim},
+  // Mono, like every other measured value in the app: a clock time is one.
+  time: {...typography.monoTiny},
+  metaOut: {color: t.bubbleOutMeta},
   metaIn: {color: t.bubbleMeta},
-  tick: {...typography.caption, fontSize: 10, fontWeight: '600'},
+  tick: {...typography.caption, fontSize: 11, fontWeight: '500'},
+  receipt: {flexDirection: 'row', alignItems: 'center', gap: 4},
   progressRow: {flexDirection: 'row', alignItems: 'center', gap: 6, flex: 1, marginTop: 2},
   progressTrack: {
     flex: 1,

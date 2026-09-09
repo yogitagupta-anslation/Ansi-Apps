@@ -1,35 +1,26 @@
 import React, {useCallback, useEffect, useMemo, useState} from 'react';
-import {
-  Alert,
-  FlatList,
-  LayoutAnimation,
-  Platform,
-  RefreshControl,
-  UIManager,
-  View,
-} from 'react-native';
+import {Alert, FlatList, InteractionManager, LayoutAnimation, Linking, Platform, RefreshControl, UIManager, View} from 'react-native';
 import {useFocusEffect} from '@react-navigation/native';
-import {radius, spacing, typography} from '../config/theme';
+import {avatarHue, radius, spacing, typography} from '../config/theme';
 import {makeStyles, useTheme} from '../theme/ThemeProvider';
 import {sharedInterests} from '../config/interests';
+import {RECONNECT_MAX_ATTEMPTS} from '../config/constants';
 import {EmptyState} from '../components/ui/Surface';
+import {ConnectFailedSheet} from '../components/ConnectFailedSheet';
+import {classifyBleError} from '../ble/LinkErrors';
+import {NearbyEmpty} from '../components/NearbyEmpty';
 import {Screen} from '../components/ui/Screen';
-import {FadeIn, Pulse, Touchable} from '../components/Motion';
+import {BreathingDot, FadeIn, Spinner, Touchable} from '../components/Motion';
 import {Icon, type IconName} from '../components/ui/Icon';
 import {LABELS as LINK_STATE_LABELS} from '../components/ConnectionIndicator';
 import {PeerProfileSheet} from '../components/PeerProfileSheet';
-import {RECONNECT_MAX_ATTEMPTS} from '../config/constants';
+
 import {describeFailure} from '../ble/LinkErrors';
 import {AppText, DenseText} from '../components/AppText';
 import {InitialAvatar, SignalBars} from '../components/ui/Primitives';
+import {MascotAvatar} from '../components/ui/Mascot';
 import {Radar, isLive} from '../components/ui/Radar';
-import {
-  ConnectRing,
-  ConnectedRing,
-  StageChecklist,
-  isConnecting,
-  stageCaption,
-} from '../components/ui/ConnectProgress';
+import {CONNECT_STAGES, ConnectRing, ConnectedRing, isConnecting, stageIndex} from '../components/ui/ConnectProgress';
 import {ByteSparkline, TrafficRing, trafficLabel} from '../components/ui/Traffic';
 import {useLinkTraffic} from '../peers/useLinkTraffic';
 import {qualityLabel} from '../peers/LinkMetrics';
@@ -40,6 +31,7 @@ import type {Peer} from '../types/Peer';
 import type {LinkState} from '../types/BLE';
 import type {RootTabScreenProps} from '../navigation/types';
 import {relativeTime} from '../utils/time';
+import {formatDuration} from '../peers/LinkMetrics';
 import {isCentralLink} from '../utils/linkId';
 
 // Opt-in flag Android needs for LayoutAnimation outside a native-driver context. A no-op
@@ -90,6 +82,22 @@ export function NearbyScreen({navigation}: RootTabScreenProps<'Nearby'>) {
   // radio in the room.
   const [sort, setSort] = useState<SortMode>('match');
   const myInterests = useAppStore(s => s.settings.interests);
+  const links = useAppStore(s => s.links);
+  const permission = useAppStore(s => s.permission);
+  const queuedTotal = useAppStore(s => s.queuedTotal);
+  /** Refused permanently — Android will not show the dialog again. */
+  const permissionBlocked = permission.blocked.length > 0;
+  const connectedPeers = useMemo(
+    () => peers.filter(p => p.state === 'connected'),
+    [peers],
+  );
+
+  /** Hand the slot back. The scheduler will offer it to whoever is waiting. */
+  const onDisconnect = useCallback((peer: Peer) => {
+    if (peer.linkId) {
+      bleChat.peerManager.disconnect(peer.linkId).catch(() => undefined);
+    }
+  }, []);
 
   // Scan continuously while this screen is actually being looked at, and fall back to
   // the paced profile on the way out. Someone watching a discovery list wants results
@@ -123,6 +131,10 @@ export function NearbyScreen({navigation}: RootTabScreenProps<'Nearby'>) {
 
   const [verifiedOnly, setVerifiedOnly] = useState(false);
   const [profilePeerId, setProfilePeerId] = useState<string | null>(null);
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  // Held as {peer, name} rather than an id: the row already knows the display name it
+  // rendered, and re-deriving it here could disagree with what the tap was next to.
+  const [failureFor, setFailureFor] = useState<{peer: Peer; name: string} | null>(null);
 
   /** Chat peers carry live connection state; other devices are display-only. */
   const peerByLink = useMemo(() => {
@@ -220,9 +232,23 @@ export function NearbyScreen({navigation}: RootTabScreenProps<'Nearby'>) {
     // handshake has no peerId yet, so matching on peerId alone let the same person
     // appear live above and "Not in range · seen just now" below at the same time.
     const inRange = new Set<string>();
+    /**
+     * Advertised id prefixes of everything in range.
+     *
+     * Matched against the START of a known peerId, not against that peer's own stored
+     * prefix — an identified peer often has no prefix recorded, because the identity came
+     * from the handshake rather than from an advertisement. Comparing prefix to prefix
+     * therefore missed, and a peer who dropped and is being redialled appeared twice at
+     * once: live above, mid-handshake, and "Not in range" below. The prefix is a piece of
+     * the peerId, so this is the same test PeerManager already uses before dialling.
+     */
+    const inRangePrefixes: string[] = [];
     for (const row of chatRows) {
       if (row.peer?.peerId) inRange.add(row.peer.peerId);
-      if (row.peer?.peerIdPrefix) inRange.add(`p:${row.peer.peerIdPrefix}`);
+      if (row.peer?.peerIdPrefix) {
+        inRange.add(`p:${row.peer.peerIdPrefix}`);
+        inRangePrefixes.push(row.peer.peerIdPrefix);
+      }
       if (row.device.linkId) inRange.add(`l:${row.device.linkId}`);
     }
     return peers
@@ -231,6 +257,7 @@ export function NearbyScreen({navigation}: RootTabScreenProps<'Nearby'>) {
           p.peerId !== null &&
           !inRange.has(p.peerId) &&
           !(p.peerIdPrefix && inRange.has(`p:${p.peerIdPrefix}`)) &&
+          !inRangePrefixes.some(prefix => p.peerId!.startsWith(prefix)) &&
           !(p.linkId && inRange.has(`l:${p.linkId}`)),
       )
       .sort((a, b) => {
@@ -289,13 +316,32 @@ export function NearbyScreen({navigation}: RootTabScreenProps<'Nearby'>) {
     bleChat.peerManager.cancelConnect(linkId).catch(() => undefined);
   }, []);
 
+  /**
+   * Dial a peer, and explain it properly if it does not work.
+   *
+   * Two things this deliberately does NOT do. It does not report a cancellation — the
+   * user pressing Cancel is the one outcome they already know about, and an alert saying
+   * "Connection failed" on top of their own action is how a working app reads as broken.
+   * And it does not fall back to a raw platform string: the recovery sheet exists for
+   * exactly this, so a real failure opens it against the peer that failed.
+   */
   const onConnect = useCallback((linkId: string) => {
-    bleChat.peerManager.connect(linkId).catch(err =>
+    bleChat.peerManager.connect(linkId).catch(err => {
+      if (classifyBleError(err, 'connecting').reason === 'Cancelled') {
+        return;
+      }
+      const peer = bleChat.peerManager
+        .getPeers()
+        .find(p => p.linkId === linkId);
+      if (peer) {
+        setFailureFor({peer, name: peer.displayName ?? 'This person'});
+        return;
+      }
       Alert.alert(
-        'Connection failed',
+        'Could not connect',
         err instanceof Error ? err.message : String(err),
-      ),
-    );
+      );
+    });
   }, []);
 
   const onOpenChat = useCallback(
@@ -354,7 +400,11 @@ export function NearbyScreen({navigation}: RootTabScreenProps<'Nearby'>) {
       <FlatList
         data={chatRows}
         keyExtractor={item => item.device.linkId}
-        contentContainerStyle={styles.content}
+        contentContainerStyle={[
+          styles.content,
+          // So an empty state can centre itself in the space a list would have used.
+          rowCount === 0 ? styles.contentEmpty : null,
+        ]}
         refreshControl={
           <RefreshControl
             refreshing={rescanning}
@@ -372,66 +422,96 @@ export function NearbyScreen({navigation}: RootTabScreenProps<'Nearby'>) {
                   Nearby
                 </AppText>
                 <View style={styles.subtitleRow}>
-                  {/* The dot only lives while a scan does. A static one would look the
-                      same whether the radio is sweeping or wedged. */}
-                  <Pulse active={scanning}>
-                    <View
-                      style={[
-                        styles.subtitleDot,
-                        {backgroundColor: scanning ? theme.accent : theme.textFaint},
-                      ]}
-                    />
-                  </Pulse>
-                  <DenseText style={styles.subtitle} numberOfLines={1}>
-                    <DenseText style={styles.subtitleStrong}>
-                      {chatRows.length} peer{chatRows.length === 1 ? '' : 's'}
-                    </DenseText>
-                    {subtitleTail ? ` · ${subtitleTail}` : ''}
+                  {/* Green while the radio is sweeping, grey when it is not. The word
+                      beside it carries the same fact, because reduce-motion holds the
+                      dot still and a still dot must not be the only thing reporting. */}
+                  <BreathingDot
+                    size={6}
+                    active={scanning && !permissionBlocked && bluetoothState === 'PoweredOn'}
+                    color={
+                      permissionBlocked
+                        ? theme.error
+                        : bluetoothState !== 'PoweredOn'
+                        ? theme.warn
+                        : scanning
+                        ? theme.ok
+                        : theme.textFaint
+                    }
+                  />
+                  <DenseText
+                    style={[
+                      styles.subtitle,
+                      permissionBlocked
+                        ? {color: theme.error}
+                        : bluetoothState !== 'PoweredOn'
+                        ? {color: theme.warn}
+                        : null,
+                    ]}
+                    numberOfLines={1}>
+                    {permissionBlocked
+                      ? 'Permission needed'
+                      : bluetoothState !== 'PoweredOn'
+                      ? 'Bluetooth is off'
+                      : rowCount === 0
+                      ? scanning
+                        ? 'Looking around'
+                        : 'Not looking'
+                      : `${rowCount} ${rowCount === 1 ? 'person' : 'people'} around you`}
                   </DenseText>
                 </View>
               </View>
-              {/* Filled lavender chip rather than an outline, and purple rather than red
-                  — this is a mode toggle (Scan/Stop), not a destructive action, so it
-                  reads as the brand's own control language rather than a warning. */}
-              <Touchable scale={false} onPress={toggleScan} style={styles.stopButton}>
+
+              {/* One control in the corner, as drawn. Search opens the filters with it:
+                  sorting and the verified-only toggle are things you reach for when the
+                  list is long, and putting them on the screen permanently made a header
+                  out of a list that is usually three rows. */}
+              <Touchable
+                scale={false}
+                onPress={() => setFiltersOpen(v => !v)}
+                hitSlop={10}
+                style={styles.headerAction}
+                accessibilityRole="button"
+                accessibilityState={{expanded: filtersOpen}}
+                accessibilityLabel="Search and filter">
                 <Icon
-                  name={scanning ? 'stop' : 'radar'}
-                  color={theme.accent}
-                  size={scanning ? 12 : 14}
+                  name={filtersOpen ? 'close' : 'search'}
+                  color={filtersOpen ? theme.text : theme.textDim}
+                  size={20}
+                  strokeWidth={1.8}
                 />
-                <DenseText style={styles.stopText}>
-                  {scanning ? 'Stop' : 'Scan'}
-                </DenseText>
               </Touchable>
             </View>
 
-            {/* Four sort modes, all visible. The old control was a single button that
-                cycled through them, so choosing one meant tapping until the right label
-                came up and there was no way to see what the others were. */}
+            {/* One control, not four.
+                Showing all four modes at once meant a row of tabs above a list that is
+                usually two or three rows long — the control was competing with its own
+                results. It names the mode you are in and opens the rest on tap, so the
+                capability is unchanged and the screen is the list again. */}
+            {filtersOpen ? (
             <View style={styles.controls}>
-              <View style={styles.segmented}>
-                {SORTS.map(option => {
-                  const active = option.key === sort;
-                  return (
-                    <Touchable
-                      key={option.key}
-                      scale={false}
-                      onPress={() => setSort(option.key)}
-                      accessibilityLabel={`Sort by ${option.label}`}
-                      accessibilityState={{selected: active}}
-                      style={
-                        active ? [styles.segment, styles.segmentActive] : styles.segment
-                      }>
-                      <DenseText
-                        style={active ? styles.segmentTextActive : styles.segmentText}
-                        numberOfLines={1}
-                        maxFontSizeMultiplier={1}>
-                        {option.label}
-                      </DenseText>
-                    </Touchable>
-                  );
-                })}
-              </View>
+              <Touchable
+                scale={false}
+                onPress={() =>
+                  Alert.alert('Sort by', undefined, [
+                    ...SORTS.map(option => ({
+                      text: option.key === sort ? `${option.label}  ✓` : option.label,
+                      onPress: () => setSort(option.key),
+                    })),
+                    {text: 'Cancel', style: 'cancel' as const},
+                  ])
+                }
+                accessibilityLabel={`Sort by ${
+                  SORTS.find(o => o.key === sort)?.label ?? ''
+                }. Change sort order`}
+                style={styles.sortButton}>
+                <DenseText style={styles.sortLabel}>
+                  {SORTS.find(o => o.key === sort)?.label ?? ''}
+                </DenseText>
+                <Icon name="chevronDown" color={theme.textDim} size={13} />
+              </Touchable>
+
+              <View style={styles.grow} />
+
               <Touchable
                 scale={false}
                 onPress={() => setVerifiedOnly(v => !v)}
@@ -447,19 +527,23 @@ export function NearbyScreen({navigation}: RootTabScreenProps<'Nearby'>) {
                   color={verifiedOnly ? theme.ok : theme.textDim}
                   size={15}
                 />
+                <DenseText
+                  style={[
+                    styles.filterLabel,
+                    {color: verifiedOnly ? theme.ok : theme.textDim},
+                  ]}>
+                  Verified
+                </DenseText>
               </Touchable>
             </View>
-
-            {/* The map, above the list. Not instead of it: the radar answers "who is
-                around and how close", the rows answer "what can I do about them". */}
-            {chatRows.length > 0 ? (
-              <DiscoveryRadar blips={blips} scanning={scanning} />
             ) : null}
 
-            {/* Dashed, and one line. As a full promo card with an icon tile and two
-                lines of copy it read as an advertisement for a feature rather than a
-                thing you could tap. */}
-            {chatRows.length > 0 ? (
+            {/* No radar once there are rows.
+                It answers "who is around and how close", which the rows answer better
+                the moment there are any — and a 260pt dial above a three-row list pushed
+                the thing you came for below the fold. It stays on the empty state, where
+                it is the only thing that can say the radio is working. */}
+            {filtersOpen && chatRows.length > 1 ? (
               <Touchable scale={false} onPress={onConnectAll} style={styles.connectAll}>
                 <Icon name="broadcast" color={theme.textDim} size={15} />
                 <DenseText style={styles.connectAllText} numberOfLines={1}>
@@ -467,6 +551,65 @@ export function NearbyScreen({navigation}: RootTabScreenProps<'Nearby'>) {
                 </DenseText>
                 <DenseText style={styles.connectAllGo}>Go</DenseText>
               </Touchable>
+            ) : null}
+
+            {/*
+              At the radio's limit, said as a fact rather than a failure.
+
+              `budgetLearned` is only true once the chip has actually refused a link and
+              the scheduler lowered its budget to match — so this is never a guess about
+              capacity, it is the number the hardware gave us. Without it, the seventh
+              "Say hi" simply fails and looks like the app is broken.
+
+              The connected peers are listed with how long each link has been up, not with
+              an idleness ranking: the transport measures uptime and does not measure
+              time-since-last-byte, and inventing "idle 14 minutes" from uptime would be a
+              number that reads precise and is not.
+            */}
+            {links.budgetLearned && connectedPeers.length >= links.effectiveBudget ? (
+              <View style={styles.limitBlock}>
+                <View style={styles.limitHead}>
+                  <Icon name="alert" color={theme.warn} size={17} strokeWidth={1.9} />
+                  <AppText style={styles.limitTitle}>This phone is at its limit</AppText>
+                </View>
+                <DenseText style={styles.limitBody}>
+                  Bluetooth chips only hold a handful of links at once. Yours holds{' '}
+                  {links.effectiveBudget} and refused another — nothing is broken.
+                </DenseText>
+                <DenseText style={styles.limitLabel}>FREE UP A SLOT</DenseText>
+                {connectedPeers.map(p => (
+                  <View key={p.peerId ?? p.linkId} style={styles.limitRow}>
+                    <MascotAvatar
+                      size={32}
+                      tint={avatarHue(theme, p.peerId ?? p.linkId ?? 'x').fg}
+                    />
+                    <View style={styles.grow}>
+                      <AppText style={styles.limitName} numberOfLines={1}>
+                        {p.displayName ?? 'Someone nearby'}
+                      </AppText>
+                      <DenseText style={styles.limitMeta}>
+                        Connected {formatDuration(p.metrics?.currentUptimeMs ?? 0)}
+                      </DenseText>
+                    </View>
+                    <Touchable
+                      scale={false}
+                      onPress={() => onDisconnect(p)}
+                      style={[styles.pill, styles.pillNeutral]}>
+                      <DenseText style={[styles.pillText, styles.pillNeutralText]}>
+                        Disconnect
+                      </DenseText>
+                    </Touchable>
+                  </View>
+                ))}
+              </View>
+            ) : null}
+
+            {/* The list below is people who are in range right now; the footer's EARLIER
+                is people who were. Naming both is what makes the second one legible. */}
+            {chatRows.length > 0 ? (
+              <View style={styles.ruleHeader}>
+                <DenseText style={styles.ruleTitle}>IN RANGE</DenseText>
+              </View>
             ) : null}
           </>
         }
@@ -482,6 +625,7 @@ export function NearbyScreen({navigation}: RootTabScreenProps<'Nearby'>) {
               onOpenChat={onOpenChat}
               onBlock={onBlock}
               onOpenProfile={setProfilePeerId}
+              onExplainFailure={(p, n) => setFailureFor({peer: p, name: n})}
             />
           </FadeIn>
         )}
@@ -489,8 +633,7 @@ export function NearbyScreen({navigation}: RootTabScreenProps<'Nearby'>) {
           recent.length > 0 ? (
             <View style={styles.recentBlock}>
               <View style={styles.ruleHeader}>
-                <DenseText style={styles.ruleTitle}>RECENTLY CONNECTED</DenseText>
-                <View style={styles.rule} />
+                <DenseText style={styles.ruleTitle}>EARLIER</DenseText>
               </View>
               {recent.map((peer, index) => (
                 <FadeIn key={peer.peerId!} index={index}>
@@ -506,21 +649,48 @@ export function NearbyScreen({navigation}: RootTabScreenProps<'Nearby'>) {
           ) : null
         }
         ListEmptyComponent={
-          bluetoothState === 'PoweredOn' && scanning ? (
-            <DiscoveryRadar blips={blips} scanning={scanning} />
-          ) : (
-            <EmptyState
-              glyph={bluetoothState === 'PoweredOn' ? '◎' : '⃠'}
-              title={bluetoothState !== 'PoweredOn' ? 'Bluetooth is off' : 'Not scanning'}
-              detail={
-                bluetoothState !== 'PoweredOn'
-                  ? 'Turn Bluetooth on to find people nearby.'
-                  : 'Tap Scan to look for nearby Bluetooth LE devices.'
+          <NearbyEmpty
+            kind={
+              permissionBlocked
+                ? 'blocked'
+                : bluetoothState !== 'PoweredOn'
+                ? 'off'
+                : 'searching'
+            }
+            queuedCount={queuedTotal}
+            otherDevices={otherDevicesCount}
+            onPrimary={() => {
+              if (permissionBlocked) {
+                void Linking.openSettings();
+              } else if (bluetoothState !== 'PoweredOn') {
+                // Android cannot switch the radio on for us; the settings panel is the
+                // closest an app is allowed to get.
+                void Linking.sendIntent('android.settings.BLUETOOTH_SETTINGS').catch(() =>
+                  Linking.openSettings(),
+                );
+              } else {
+                onRescan();
               }
-            />
-          )
+            }}
+          />
         }
       />
+      <ConnectFailedSheet
+        visible={failureFor !== null}
+        name={failureFor?.name ?? ''}
+        failure={failureFor?.peer.failure ?? null}
+        attempts={failureFor?.peer.attempts}
+        maxAttempts={RECONNECT_MAX_ATTEMPTS}
+        onRetry={() => {
+          const link = failureFor?.peer.linkId;
+          setFailureFor(null);
+          if (link) {
+            onConnect(link);
+          }
+        }}
+        onClose={() => setFailureFor(null)}
+      />
+
       <PeerProfileSheet
         visible={profilePeerId !== null}
         peer={peers.find(p => p.peerId === profilePeerId) ?? null}
@@ -543,8 +713,17 @@ export function NearbyScreen({navigation}: RootTabScreenProps<'Nearby'>) {
             ? () => {
                 const p = peers.find(x => x.peerId === profilePeerId);
                 if (p) {
+                  /**
+                   * Close the sheet, THEN navigate — never both in the same frame.
+                   *
+                   * A Modal is a real window on Android, and pushing a screen while that
+                   * window is still being torn down is a native crash rather than a
+                   * warning: nothing in JavaScript is left to catch it, so the app simply
+                   * closes with no error anywhere. Waiting for the dismissal to finish
+                   * also stops the push animation from fighting it.
+                   */
                   setProfilePeerId(null);
-                  onOpenChat(p);
+                  InteractionManager.runAfterInteractions(() => onOpenChat(p));
                 }
               }
             : undefined
@@ -568,19 +747,26 @@ export function NearbyScreen({navigation}: RootTabScreenProps<'Nearby'>) {
 function DiscoveryRadar({
   blips,
   scanning,
+  /**
+   * Suppressed when an empty state is rendering directly beneath, which already says
+   * that nothing is here. Two sentences a line apart making the same point is exactly
+   * the noise the caption exists to avoid.
+   */
+  caption = true,
 }: {
   blips: React.ComponentProps<typeof Radar>['blips'];
   scanning: boolean;
+  caption?: boolean;
 }) {
   const styles = useStyles();
   return (
     <View style={styles.radarWrap}>
       <Radar size={260} blips={blips} scanning={scanning} />
-      <DenseText style={styles.radarCaption}>
-        {blips.length === 0
-          ? 'Anything advertising in range will appear here.'
-          : 'Distance from centre is measured RSSI — nothing is placed for looks.'}
-      </DenseText>
+      {caption && blips.length > 0 ? (
+        <DenseText style={styles.radarCaption}>
+          Distance from centre is measured RSSI — nothing is placed for looks.
+        </DenseText>
+      ) : null}
     </View>
   );
 }
@@ -622,6 +808,7 @@ function PeerCard({
   onOpenChat,
   onBlock,
   onOpenProfile,
+  onExplainFailure,
 }: {
   device: DiscoveredDevice;
   cls: DeviceClass;
@@ -632,6 +819,7 @@ function PeerCard({
   onOpenChat: (peer: Peer) => void;
   onBlock: (peerId: string, name: string) => void;
   onOpenProfile: (peerId: string) => void;
+  onExplainFailure: (peer: Peer, name: string) => void;
 }) {
   const styles = useStyles();
   const theme = useTheme();
@@ -652,35 +840,50 @@ function PeerCard({
   const name = peer?.displayName ?? device.name ?? 'Someone nearby';
 
   /**
-   * One line, not four badges.
+   * A word and a measurement, split.
    *
-   * State, quality, MTU and signal were a pill, a pill, a fragment and a number spread
-   * across two columns. Every one of them is still here — they are just facts about the
-   * same link, so they read as one sentence about it.
+   * These used to be one joined sentence — state, quality, MTU and signal all in the same
+   * grey run-on. They are two different kinds of thing: the first is a STATUS, which is
+   * what colour is for in this app, and the rest are MEASUREMENTS, which belong in mono
+   * so a column of them aligns down the list. Every value that was in the sentence is
+   * still here.
    */
-  const meta = failed
-    ? describeFailure(peer!.failure!)
-    : [
-        connected
-          ? traffic.active
-            ? trafficLabel(traffic)
-            : 'Connected'
-          : connecting
-          ? stageCaption(peer!.state)
-          : reconnecting
-          ? `Reconnecting ${peer!.reconnectAttempt}/${RECONNECT_MAX_ATTEMPTS}`
-          : busy
-          ? LINK_STATE_LABELS[peer!.state]
-          : unconnectable
-          ? 'Not connectable'
-          : 'Available',
-        connected ? qualityLabel(peer?.metrics?.quality ?? null) : null,
-        connected && peer?.gatt ? `MTU ${peer.gatt.mtu}` : null,
-        device.rssi !== null ? `${device.rssi} dBm` : null,
-        connected ? null : `seen ${relativeTime(device.lastSeen)}`,
-      ]
-        .filter(Boolean)
-        .join(' · ');
+  const word = failed
+    ? "Couldn't connect"
+    : connected
+    ? traffic.active
+      ? trafficLabel(traffic)
+      : 'Connected'
+    : connecting
+    ? 'Saying hello…'
+    : reconnecting
+    ? 'Trying to reconnect'
+    : busy
+    ? LINK_STATE_LABELS[peer!.state]
+    : unconnectable
+    ? "Can't chat — no BLE Chat on their phone"
+    : 'Available';
+
+  const wordColor = failed
+    ? theme.error
+    : connected
+    ? theme.ok
+    : reconnecting || busy || connecting
+    ? theme.warn
+    : unconnectable
+    ? theme.textDim
+    : theme.textDim;
+
+  // U+2212, not a hyphen: in a mono column the true minus is the width of a digit, so
+  // the values line up on their first significant figure instead of drifting a pixel.
+  const measurement = [
+    device.rssi !== null ? String(device.rssi).replace('-', '−') : null,
+    connected && peer?.gatt ? String(peer.gatt.mtu) : null,
+    connected ? qualityLabel(peer?.metrics?.quality ?? null) : null,
+    connected ? null : `seen ${relativeTime(device.lastSeen)}`,
+  ]
+    .filter(Boolean)
+    .join(' · ');
 
   const shared = peer ? sharedInterests(myInterests, peer.interests) : [];
   const rest = (peer?.interests ?? []).filter(
@@ -688,9 +891,9 @@ function PeerCard({
   );
 
   return (
-    <View style={failed ? [styles.card, styles.cardFailed] : styles.card}>
+    <View style={styles.row}>
       {/* ---- who ---- */}
-      <View style={styles.cardHead}>
+      <View style={styles.rowHead}>
         <Ringed
           state={peer?.state ?? null}
           trafficActive={traffic.active}
@@ -700,27 +903,22 @@ function PeerCard({
               scale={false}
               onPress={() => onOpenProfile(peer.peerId!)}
               accessibilityLabel={`View ${name}'s profile`}>
-              <InitialAvatar
-                name={name}
-                seed={peer.peerId}
-                size={44}
-                online={connected ? true : undefined}
-                bg={failed ? theme.error + '1f' : undefined}
-                fg={failed ? theme.error : undefined}
+              <MascotAvatar
+                size={38}
+                tint={avatarHue(theme, peer.peerId).fg}
+                status={connected ? theme.ok : null}
               />
             </Touchable>
           ) : (
-            <InitialAvatar
-              name={name}
-              seed={device.linkId}
-              size={44}
-              bg={failed ? theme.error + '1f' : undefined}
-              fg={failed ? theme.error : undefined}
+            <MascotAvatar
+              size={38}
+              tint={failed ? theme.neutral : avatarHue(theme, device.linkId).fg}
+              faded={failed ? 0.5 : 0}
             />
           )}
         </Ringed>
 
-        <View style={styles.cardHeadBody}>
+        <View style={styles.rowBody}>
           <View style={styles.nameRow}>
             <AppText style={styles.name} numberOfLines={1}>
               {name}
@@ -728,32 +926,70 @@ function PeerCard({
             {/* Every handshake is authenticated or the link never reaches "connected" —
                 this is not a claim beyond what the crypto already proved. */}
             {peer?.authenticated ? (
-              <Icon name="shield" color={theme.ok} size={13} strokeWidth={2} />
+              <Icon name="shield" color={theme.ok} size={12} strokeWidth={2} />
             ) : null}
             {peer?.peerId ? <FavoriteStar peerId={peer.peerId} /> : null}
-            {failed ? (
-              <View style={[styles.statePill, {backgroundColor: theme.error + '1f'}]}>
-                <DenseText
-                  style={[styles.statePillText, {color: theme.error}]}
-                  maxFontSizeMultiplier={1}>
-                  FAILED
-                </DenseText>
-              </View>
-            ) : null}
-            <View style={styles.grow} />
-            {!failed ? <SignalBars rssi={device.rssi} size="sm" /> : null}
           </View>
-          <DenseText
-            style={failed ? [styles.meta, {color: theme.error}] : styles.meta}
-            numberOfLines={2}>
-            {meta}
-          </DenseText>
+          <View style={styles.metaRow}>
+            {/* Spinning only while something is genuinely in flight. A static glyph
+                here would look identical whether a handshake was running or stuck. */}
+            {/* A glyph per state: a spinner only while something is genuinely in
+                flight, a link when one is up, a warning when it is not. */}
+            {connecting || reconnecting ? (
+              <Spinner size={12} color={theme.warn} />
+            ) : connected ? (
+              <Icon name="link2" size={12} color={theme.ok} strokeWidth={2.4} />
+            ) : failed ? (
+              <Icon name="alert" size={12} color={theme.error} strokeWidth={2.2} />
+            ) : null}
+            <DenseText style={[styles.metaWord, {color: wordColor}]} numberOfLines={1}>
+              {word}
+            </DenseText>
+          </View>
         </View>
-      </View>
 
-      {/* The five stages, named. The ring says how far; this says which — and the name
-          is the only part a bug report can use. */}
-      {connecting ? <StageChecklist state={peer!.state} /> : null}
+        <View style={styles.trail}>
+          {/* The bars and the number say the same thing, so only one of them is on the
+              row: bars here, where they sit above the action and read as "how well
+              could this go", and the dBm in the detail sheet for anyone who wants it. */}
+          {!failed && !unconnectable ? <SignalBars rssi={device.rssi} size="sm" /> : null}
+          <RowAction
+            styles={styles}
+            unconnectable={unconnectable}
+            cls={cls}
+            connected={connected}
+            busy={busy}
+            reconnecting={reconnecting}
+            failed={failed}
+            onOpenChat={() => onOpenChat(peer!)}
+            onCancel={() => onCancel(device.linkId)}
+            onConnect={() => onConnect(device.linkId)}
+          />
+        </View>
+
+        {/* Profile, block and the failure detail, behind one glyph.
+            They were three bordered icon buttons on a row that has just lost its own
+            border; as a menu they stay one tap away and stop being three more boxes. */}
+        {peer?.peerId || failed ? (
+          <Touchable
+            scale={false}
+            onPress={() =>
+              openPeerMenu({
+                name,
+                peerId: peer?.peerId ?? null,
+                onWhyFailed: failed ? () => onExplainFailure(peer!, name) : null,
+                onOpenProfile,
+                onBlock,
+              })
+            }
+            style={styles.more}
+            accessibilityLabel={`More options for ${name}`}>
+            <AppText style={styles.moreGlyph} maxFontSizeMultiplier={1}>
+              ···
+            </AppText>
+          </Touchable>
+        ) : null}
+      </View>
 
       {/* What is actually on the link, for the last few seconds. Rendered only while
           connected: on any other state there is no link to have traffic on. */}
@@ -761,108 +997,194 @@ function PeerCard({
         <ByteSparkline traffic={traffic} />
       ) : null}
 
-      {/* ---- why ---- */}
-      {!failed && !connecting && (shared.length > 0 || rest.length > 0) ? (
+      {/* ---- why ----
+          Only what you have in common, and in ink rather than the accent. The full list
+          of someone's interests is on their detail page; what belongs on a row you are
+          scanning is the reason to stop at this one. */}
+      {!failed && !connecting && shared.length > 0 ? (
         <View style={styles.interests}>
-          {shared.map(interest => (
-            <View key={interest} style={styles.chipShared}>
-              <DenseText style={styles.chipSharedText} maxFontSizeMultiplier={1}>
-                {interest}
-              </DenseText>
-            </View>
-          ))}
-          {shared.length > 0 ? (
-            <DenseText style={styles.sharedCount} maxFontSizeMultiplier={1}>
-              {shared.length} shared
-            </DenseText>
-          ) : null}
-          {rest.map(interest => (
-            <View key={interest} style={styles.chip}>
-              <DenseText style={styles.chipText} maxFontSizeMultiplier={1}>
-                {interest}
-              </DenseText>
-            </View>
-          ))}
+          <DenseText style={styles.interestShared} numberOfLines={1}>
+            {shared.join(' · ')}
+          </DenseText>
         </View>
       ) : null}
 
-      {/* ---- what you can do ---- */}
-      <View style={styles.actions}>
-        {unconnectable ? (
-          <View style={[styles.actionPrimary, styles.actionDisabled]}>
-            <DenseText style={styles.actionDisabledText} numberOfLines={1}>
-              {cls.kind === 'chat' ? 'Not connectable' : 'Not a BLE Chat device'}
-            </DenseText>
-          </View>
-        ) : connected && peer ? (
-          <Touchable
-            scale={false}
-            onPress={() => onOpenChat(peer)}
-            style={[styles.actionPrimary, styles.actionFilled]}>
-            <Icon name="chatBubble" color={theme.onAccent} size={14} />
-            <DenseText style={styles.actionFilledText}>Open chat</DenseText>
-          </Touchable>
-        ) : busy || reconnecting ? (
-          // Every attempt gets a way out. Tapping Connect by accident should not commit
-          // the phone to a full timeout plus the whole retry budget.
-          <Touchable
-            scale={false}
-            onPress={() => onCancel(device.linkId)}
-            style={[styles.actionPrimary, styles.actionOutlineNeutral]}>
-            <DenseText style={styles.actionOutlineNeutralText}>Cancel</DenseText>
-          </Touchable>
-        ) : failed ? (
-          <>
-            <Touchable
-              scale={false}
-              onPress={() => onConnect(device.linkId)}
-              style={[styles.actionPrimary, styles.actionOutlineNeutral]}>
-              <DenseText style={styles.actionOutlineNeutralText}>Retry</DenseText>
-            </Touchable>
-            <Touchable
-              scale={false}
-              onPress={() =>
-                Alert.alert('Why did this fail?', describeFailure(peer!.failure!))
-              }
-              style={[styles.actionPrimary, styles.actionPlain]}>
-              <DenseText style={styles.actionPlainText} numberOfLines={1}>
-                Why did this fail?
-              </DenseText>
-            </Touchable>
-          </>
-        ) : (
-          <Touchable
-            scale={false}
-            onPress={() => onConnect(device.linkId)}
-            style={[styles.actionPrimary, styles.actionOutline]}>
-            <Icon name="link" color={theme.accent} size={14} />
-            <DenseText style={styles.actionOutlineText}>Connect</DenseText>
-          </Touchable>
-        )}
+      {/* The handshake, as it happens. Five named stages are a lot of screen for
+          something that lasts two seconds; the bar says how far without the list. */}
+      {connecting ? (
+        <View style={styles.progressTrack}>
+          <View
+            style={[
+              styles.progressFill,
+              {width: `${Math.round(stageProgress(peer!.state) * 100)}%`},
+            ]}
+          />
+        </View>
+      ) : null}
 
-        {/* A known identity only — blocking a device we have never handshaken with would
-            block nothing real, since there is no proven peerId to refuse yet. */}
-        {!failed && peer?.peerId ? (
-          <>
-            <Touchable
-              scale={false}
-              onPress={() => onOpenProfile(peer.peerId!)}
-              style={styles.actionIcon}
-              accessibilityLabel="View profile">
-              <Icon name="device" color={theme.textDim} size={15} />
-            </Touchable>
-            <Touchable
-              scale={false}
-              onPress={() => onBlock(peer.peerId!, name)}
-              style={styles.actionIcon}
-              accessibilityLabel="Block">
-              <Icon name="block" color={theme.textDim} size={15} />
-            </Touchable>
-          </>
-        ) : null}
-      </View>
     </View>
   );
+}
+
+/**
+ * How far through a handshake a link is, as 0..1.
+ *
+ * Derived from the stage list rather than a timer, so the bar can only advance when the
+ * transport actually reaches the next stage. A bar driven by elapsed time would keep
+ * filling through a connection that had already stalled, which is the one thing it must
+ * never do.
+ */
+function stageProgress(state: LinkState): number {
+  const i = stageIndex(state);
+  if (i < 0) {
+    return 0.08;
+  }
+  return (i + 1) / CONNECT_STAGES.length;
+}
+
+/**
+ * The one action on a row.
+ *
+ * One, not three. Every state here already had a primary thing to do; what it also had
+ * was a second and third button competing with it for the same strip of width. The
+ * secondary ones now live behind the row's overflow glyph, which leaves this able to sit
+ * on the head row beside the name instead of claiming a band of its own.
+ *
+ * Only the connected state gets the accent outline: an accent on every row is the same
+ * as an accent on none.
+ */
+function RowAction({
+  styles,
+  unconnectable,
+  cls,
+  connected,
+  busy,
+  reconnecting,
+  failed,
+  onOpenChat,
+  onCancel,
+  onConnect,
+}: {
+  styles: ReturnType<typeof useStyles>;
+  unconnectable: boolean;
+  cls: DeviceClass;
+  connected: boolean;
+  busy: boolean;
+  reconnecting: boolean;
+  failed: boolean;
+  onOpenChat: () => void;
+  onCancel: () => void;
+  onConnect: () => void;
+}) {
+  const theme = useTheme();
+  if (unconnectable) {
+    return (
+      <View style={[styles.pill, styles.pillDisabled]}>
+        <DenseText style={[styles.pillText, styles.pillDisabledText]} numberOfLines={1}>
+          {cls.kind === 'chat' ? 'Unreachable' : 'Not chat'}
+        </DenseText>
+      </View>
+    );
+  }
+
+  // Connected is the only FILLED pill on the screen; an offer to start something is
+  // outlined in the accent, and a recovery is neutral. "Say hi" rather than "Connect"
+  // because that is what it does — the Bluetooth part is our problem, not yours.
+  const [label, onPress, kind, icon] = connected
+    ? (['Open', onOpenChat, 'filled', 'tabChats'] as const)
+    : busy || reconnecting
+    ? // Every attempt keeps a way out: tapping this by accident should not commit the
+      // phone to a full timeout plus the whole retry budget.
+      (['Cancel', onCancel, 'plain', null] as const)
+    : failed
+    ? (['Try again', onConnect, 'neutral', 'radar'] as const)
+    : (['Say hi', onConnect, 'accent', 'chatPlus'] as const);
+
+  return (
+    <Touchable
+      scale={false}
+      onPress={onPress}
+      style={[
+        styles.pill,
+        kind === 'filled'
+          ? styles.pillFilled
+          : kind === 'accent'
+          ? styles.pillAccent
+          : kind === 'neutral'
+          ? styles.pillNeutral
+          : styles.pillPlain,
+      ]}>
+      {icon ? (
+        <Icon
+          name={icon}
+          size={12}
+          strokeWidth={2}
+          color={
+            kind === 'filled'
+              ? theme.onAccent
+              : kind === 'accent'
+              ? theme.accent
+              : theme.text
+          }
+        />
+      ) : null}
+      <DenseText
+        style={[
+          styles.pillText,
+          kind === 'filled'
+            ? styles.pillFilledText
+            : kind === 'accent'
+            ? styles.pillAccentText
+            : styles.pillNeutralText,
+        ]}
+        numberOfLines={1}>
+        {label}
+      </DenseText>
+    </Touchable>
+  );
+}
+
+/**
+ * The row's overflow menu.
+ *
+ * A plain Alert rather than a custom sheet: it is two or three destinations, the platform
+ * already draws one correctly, and a bespoke sheet here would be a new overlay to
+ * maintain for no gain. Block is marked destructive so it reads as the one that cannot be
+ * undone by tapping again.
+ */
+function openPeerMenu({
+  name,
+  peerId,
+  onWhyFailed,
+  onOpenProfile,
+  onBlock,
+}: {
+  name: string;
+  peerId: string | null;
+  onWhyFailed: (() => void) | null;
+  onOpenProfile: (peerId: string) => void;
+  onBlock: (peerId: string, name: string) => void;
+}): void {
+  const buttons: Array<{
+    text: string;
+    style?: 'cancel' | 'destructive';
+    onPress?: () => void;
+  }> = [];
+
+  if (onWhyFailed !== null) {
+    buttons.push({text: 'Why did this fail?', onPress: onWhyFailed});
+  }
+  if (peerId !== null) {
+    buttons.push({text: 'View profile', onPress: () => onOpenProfile(peerId)});
+    buttons.push({
+      text: 'Block',
+      style: 'destructive',
+      onPress: () => onBlock(peerId, name),
+    });
+  }
+  buttons.push({text: 'Cancel', style: 'cancel'});
+
+  Alert.alert(name, undefined, buttons);
 }
 
 /**
@@ -969,188 +1291,168 @@ function RecentRow({
 
 const useStyles = makeStyles(t => ({
   content: {padding: spacing.lg + 4, paddingBottom: spacing.xl},
+  contentEmpty: {flexGrow: 1},
   grow: {flex: 1},
 
   // ---- header ------------------------------------------------------------
-  header: {flexDirection: 'row', alignItems: 'center', gap: spacing.md},
+  header: {flexDirection: 'row', alignItems: 'flex-start', gap: spacing.md},
   headerText: {flex: 1},
-  title: {fontSize: 26, fontWeight: '800', letterSpacing: -0.6, color: t.text},
-  subtitleRow: {flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 3},
+  // 28/600 at line-height 1, exactly as drawn — the title sits tight above its own
+  // status line rather than floating in a taller box.
+  title: {fontSize: 28, fontWeight: '600', letterSpacing: -1, lineHeight: 28, color: t.text},
+  headerAction: {paddingTop: 6, paddingLeft: spacing.sm},
+  subtitleRow: {flexDirection: 'row', alignItems: 'center', gap: 7, marginTop: 9},
   subtitleDot: {width: 6, height: 6, borderRadius: 3},
-  subtitle: {...typography.caption, color: t.textDim, flex: 1},
-  subtitleStrong: {color: t.text, fontWeight: '700'},
-  stopButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 7,
-    backgroundColor: t.accentSoft,
-    borderRadius: radius.pill,
-    paddingVertical: 8,
-    paddingHorizontal: 13,
-  },
-  stopText: {...typography.callout, color: t.accent, fontWeight: '700'},
+  subtitle: {fontSize: 13.5, lineHeight: 18, color: t.textDim, flex: 1},
 
   // ---- sort --------------------------------------------------------------
-  controls: {flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 14},
-  segmented: {
-    flex: 1,
-    flexDirection: 'row',
-    gap: 2,
-    backgroundColor: t.surfaceAlt,
-    borderRadius: 12,
-    padding: 3,
-  },
-  segment: {flex: 1, alignItems: 'center', paddingVertical: 7, borderRadius: 9},
-  // A raised chip, not a tint: the selected segment should look like it is on top of the
-  // track rather than a differently-coloured part of it.
-  segmentActive: {
-    backgroundColor: t.surface,
-    shadowColor: '#000',
-    shadowOpacity: t.isDark ? 0.3 : 0.08,
-    shadowRadius: 2,
-    shadowOffset: {width: 0, height: 1},
-    elevation: 1,
-  },
-  segmentText: {...typography.caption, color: t.textDim, fontWeight: '600'},
-  segmentTextActive: {...typography.caption, color: t.text, fontWeight: '700'},
+  controls: {flexDirection: 'row', alignItems: 'center', marginTop: 18},
+  // The current mode, named, with a chevron. No track, no tabs.
+  sortButton: {flexDirection: 'row', alignItems: 'center', gap: 5, paddingVertical: 6},
+  sortLabel: {...typography.caption, color: t.text, fontWeight: '500'},
   filterButton: {
-    width: 34,
-    height: 34,
-    borderRadius: 11,
-    borderWidth: 1,
-    borderColor: t.border,
-    backgroundColor: t.surface,
+    flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
+    gap: 5,
+    paddingVertical: 6,
+    paddingLeft: 10,
   },
-  filterButtonActive: {borderColor: t.ok, backgroundColor: t.tileGreen},
+  filterButtonActive: {},
+  filterLabel: {...typography.caption},
 
   connectAll: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.sm,
-    backgroundColor: t.surface,
-    borderWidth: 1,
-    borderStyle: 'dashed',
-    borderColor: t.textFaint + '77',
-    borderRadius: 14,
-    paddingHorizontal: 13,
-    paddingVertical: 11,
-    marginTop: 14,
-    marginBottom: 14,
+    paddingVertical: 12,
+    marginTop: 10,
   },
-  connectAllText: {...typography.callout, color: t.text, fontWeight: '600', flex: 1},
-  connectAllGo: {...typography.callout, color: t.accent, fontWeight: '700'},
+  connectAllText: {...typography.caption, color: t.textDim, flex: 1},
+  connectAllGo: {...typography.callout, color: t.accent},
 
-  // ---- peer card ---------------------------------------------------------
-  card: {
-    backgroundColor: t.surface,
-    borderWidth: 1,
-    borderColor: t.border,
-    borderRadius: 20,
-    padding: 14,
-    marginBottom: 10,
-    shadowColor: '#000',
-    shadowOpacity: t.isDark ? 0.2 : 0.05,
-    shadowRadius: 3,
-    shadowOffset: {width: 0, height: 1},
-    elevation: 1,
+  // ---- peer row ----------------------------------------------------------
+  //
+  // Not a card. This was a bordered, shadowed, rounded container holding three stacked
+  // bands; it is now a plain row on the page with a hairline beneath it. The negative
+  // margin cancels the list's own padding so that hairline runs edge to edge, which is
+  // what makes a run of rows read as one list rather than as a stack of separate things.
+  // The hairline sits on TOP of each row, not under it: that puts one under the section
+  // label and none dangling below the last row, which is what the design shows.
+  row: {
+    marginHorizontal: -(spacing.lg + 4),
+    paddingHorizontal: 18,
+    paddingVertical: 13,
+    borderTopWidth: 1,
+    borderTopColor: t.divider,
   },
-  cardFailed: {borderColor: t.error + '55'},
-  cardHead: {flexDirection: 'row', alignItems: 'center', gap: spacing.md},
-  cardHeadBody: {flex: 1, minWidth: 0},
+  rowHead: {flexDirection: 'row', alignItems: 'flex-start', gap: 12},
+  rowBody: {flex: 1, minWidth: 0},
   nameRow: {flexDirection: 'row', alignItems: 'center', gap: 5},
-  name: {fontSize: 16, fontWeight: '700', color: t.text, flexShrink: 1},
-  statePill: {borderRadius: radius.pill, paddingHorizontal: 8, paddingVertical: 2},
-  statePillText: {fontSize: 10, fontWeight: '800', letterSpacing: 0.4},
-  meta: {...typography.caption, color: t.textDim, fontSize: 11, marginTop: 3},
+  name: {fontSize: 16, fontWeight: '500', color: t.text, flexShrink: 1},
+  nameMuted: {...typography.headline, fontWeight: '400', color: t.textDim, flexShrink: 1},
+  metaRow: {flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 4},
+  // The status word carries the colour; nothing behind it does.
+  metaWord: {fontSize: 12.5, lineHeight: 17, flexShrink: 1},
+  // Measurements are mono so a column of them aligns down the list and stops competing
+  // with the name, which is the thing you actually scan for.
+  metaValue: {...typography.monoSmall, fontSize: 11.5, color: t.textDim},
 
-  interests: {
+  // Shared interests are coloured words rather than filled chips: the accent still marks
+  // them, without adding four more boxes to a row that just lost its own.
+  // Inside the name column, not indented under it: the design keeps interests in the
+  // same block as the name and status, which is why the row reads as one thing.
+  interests: {flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 6, marginTop: 5},
+  interestShared: {fontSize: 12.5, lineHeight: 17, color: t.text},
+  interestRest: {...typography.caption, color: t.textDim},
+  interestSep: {...typography.caption, color: t.separator},
+
+  // The handshake's progress, as a filling track.
+  progressTrack: {height: 3, borderRadius: 999, backgroundColor: t.divider, marginTop: 10, overflow: 'hidden'},
+  progressFill: {height: 3, borderRadius: 999, backgroundColor: t.warn},
+
+  // One pill, on the right of the head row, sized to its label.
+  // Icon and label together, as drawn. A filled pill sits a hair taller than an
+  // outlined one because it has no border to make up the difference.
+  pill: {
     flexDirection: 'row',
     alignItems: 'center',
-    flexWrap: 'wrap',
     gap: 5,
-    marginTop: 11,
-  },
-  // flexShrink: 0 — in a wrapping row a flex layout may squeeze a chip narrower than its
-  // text needs before wrapping it, which clips the last character with no ellipsis.
-  chipShared: {
-    backgroundColor: t.accentSoft,
     borderWidth: 1,
-    borderColor: t.accent + '33',
     borderRadius: radius.pill,
-    paddingHorizontal: 9,
-    paddingVertical: 3,
+    paddingVertical: 5,
+    paddingHorizontal: 12,
     flexShrink: 0,
   },
-  chipSharedText: {fontSize: 11, fontWeight: '700', color: t.accent},
-  sharedCount: {fontSize: 11, fontWeight: '600', color: t.textFaint},
-  chip: {
-    borderWidth: 1,
-    borderColor: t.divider,
-    borderRadius: radius.pill,
-    paddingHorizontal: 9,
-    paddingVertical: 3,
-    flexShrink: 0,
+  pillText: {fontSize: 12.5, fontWeight: '500'},
+  trail: {alignItems: 'flex-end', gap: 8, flexShrink: 0},
+  // A hair taller than an outlined pill, which has a border to make up the difference.
+  pillFilled: {
+    backgroundColor: t.accent,
+    borderColor: t.accent,
+    paddingVertical: 6,
+    paddingHorizontal: 13,
   },
-  chipText: {fontSize: 11, color: t.textFaint},
-
-  actions: {flexDirection: 'row', alignItems: 'center', gap: spacing.sm, marginTop: 12},
-  actionPrimary: {
-    flex: 1,
-    height: 38,
-    borderRadius: radius.pill,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 6,
-  },
-  actionFilled: {backgroundColor: t.accent},
-  actionFilledText: {...typography.callout, color: t.onAccent, fontWeight: '700'},
-  actionOutline: {borderWidth: 1, borderColor: t.accent},
-  actionOutlineText: {...typography.callout, color: t.accent, fontWeight: '700'},
-  actionOutlineNeutral: {borderWidth: 1, borderColor: t.border},
-  actionOutlineNeutralText: {...typography.callout, color: t.text, fontWeight: '700'},
-  actionPlain: {},
-  actionPlainText: {...typography.callout, color: t.textDim, fontWeight: '600'},
-  actionDisabled: {borderWidth: 1, borderColor: t.border, backgroundColor: t.surfaceAlt},
-  actionDisabledText: {...typography.callout, color: t.textDim, fontWeight: '600'},
-  actionIcon: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
-    borderWidth: 1,
-    borderColor: t.border,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
+  pillFilledText: {color: t.onAccent},
+  pillPlain: {borderColor: 'transparent', paddingHorizontal: 4},
+  pillAccent: {borderColor: t.accent},
+  pillAccentText: {color: t.accent},
+  pillNeutral: {borderColor: t.border},
+  pillNeutralText: {color: t.text},
+  pillDisabled: {borderColor: t.divider},
+  pillDisabledText: {color: t.textFaint},
+  // The overflow affordance, in the same language as the thread header's.
+  more: {paddingHorizontal: 6, paddingVertical: 4, flexShrink: 0},
+  moreGlyph: {fontSize: 17, color: t.textDim, lineHeight: 20},
 
   // ---- recently connected ------------------------------------------------
   recentBlock: {marginTop: 6},
-  ruleHeader: {
+  lookAgain: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: spacing.sm,
-    marginTop: 16,
-    marginBottom: 8,
+    gap: 8,
+    borderWidth: 1,
+    borderColor: t.border,
+    borderRadius: radius.pill,
+    paddingVertical: 10,
+    paddingHorizontal: 20,
   },
+  lookAgainText: {...typography.callout, color: t.text},
+
+  limitBlock: {
+    marginTop: 22,
+    paddingTop: 18,
+    borderTopWidth: 1,
+    borderTopColor: t.divider,
+  },
+  limitHead: {flexDirection: 'row', alignItems: 'center', gap: 10},
+  limitTitle: {...typography.title, fontSize: 18, color: t.text, flex: 1},
+  limitBody: {...typography.caption, color: t.textDim, marginTop: 8},
+  limitLabel: {...typography.overline, color: t.textDim, marginTop: 20, marginBottom: 4},
+  limitRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingVertical: 10,
+  },
+  limitName: {...typography.headline, fontSize: 15, color: t.text},
+  limitMeta: {...typography.caption, color: t.textDim, marginTop: 2},
+
+  // A label and space, no rule line. The hairlines under the rows already say where one
+  // group stops; a second horizontal line above the label was drawing the same boundary
+  // twice.
+  ruleHeader: {marginTop: 26, marginBottom: 2},
   ruleTitle: {...typography.overline, color: t.textDim},
-  rule: {flex: 1, height: 1, backgroundColor: t.divider},
   recentRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: spacing.md,
-    backgroundColor: t.surface,
-    borderWidth: 1,
-    borderColor: t.divider,
-    borderRadius: 18,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    marginBottom: spacing.sm,
+    gap: 13,
+    marginHorizontal: -(spacing.lg + 4),
+    paddingHorizontal: spacing.lg + 4,
+    paddingVertical: spacing.lg,
   },
-  recentName: {...typography.callout, fontSize: 14, fontWeight: '700', color: t.text},
-  recentMeta: {...typography.caption, color: t.textFaint, fontSize: 11, marginTop: 2},
-  recentAction: {...typography.callout, color: t.textDim, fontWeight: '700'},
+  recentName: {...typography.headline, fontWeight: '400', color: t.textDim},
+  recentMeta: {...typography.caption, color: t.textDim, marginTop: 3},
+  recentAction: {...typography.callout, color: t.accent},
 
   // ---- radar ---------------------------------------------------------------
   radarWrap: {alignItems: 'center', paddingTop: 6, paddingBottom: spacing.lg},

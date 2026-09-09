@@ -151,6 +151,49 @@ class BlePeripheral: RCTEventEmitter, CBPeripheralManagerDelegate {
     // Otherwise the delegate callback will pick it up.
   }
 
+  /**
+   * Rewrites the advertised local name in place.
+   *
+   * CoreBluetooth allows a running peripheral manager to re-advertise without touching
+   * its services, so unlike stop/start this leaves connected centrals alone -- which is
+   * the whole point: a room's occupancy changes every time somebody joins, and dropping
+   * the link to announce that would be absurd.
+   *
+   * startResolve is deliberately left alone; a refresh that fails leaves a stale scan
+   * entry, not a broken room.
+   */
+  @objc(updateAdvertisement:displayName:interestMask:resolver:rejecter:)
+  func updateAdvertisement(
+    _ peerIdPrefix: String,
+    displayName: String,
+    interestMask: NSNumber,
+    resolver resolve: @escaping RCTPromiseResolveBlock,
+    rejecter reject: @escaping RCTPromiseRejectBlock
+  ) {
+    guard let manager = manager, let serviceUUID = serviceUUID else {
+      reject("E_NOT_ADVERTISING", "Not advertising; call start first", nil)
+      return
+    }
+
+    let mask = UInt32(truncating: interestMask) & 0xFF_FFFF
+    localName = "BC-" + peerIdPrefix + String(format: "%06x", mask)
+
+    guard manager.state == .poweredOn else {
+      reject("E_BT_OFF", "Bluetooth is not powered on", nil)
+      return
+    }
+
+    if isAdvertising {
+      manager.stopAdvertising()
+      isAdvertising = false
+    }
+    manager.startAdvertising([
+      CBAdvertisementDataLocalNameKey: localName,
+      CBAdvertisementDataServiceUUIDsKey: [serviceUUID],
+    ])
+    resolve(["advertising": true])
+  }
+
   @objc(stop:rejecter:)
   func stop(
     _ resolve: @escaping RCTPromiseResolveBlock,

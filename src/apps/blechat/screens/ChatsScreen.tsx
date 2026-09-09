@@ -211,7 +211,7 @@ export function ChatsScreen({navigation}: RootTabScreenProps<'Chats'>) {
         <FadeIn index={3}>
           {chats.length === 0 ? (
             <EmptyState
-              glyph="✉"
+              icon="chatBubble"
               title="No conversations yet"
               detail="Connect to someone on Nearby to start chatting, or create a group."
             />
