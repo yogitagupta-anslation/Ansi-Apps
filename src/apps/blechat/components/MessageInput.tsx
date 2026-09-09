@@ -1,5 +1,5 @@
 import React, {useState} from 'react';
-import {TextInput, TouchableOpacity, View} from 'react-native';
+import {ScrollView, TextInput, TouchableOpacity, View} from 'react-native';
 import {radius, spacing, typography} from '../config/theme';
 import {makeStyles, useTheme} from '../theme/ThemeProvider';
 import {DenseText} from './AppText';
@@ -8,7 +8,14 @@ import {Icon} from './ui/Icon';
 interface Props {
   /** False only when there is no addressable peer at all — never merely "offline". */
   enabled: boolean;
-  disabledReason: string;
+  /**
+   * One-tap replies for this moment, or empty for none.
+   *
+   * Shown above the row and only while the field is untouched: the instant someone
+   * starts typing they have said what they want, and a row of guesses underneath it is
+   * in the way.
+   */
+  suggestions?: readonly string[];
   /**
    * The link is down, but the message will still be kept and sent later.
    *
@@ -30,7 +37,7 @@ interface Props {
 
 export function MessageInput({
   enabled,
-  disabledReason,
+  suggestions,
   queueing = false,
   queueingReason,
   onSend,
@@ -50,9 +57,31 @@ export function MessageInput({
     setText('');
   };
 
+  const showSuggestions =
+    enabled && !text.trim() && !!suggestions && suggestions.length > 0;
+
   return (
     <View style={styles.wrapper}>
-      {!enabled && <DenseText style={styles.disabled}>{disabledReason}</DenseText>}
+      {showSuggestions ? (
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
+          contentContainerStyle={styles.suggestions}>
+          {suggestions.map(suggestion => (
+            <TouchableOpacity
+              key={suggestion}
+              style={styles.chip}
+              onPress={() => onSend(suggestion)}
+              accessibilityRole="button"
+              accessibilityLabel={`Send "${suggestion}"`}>
+              <DenseText style={styles.chipText} maxFontSizeMultiplier={1.2}>
+                {suggestion}
+              </DenseText>
+            </TouchableOpacity>
+          ))}
+        </ScrollView>
+      ) : null}
 
       {/* Reassurance, not a warning. The message is going to be delivered — just not
           this second — so this says what will happen rather than what has failed. */}
@@ -135,7 +164,18 @@ const useStyles = makeStyles(t => ({
     paddingTop: 12,
     paddingBottom: spacing.lg,
   },
-  disabled: {...typography.caption, color: t.warn, marginBottom: spacing.sm},
+  // A row of one-tap replies, in the accent so they read as something to press rather
+  // than something to read. Outlined, not filled: the send button is the only filled
+  // thing in this bar and it should stay that way.
+  suggestions: {flexDirection: 'row', gap: 7, paddingBottom: 12, paddingRight: spacing.lg},
+  chip: {
+    borderWidth: 1,
+    borderColor: t.accent,
+    borderRadius: radius.pill,
+    paddingVertical: 7,
+    paddingHorizontal: 14,
+  },
+  chipText: {fontSize: 13, fontWeight: '500', color: t.accentQuiet},
   queueing: {
     flexDirection: 'row',
     alignItems: 'flex-start',

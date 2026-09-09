@@ -38,12 +38,7 @@ async function render(props: Partial<React.ComponentProps<typeof MessageInput>>)
   await act(async () => {
     tree = TestRenderer.create(
       <ThemeProvider mode="light">
-        <MessageInput
-          enabled
-          disabledReason="nothing to address"
-          onSend={() => undefined}
-          {...props}
-        />
+        <MessageInput enabled onSend={() => undefined} {...props} />
       </ThemeProvider>,
     );
   });
@@ -126,12 +121,14 @@ describe('composer', () => {
     const sent: string[] = [];
     const {tree, text} = await render({
       enabled: false,
-      disabledReason: 'Say hi on Nearby first',
       onSend: t => sent.push(t),
     });
 
-    expect(tree.root.findByType(TextInput).props.editable).toBe(false);
-    expect(text).toContain('Say hi on Nearby first');
+    const field = tree.root.findByType(TextInput);
+    expect(field.props.editable).toBe(false);
+    // The field says so itself; there is no separate line of explanation any more.
+    expect(field.props.placeholder).toBe('Not connected');
+    expect(text).not.toContain('Say hi');
 
     // Even if the submit fires, nothing may leave: there is no peer to queue against,
     // so accepting it would lose the message rather than delay it.

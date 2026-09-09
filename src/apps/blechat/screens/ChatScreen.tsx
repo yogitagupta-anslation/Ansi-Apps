@@ -31,6 +31,7 @@ import {AppText, DenseText} from '../components/AppText';
 import {FadeIn, SendIn, Touchable} from '../components/Motion';
 import {Icon} from '../components/ui/Icon';
 import {classifyBleError, describeFailure} from '../ble/LinkErrors';
+import {suggestionsFor} from '../config/suggestions';
 import {qualityLabel} from '../peers/LinkMetrics';
 import {avatarHue, elevation, radius, spacing, speakerTint, typography} from '../config/theme';
 import {makeStyles, useTheme} from '../theme/ThemeProvider';
@@ -456,6 +457,25 @@ export function ChatScreen({route, navigation}: RootStackScreenProps<'Chat'>) {
     openedWith.current = new Set(messages.map(m => m.id));
   }
 
+  /**
+   * What to offer above the composer right now.
+   *
+   * Openers on an empty thread, replies when theirs was the last word, and nothing when
+   * ours was — a suggestion to answer yourself is noise. Group threads are left alone:
+   * a one-tap "Okay!" addressed to everybody is a different decision from sending it to
+   * one person, and not one to make on somebody's behalf.
+   */
+  const suggestions = useMemo(() => {
+    if (isGroup) {
+      return [];
+    }
+    const last = messages.length > 0 ? messages[messages.length - 1] : null;
+    return suggestionsFor({
+      threadEmpty: messages.length === 0,
+      lastIncoming: last?.direction === 'incoming' ? last.text : null,
+    });
+  }, [messages, isGroup]);
+
   const [profileVisible, setProfileVisible] = useState(false);
   const blockedPeerIds = useAppStore(st => st.blockedPeerIds);
 
@@ -759,7 +779,7 @@ export function ChatScreen({route, navigation}: RootStackScreenProps<'Chat'>) {
                   peer?.displayName ?? displayName
                 } is back in range.`
           }
-          disabledReason="Say hi on Nearby first — there is nobody to address this to yet."
+          suggestions={suggestions}
           tone={!isGroup && peer ? dotColor(peer.state, theme) : undefined}
           onSend={onSend}
         />
