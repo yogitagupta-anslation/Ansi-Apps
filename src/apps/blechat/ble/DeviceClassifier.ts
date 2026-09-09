@@ -61,7 +61,8 @@ const SERVICE_MAP: Array<{uuid: string; cls: Omit<DeviceClass, 'kind'> & {kind: 
   {uuid: uuid16('180a'), cls: {kind: 'unknown', category: 'Generic', detail: 'Device Info', glyph: '?'}},
 ];
 
-const CHAT: DeviceClass = {
+/** Exported so a peer we are connected to can be listed without a scan result. */
+export const CHAT: DeviceClass = {
   kind: 'chat',
   category: 'BLE Chat',
   detail: 'Peer',

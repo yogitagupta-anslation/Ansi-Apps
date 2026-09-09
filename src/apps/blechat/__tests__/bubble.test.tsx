@@ -77,12 +77,15 @@ async function receiptIcons(msg: ChatMessage): Promise<string[]> {
 }
 
 /** Every string the bubble renders, flattened, so assertions read as "does it say X". */
-async function renderBubble(msg: ChatMessage): Promise<string> {
+async function renderBubble(
+  msg: ChatMessage,
+  props: Partial<React.ComponentProps<typeof MessageBubble>> = {},
+): Promise<string> {
   let renderer: TestRenderer.ReactTestRenderer;
   await act(async () => {
     renderer = TestRenderer.create(
       <ThemeProvider mode="light">
-        <MessageBubble message={msg} onRetry={() => {}} />
+        <MessageBubble message={msg} onRetry={() => {}} {...props} />
       </ThemeProvider>,
     );
   });
@@ -127,17 +130,42 @@ describe('message bubble', () => {
   });
 
   describe('outgoing delivery states', () => {
-    const cases: Array<[MessageStatus, string]> = [
+    /**
+     * A state that needs explaining says so in the bubble; one that has settled says so
+     * once, under the newest message. Repeating "Delivered" beside every bubble turned
+     * the receipt into wallpaper — read once, then never again — which is the opposite
+     * of what a receipt is for.
+     */
+    const inBubble: Array<[MessageStatus, string]> = [
       ['pending', 'Waiting to send'],
-      ['sending', 'Sending'],
-      ['sent', 'Sent'],
-      ['received', 'Delivered'],
       ['failed', 'Failed'],
     ];
 
-    it.each(cases)('reports %s as "%s"', async (status, label) => {
+    it.each(inBubble)('explains %s in the bubble itself', async (status, label) => {
       const rendered = await renderBubble(message({direction: 'outgoing', status}));
       expect(rendered).toContain(label);
+    });
+
+    const asReceipt: Array<[MessageStatus, string]> = [
+      ['sending', 'Sending'],
+      ['sent', 'Sent'],
+      ['received', 'Delivered'],
+    ];
+
+    it.each(asReceipt)('reports %s under the newest message', async (status, label) => {
+      const rendered = await renderBubble(
+        message({direction: 'outgoing', status}),
+        {showReceipt: true},
+      );
+      expect(rendered).toContain(label);
+    });
+
+    it.each(asReceipt)('says nothing about %s on an older message', async status => {
+      // Whether the message before last was delivered stops being news the moment
+      // another one goes out.
+      const rendered = await renderBubble(message({direction: 'outgoing', status}));
+      expect(rendered).not.toContain('Delivered');
+      expect(rendered).not.toContain('Sent');
     });
 
     /**

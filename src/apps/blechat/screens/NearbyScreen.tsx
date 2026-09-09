@@ -4,7 +4,7 @@ import {useFocusEffect} from '@react-navigation/native';
 import {avatarHue, radius, spacing, typography} from '../config/theme';
 import {makeStyles, useTheme} from '../theme/ThemeProvider';
 import {sharedInterests} from '../config/interests';
-import {RECONNECT_MAX_ATTEMPTS} from '../config/constants';
+import {BLE_SERVICE_UUID, RECONNECT_MAX_ATTEMPTS} from '../config/constants';
 import {EmptyState} from '../components/ui/Surface';
 import {ConnectFailedSheet} from '../components/ConnectFailedSheet';
 import {classifyBleError} from '../ble/LinkErrors';
@@ -24,7 +24,7 @@ import {CONNECT_STAGES, ConnectRing, ConnectedRing, isConnecting, stageIndex} fr
 import {ByteSparkline, TrafficRing, trafficLabel} from '../components/ui/Traffic';
 import {useLinkTraffic} from '../peers/useLinkTraffic';
 import {qualityLabel} from '../peers/LinkMetrics';
-import {classifyDevice, type DeviceClass} from '../ble/DeviceClassifier';
+import {CHAT, classifyDevice, type DeviceClass} from '../ble/DeviceClassifier';
 import {bleChat} from '../services/BleChatService';
 import {toggleFavoritePeer, useAppStore, type DiscoveredDevice} from '../state/appStore';
 import type {Peer} from '../types/Peer';
@@ -42,6 +42,15 @@ if (
 ) {
   UIManager.setLayoutAnimationEnabledExperimental(true);
 }
+
+/**
+ * How long the opening sweep gets before the screen is willing to say the room is empty.
+ *
+ * Long enough to cover a couple of advertising intervals plus a scan-window miss — the
+ * BLE defaults put a beacon out every 1–2 seconds and a scan does not hear every one —
+ * and short enough that a genuinely empty room does not sit on a false promise.
+ */
+const FIRST_LOOK_MS = 5_000;
 
 type SortMode = 'match' | 'signal' | 'name' | 'recent';
 
@@ -108,6 +117,28 @@ export function NearbyScreen({navigation}: RootTabScreenProps<'Nearby'>) {
       return () => bleChat.setScanIntensity('balanced');
     }, []),
   );
+
+  /**
+   * The opening sweep, held apart from an empty room.
+   *
+   * A phone advertises on its own schedule — a beacon every second or two — and a scan
+   * only hears one if it happens to be listening when it goes out. So for the first few
+   * seconds after this screen opens there is genuinely nothing to conclude, and the old
+   * behaviour concluded anyway: "Nobody here yet" appeared instantly, including with a
+   * second phone lying on the desk beside it. That is the single most damaging sentence
+   * this app can show, because it is the app's whole premise failing in front of you.
+   *
+   * Reset on every focus rather than once on mount: coming back to Nearby restarts the
+   * same sweep, and the same grace applies.
+   */
+  const [firstLook, setFirstLook] = useState(true);
+  useFocusEffect(
+    useCallback(() => {
+      setFirstLook(true);
+      const timer = setTimeout(() => setFirstLook(false), FIRST_LOOK_MS);
+      return () => clearTimeout(timer);
+    }, []),
+  );
   /**
    * Pull-to-rescan.
    *
@@ -153,6 +184,44 @@ export function NearbyScreen({navigation}: RootTabScreenProps<'Nearby'>) {
       cls: classifyDevice(device.serviceUuids, device.name),
       peer: peerByLink.get(device.linkId) ?? null,
     }));
+
+    /**
+     * Someone we are talking to belongs in the list, whether or not we scanned them.
+     *
+     * This list was built purely from scan results, and a peer who dialled US never
+     * appears in them: they are connected, their messages are arriving, and Nearby said
+     * "Nobody here yet". Two phones a metre apart, one showing the other and the other
+     * showing an empty room — which is exactly what it looked like from the outside.
+     *
+     * Being connected is stronger evidence of presence than an advertisement, so those
+     * peers are added here rather than waited for. The synthetic device row carries what
+     * is genuinely known — the link, the name from the handshake, the measured signal —
+     * and nothing that is not.
+     */
+    const seen = new Set(list.map(row => row.device.linkId));
+    for (const peer of peers) {
+      if (!peer.linkId || seen.has(peer.linkId)) {
+        continue;
+      }
+      if (peer.state === 'disconnected' || peer.state === 'failed') {
+        continue;
+      }
+      list.push({
+        device: {
+          linkId: peer.linkId,
+          address: peer.linkId.replace(/^[cp]:/, ''),
+          name: peer.displayName,
+          rssi: peer.metrics?.latestRssi ?? null,
+          lastSeen: peer.lastSeen,
+          isChatPeer: true,
+          isConnectable: true,
+          serviceUuids: [BLE_SERVICE_UUID],
+        },
+        cls: CHAT,
+        peer,
+      });
+      seen.add(peer.linkId);
+    }
 
     if (verifiedOnly) {
       list = list.filter(row => row.peer?.authenticated);
@@ -657,6 +726,7 @@ export function NearbyScreen({navigation}: RootTabScreenProps<'Nearby'>) {
                 ? 'off'
                 : 'searching'
             }
+            firstLook={firstLook}
             queuedCount={queuedTotal}
             otherDevices={otherDevicesCount}
             onPrimary={() => {

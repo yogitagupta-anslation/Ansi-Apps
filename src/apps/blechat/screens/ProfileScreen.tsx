@@ -85,8 +85,11 @@ export function ProfileScreen({navigation}: RootTabScreenProps<'You'>) {
 
   return (
     <Screen>
+      {/* "You", not "Profile" — the tab that opens this screen says You, and a heading
+          that renames the destination the moment you arrive makes the reader check
+          whether they landed where they meant to. */}
       <View style={styles.head}>
-        <AppText style={styles.title}>Profile</AppText>
+        <AppText style={styles.title}>You</AppText>
       </View>
 
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>

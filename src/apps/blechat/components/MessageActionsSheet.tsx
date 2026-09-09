@@ -16,9 +16,21 @@ import type {ChatMessage} from '../types/Message';
  * thread of similar-looking lines "Message" at the top of an alert does not tell you
  * which one you long-pressed. Seeing it float there does.
  *
+ * Every label here promises only what this app can actually do:
+ *
  * "Delete for me" says exactly that. There is no server copy to remove and the other
- * phone already has the bytes — a plain "Delete" would be claiming a reach this app does
- * not have.
+ * phone already has the bytes — a plain "Delete" would claim a reach this app has not
+ * got.
+ *
+ * "Edit" is offered only while a message is still on this phone. There is no edit packet
+ * in the protocol, so editing something already delivered would change your copy and
+ * leave theirs as it was — two people reading different words and no way to tell. On a
+ * message that has not gone yet, editing is simply true: it takes the text back to the
+ * composer to be sent as you meant it.
+ *
+ * The delivery detail sits in the sheet rather than behind another tap, because the
+ * question it answers — did this actually reach them, and when — is the reason people
+ * press and hold in the first place.
  */
 export function MessageActionsSheet({
   message,
@@ -26,12 +38,15 @@ export function MessageActionsSheet({
   onCopy,
   onRetry,
   onDelete,
+  onEdit,
 }: {
   message: ChatMessage | null;
   onClose: () => void;
   onCopy: () => void;
   onRetry: () => void;
   onDelete: () => void;
+  /** Takes an unsent message back to the composer. Absent when nothing can be edited. */
+  onEdit?: () => void;
 }) {
   const styles = useStyles();
   const theme = useTheme();
@@ -43,6 +58,17 @@ export function MessageActionsSheet({
 
   const outgoing = message.direction === 'outgoing';
   const canRetry = outgoing && message.status === 'failed';
+  /**
+   * Still ours to change.
+   *
+   * Pending means it never left; failed means it left and did not arrive, and the peer
+   * has nothing to disagree with. Anything sent or delivered is on another phone, where
+   * this app cannot reach it.
+   */
+  const canEdit =
+    outgoing && (message.status === 'pending' || message.status === 'failed') && !!onEdit;
+
+  const steps = outgoing ? deliverySteps(message) : null;
 
   return (
     <Modal visible transparent animationType="fade" onRequestClose={onClose} statusBarTranslucent>
@@ -61,8 +87,39 @@ export function MessageActionsSheet({
             </View>
           </View>
 
+          {/* What happened to it, in the order it happened, with the times. The
+              question people press and hold to answer. */}
+          {steps && steps.length > 0 ? (
+            <View style={styles.timeline}>
+              {steps.map(step => (
+                <View key={step.label} style={styles.step}>
+                  <Icon
+                    name={step.done ? 'check' : 'clock'}
+                    size={13}
+                    strokeWidth={2.4}
+                    color={step.done ? theme.ok : theme.textFaint}
+                  />
+                  <AppText
+                    style={[styles.stepLabel, !step.done && {color: theme.textFaint}]}
+                    numberOfLines={1}>
+                    {step.label}
+                  </AppText>
+                  <DenseText style={styles.stepTime}>{step.at}</DenseText>
+                </View>
+              ))}
+            </View>
+          ) : null}
+
           <View style={styles.menu}>
             <Row icon="copy" label="Copy text" onPress={onCopy} first />
+            {canEdit ? (
+              <Row
+                icon="pencil"
+                label="Edit"
+                hint="Brings it back to the composer"
+                onPress={onEdit!}
+              />
+            ) : null}
             {canRetry ? <Row icon="arrowUp" label="Try sending again" onPress={onRetry} /> : null}
             <Row
               icon="trash"
@@ -76,6 +133,35 @@ export function MessageActionsSheet({
       </View>
     </Modal>
   );
+}
+
+/**
+ * The message's journey, from what is actually recorded about it.
+ *
+ * Only steps that genuinely happened get a time. A step still ahead of the message is
+ * listed without one rather than hidden, so the gap is visible: "left this phone" with
+ * nothing after it is the clearest way to say the other phone has not confirmed yet.
+ */
+function deliverySteps(
+  message: ChatMessage,
+): Array<{label: string; at: string; done: boolean}> {
+  const at = (ms: number) =>
+    new Date(ms).toLocaleTimeString(undefined, {
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+    });
+  const left = message.status !== 'pending';
+  const arrived = message.status === 'received';
+  return [
+    {label: 'Written', at: at(message.receivedAt), done: true},
+    {
+      label: message.status === 'failed' ? 'Could not leave this phone' : 'Left this phone',
+      at: left ? at(message.receivedAt) : '',
+      done: left && message.status !== 'failed',
+    },
+    {label: 'Their phone confirmed it', at: arrived ? at(message.receivedAt) : '', done: arrived},
+  ];
 }
 
 function Row({
@@ -118,6 +204,16 @@ const useStyles = makeStyles(t => ({
     backgroundColor: t.isDark ? 'rgba(4,4,6,0.62)' : 'rgba(23,23,26,0.42)',
   },
   stack: {paddingHorizontal: 14},
+  timeline: {
+    backgroundColor: t.surface,
+    borderRadius: radius.lg,
+    paddingVertical: 6,
+    paddingHorizontal: 16,
+    marginBottom: 10,
+  },
+  step: {flexDirection: 'row', alignItems: 'center', gap: 11, paddingVertical: 7},
+  stepLabel: {flex: 1, fontSize: 13.5, color: t.text},
+  stepTime: {...typography.caption, color: t.textDim, fontVariant: ['tabular-nums']},
   bubbleRowOut: {alignItems: 'flex-end'},
   bubbleRowIn: {alignItems: 'flex-start'},
   bubble: {maxWidth: '80%', borderRadius: 18, paddingVertical: 9, paddingHorizontal: 13},
