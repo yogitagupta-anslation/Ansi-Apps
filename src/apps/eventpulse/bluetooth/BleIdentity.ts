@@ -106,8 +106,20 @@ export class PeerIdentityService {
   }
 
   /** Derive the 4-hex-character avatar id, stable for the lifetime of an event. */
-  deriveAvatarId(seed: Uint8Array, eventId: string): string {
-    const mac = hmacSha256Utf8(seed, `eventpulse/v1/avatar/${eventId}`);
+  /**
+   * The avatar id travels in the same frame as the peer id, so it has to rotate
+   * on the same epoch or it defeats the rotation entirely: a passive observer
+   * who cannot follow `peerId` across a boundary could simply follow these two
+   * bytes instead and reassemble a device's whole day. Folding the epoch into
+   * the MAC — exactly as `derivePeerId` does — makes the broadcast tuple rotate
+   * as a unit, which is what the module header promises.
+   *
+   * `now` defaults to the wall clock so callers that just want "the id to
+   * advertise right now" need not thread a timestamp through.
+   */
+  deriveAvatarId(seed: Uint8Array, eventId: string, now: number = Date.now()): string {
+    const epoch = this.epochAt(now);
+    const mac = hmacSha256Utf8(seed, `eventpulse/v1/avatar/${eventId}/${epoch}`);
     return bytesToHex(mac.slice(0, 2));
   }
 

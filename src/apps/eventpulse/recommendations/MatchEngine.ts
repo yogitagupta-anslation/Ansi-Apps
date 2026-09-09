@@ -48,7 +48,16 @@ const WEIGHTS = {
   // it is the one thing they actually told us.
   goalDirectHit: 38,
   goalTopicHit: 16,
-  statedIntentTheyWantMe: 34,
+  /**
+   * INVARIANT: this must stay strictly above the most similarity can ever score,
+   * which is `3 * sharedInterest + 3 * sharedSkill` = 36 given the caps applied
+   * below. The header's central claim — "if someone wrote 'looking to meet:
+   * founders' and you are a founder, that beats any number of overlapping tags"
+   * — is exactly this inequality, and at 34 it was false: a stranger who
+   * happened to share three interests and three skills outranked the person who
+   * wrote down that they came to meet someone with your role.
+   */
+  statedIntentTheyWantMe: 37,
   statedIntentIWantThem: 30,
   mutualConnection: 9,
   sharedInterest: 7,

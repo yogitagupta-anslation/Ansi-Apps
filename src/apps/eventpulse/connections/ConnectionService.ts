@@ -9,6 +9,15 @@
  * Messaging is deliberately out of scope for the MVP (§24). What a connection
  * buys you today is: a saved profile, a private note, and a record you can act
  * on after the event.
+ *
+ * HOW A CONNECTION IS ACTUALLY MADE NOW. `request()` and `respond()` below are
+ * the server-backed path: they write optimistically and queue an API call. With
+ * no backend they can never be delivered, so they are no longer what the Connect
+ * button drives. The live path is `ConnectionRequestCoordinator`, which performs
+ * the handshake over BLE GATT and calls `applyLocalState()` here to record the
+ * outcome. This class remains the single store of record for connections —
+ * there is exactly one place a `Connection` is persisted — and the outbox path
+ * is retained only for a deployment that does configure a server.
  */
 
 import type { Connection, ConnectionState, EventId, ProfileId } from '../types';
@@ -161,6 +170,77 @@ export class ConnectionService {
     this.emit();
 
     void this.flush();
+  }
+
+  /**
+   * Record a state the BLE handshake arrived at.
+   *
+   * This is the write path for `ConnectionRequestCoordinator`, and it
+   * deliberately does NOT touch the outbox: the exchange already happened over
+   * the radio, so there is nothing to deliver to anyone. One record per person
+   * per event — a second attempt updates the existing row rather than leaving a
+   * trail of settled ones, which is what keeps the Connections screen showing a
+   * person once.
+   */
+  async applyLocalState(input: {
+    eventId: EventId;
+    profileId: ProfileId;
+    state: ConnectionState;
+    requestId?: string;
+    note?: string;
+    card?: Connection['card'];
+    expiresAt?: number;
+    at: number;
+  }): Promise<Connection> {
+    const existing = this.list().find(
+      (connection) =>
+        connection.profileId === input.profileId && connection.eventId === input.eventId,
+    );
+
+    const connection: Connection = {
+      id: existing?.id ?? `ble_${input.profileId}_${input.eventId}`,
+      eventId: input.eventId,
+      profileId: input.profileId,
+      state: input.state,
+      createdAt: existing?.createdAt ?? input.at,
+      updatedAt: input.at,
+      // A note or a card already captured is never lost by a later transition:
+      // the decline of a second request must not erase the first one's context.
+      note: input.note ?? existing?.note,
+      card: input.card ?? existing?.card,
+      requestId: input.requestId ?? existing?.requestId,
+      expiresAt: input.expiresAt,
+      // Nothing to sync: this state came off the radio, not out of a queue.
+      pendingSync: false,
+    };
+
+    this.connections.set(connection.id, connection);
+    await this.persist();
+    this.emit();
+    return connection;
+  }
+
+  /**
+   * Drop a record entirely.
+   *
+   * Used when a provisional record — one filed against a peer whose real
+   * identity was not known yet — is reconciled onto the stable profileId it
+   * turned out to belong to. Without this the pair would show twice in
+   * Connections: once as the person, once as the peer id they were dialled by.
+   */
+  async discardLocal(eventId: EventId, profileId: ProfileId): Promise<void> {
+    const existing = this.list().find(
+      (connection) => connection.profileId === profileId && connection.eventId === eventId,
+    );
+    if (!existing) return;
+    this.connections.delete(existing.id);
+    await this.persist();
+    this.emit();
+  }
+
+  /** Everyone with a request waiting on them, in either direction. */
+  pendingOutgoing(): Connection[] {
+    return this.list().filter((connection) => connection.state === 'outgoing_pending');
   }
 
   /** Private note about someone you met. Never leaves the device. */

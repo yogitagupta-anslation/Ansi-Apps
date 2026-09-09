@@ -23,6 +23,7 @@ import type {
 } from '../types';
 import type { SyncStatus } from '../event/EventService';
 import type { SavedPerson } from '../connections/SavedPeopleService';
+import type { PendingRequest } from '../connections/ConnectionRequestCoordinator';
 import type { PresenceModel } from '../presence/PresenceController';
 import type { ZoomLevel } from '../positioning/Clustering';
 import type { BlePermissionState } from '../bluetooth/BleTransport';
@@ -68,6 +69,18 @@ export interface SessionState {
   sync: SyncStatus | null;
 
   connections: Connection[];
+  /**
+   * Requests waiting on the user, newest first.
+   *
+   * Separate from `connections` because these need a decision, not a listing —
+   * and because the record in `connections` is only half the story offline: the
+   * card that came over the radio is what lets us name the person at all.
+   */
+  incomingRequests: PendingRequest[];
+  /** Whether a GATT link can be opened at all on this build and device. */
+  gattAvailable: boolean;
+  /** Why not, when it is not. Shown to the user verbatim. */
+  gattUnavailableReason: string | null;
   blockedProfileIds: ReadonlySet<ProfileId>;
 
   /** Map view state. */
@@ -123,6 +136,9 @@ export const initialSession: SessionState = {
   sync: null,
 
   connections: [],
+  incomingRequests: [],
+  gattAvailable: false,
+  gattUnavailableReason: null,
   blockedProfileIds: new Set(),
 
   orientation: 'heading_up',
