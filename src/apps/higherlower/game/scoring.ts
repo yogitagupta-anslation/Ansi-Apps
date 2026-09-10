@@ -119,7 +119,12 @@ export function rankRacers(summary: RoundSummary): Racer[] {
       const da = closestDistance(a, summary.target);
       const db = closestDistance(b, summary.target);
       if (da !== db) return da - db;
-      return (a.finishedAt ?? a.guesses[0]?.at ?? 0) - (b.finishedAt ?? b.guesses[0]?.at ?? 0);
+      const byClock =
+        (a.finishedAt ?? a.guesses[0]?.at ?? 0) - (b.finishedAt ?? b.guesses[0]?.at ?? 0);
+      if (byClock !== 0) return byClock;
+      // Same reason as below: two equally-close shots at the same moment must
+      // resolve identically on every phone.
+      return a.id.localeCompare(b.id);
     });
   }
   const alive = (r: Racer) => r.finishedAt !== null;
@@ -132,7 +137,12 @@ export function rankRacers(summary: RoundSummary): Racer[] {
     if (summary.mode === 'efficiency' && a.guesses.length !== b.guesses.length) {
       return a.guesses.length - b.guesses.length;
     }
-    return (a.finishedAt ?? 0) - (b.finishedAt ?? 0);
+    const byClock = (a.finishedAt ?? 0) - (b.finishedAt ?? 0);
+    if (byClock !== 0) return byClock;
+    // A genuine dead heat has to break the same way on every phone. Array order
+    // is whatever order that device happened to meet people in, so it breaks on
+    // the id instead: arbitrary, but arbitrary in the same direction everywhere.
+    return a.id.localeCompare(b.id);
   });
 }
 

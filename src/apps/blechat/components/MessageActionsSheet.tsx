@@ -7,6 +7,7 @@ import {Touchable} from './Motion';
 import {Icon, type IconName} from './ui/Icon';
 import {makeStyles, useTheme} from '../theme/ThemeProvider';
 import {radius, spacing, typography} from '../config/theme';
+import {describeSchedule} from '../utils/time';
 import type {ChatMessage} from '../types/Message';
 
 /**
@@ -39,6 +40,8 @@ export function MessageActionsSheet({
   onRetry,
   onDelete,
   onEdit,
+  onSendNow,
+  onEditSchedule,
 }: {
   message: ChatMessage | null;
   onClose: () => void;
@@ -47,6 +50,10 @@ export function MessageActionsSheet({
   onDelete: () => void;
   /** Takes an unsent message back to the composer. Absent when nothing can be edited. */
   onEdit?: () => void;
+  /** Release a held message immediately. Only meaningful while it is still held. */
+  onSendNow?: () => void;
+  /** Reopen the picker on a held message's time. */
+  onEditSchedule?: () => void;
 }) {
   const styles = useStyles();
   const theme = useTheme();
@@ -57,6 +64,7 @@ export function MessageActionsSheet({
   }
 
   const outgoing = message.direction === 'outgoing';
+  const isScheduled = message.status === 'scheduled';
   const canRetry = outgoing && message.status === 'failed';
   /**
    * Still ours to change.
@@ -66,9 +74,16 @@ export function MessageActionsSheet({
    * this app cannot reach it.
    */
   const canEdit =
-    outgoing && (message.status === 'pending' || message.status === 'failed') && !!onEdit;
+    outgoing &&
+    (message.status === 'pending' ||
+      message.status === 'failed' ||
+      // A held message is the clearest case of all: it demonstrably has not left.
+      isScheduled) &&
+    !!onEdit;
 
-  const steps = outgoing ? deliverySteps(message) : null;
+  // Nothing has happened to a held message yet, so there is no journey to draw. The
+  // header above the bubble already says when it will start.
+  const steps = outgoing && !isScheduled ? deliverySteps(message) : null;
 
   return (
     <Modal visible transparent animationType="fade" onRequestClose={onClose} statusBarTranslucent>
@@ -111,7 +126,27 @@ export function MessageActionsSheet({
           ) : null}
 
           <View style={styles.menu}>
-            <Row icon="copy" label="Copy text" onPress={onCopy} first />
+            {/*
+              A held message has two questions of its own, and they come first because
+              they are the reason you pressed and held it: is it still going out when I
+              said, and can I stop waiting. Everything below applies to any message.
+            */}
+            {isScheduled && onSendNow ? (
+              <Row icon="arrowUp" label="Send now" onPress={onSendNow} first />
+            ) : null}
+            {isScheduled && onEditSchedule ? (
+              <Row
+                icon="clock"
+                label="Change the time"
+                hint={
+                  message.scheduledFor
+                    ? `Currently ${describeSchedule(message.scheduledFor)}`
+                    : undefined
+                }
+                onPress={onEditSchedule}
+              />
+            ) : null}
+            <Row icon="copy" label="Copy text" onPress={onCopy} first={!isScheduled} />
             {canEdit ? (
               <Row
                 icon="pencil"

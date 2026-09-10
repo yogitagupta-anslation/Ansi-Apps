@@ -1,4 +1,5 @@
 import React, { useMemo, useState } from 'react';
+import type { LayoutChangeEvent } from 'react-native';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { Verdict } from '../types/game';
 import { knownRange, parGuesses, rangeSize } from '../game/engine';
@@ -14,7 +15,7 @@ import Keypad from './Keypad';
 import RacerLane from './RacerLane';
 import RangeTrack from './RangeTrack';
 import DuelPanel from './DuelPanel';
-import { Palette, fonts, radius, spacing, verdictColor } from '../theme/tokens';
+import { MIN_TOUCH, Palette, glyph, radius, spacing, type, verdictColor } from '../theme/tokens';
 import { useTheme, useThemedStyles } from '../theme/ThemeProvider';
 
 interface GuessBoardProps {
@@ -55,6 +56,20 @@ export default function GuessBoard({
   const { colors } = useTheme();
   const styles = useThemedStyles(makeStyles);
   const [wagered, setWagered] = useState(false);
+  /**
+   * How tall the readout area actually turned out to be.
+   *
+   * The board is a fixed stack -- lanes, range track, readout, trail, keypad --
+   * and on a short screen the total wants more room than there is. The stage is
+   * the one part that can give, so it is the one that has to be told how much
+   * it got: sized by digit count alone the number simply overflowed and drew
+   * over the trail beneath it.
+   */
+  const [stageHeight, setStageHeight] = useState(0);
+  const onStageLayout = (e: LayoutChangeEvent) => {
+    const h = Math.round(e.nativeEvent.layout.height);
+    if (h !== stageHeight) setStageHeight(h);
+  };
 
   const rules = race.rules;
   const you = race.racers.find((r) => r.id === youId);
@@ -97,6 +112,13 @@ export default function GuessBoard({
     onSubmit(wagered);
     setWagered(false);
   };
+
+  // What the stage owes its other children before the number may have the rest:
+  // the verdict banner, the hint line, the impact bar when a guess has landed,
+  // and a gap between each. Measured once here rather than guessed per screen.
+  const stageReserved = BANNER_HEIGHT + HINT_HEIGHT + (lastGuess ? IMPACT_HEIGHT : 0) + spacing.sm * 3;
+  const numberCeiling =
+    stageHeight > 0 ? Math.max(MIN_NUMBER_SIZE, stageHeight - stageReserved) : undefined;
 
   return (
     <View style={styles.wrap}>
@@ -149,11 +171,12 @@ export default function GuessBoard({
         <RangeTrack range={race.range} known={known} guesses={guesses} />
       )}
 
-      <View style={styles.stage}>
+      <View style={styles.stage} onLayout={onStageLayout}>
         <BigNumber
           value={entry}
           placeholder={'–'.repeat(Math.min(2, maxDigits))}
           tone={lastVerdict && entry.length === 0 ? verdictColor(lastVerdict, colors) : colors.textPrimary}
+          maxSize={numberCeiling}
         />
         <FeedbackBanner verdict={lastVerdict} nonce={verdictNonce} />
         {lastGuess ? <GuessImpact guess={lastGuess} before={before} hideCounts={rules.hideRange} /> : null}
@@ -164,11 +187,9 @@ export default function GuessBoard({
         <View style={styles.trailHeader}>
           <Text style={styles.trailLabel}>YOUR GUESSES</Text>
           <Text style={[styles.trailMeta, left !== null && left <= 2 && styles.trailMetaWarn]}>
-            {left !== null
-              ? `${guesses.length} of ${rules.guessLimit} used`
-              : rules.hideRange
-                ? `${guesses.length} of ${par} par`
-                : `${guesses.length} of ${par} par · ${rangeSize(known).toLocaleString('en-US')} left`}
+            {/* The range track above already carries how many numbers are
+                left, so this line only reports the guess count. */}
+            {left !== null ? `${guesses.length} of ${rules.guessLimit} used` : `${guesses.length} of ${par} par`}
           </Text>
         </View>
         <GuessHistory guesses={guesses} />
@@ -232,34 +253,39 @@ export default function GuessBoard({
   );
 }
 
+/** Measured heights of the stage's fixed furniture, so the number gets the rest. */
+const BANNER_HEIGHT = 46;
+const HINT_HEIGHT = 18;
+const IMPACT_HEIGHT = 48;
+/** Below this the readout stops being a readout. */
+const MIN_NUMBER_SIZE = 44;
+
 const makeStyles = (colors: Palette) => StyleSheet.create({
   wrap: {
     flex: 1,
-    gap: spacing.sm + 4,
+    gap: spacing.md,
   },
   lanes: {
     gap: spacing.sm,
   },
   dropped: {
-    paddingVertical: 7,
+    paddingVertical: spacing.sm,
     paddingHorizontal: spacing.md,
     borderRadius: radius.md,
-    backgroundColor: colors.higherGlow,
+    backgroundColor: colors.higherTint,
     borderWidth: 1,
     borderColor: colors.higher,
   },
   droppedText: {
+    ...type.caption,
     color: colors.higher,
-    fontSize: 11,
-    lineHeight: 15,
-    fontWeight: '600',
   },
   quip: {
+    ...type.caption,
     color: colors.textMuted,
-    fontSize: 11,
     fontStyle: 'italic',
     textAlign: 'right',
-    marginTop: -6,
+    marginTop: -spacing.xs,
   },
   blind: {
     alignItems: 'center',
@@ -270,24 +296,29 @@ const makeStyles = (colors: Palette) => StyleSheet.create({
     borderColor: colors.divider,
   },
   blindText: {
-    ...fonts.label,
+    ...type.micro,
     color: colors.textMuted,
-    fontSize: 10,
   },
   stage: {
+    // Takes the leftover space and centres in it, rather than being squeezed
+    // below its own content height -- a View does not clip, so a stage smaller
+    // than its children overflows onto whatever is underneath.
+    flex: 1,
+    minHeight: 0,
     alignItems: 'center',
+    justifyContent: 'center',
     gap: spacing.sm,
-    flexShrink: 1,
   },
   hint: {
+    ...type.caption,
     color: colors.textMuted,
-    fontSize: 12,
+    textAlign: 'center',
   },
   hintWarn: {
     color: colors.higher,
   },
   trail: {
-    gap: 4,
+    gap: spacing.xs,
   },
   trailHeader: {
     flexDirection: 'row',
@@ -295,23 +326,23 @@ const makeStyles = (colors: Palette) => StyleSheet.create({
     alignItems: 'center',
   },
   trailLabel: {
-    ...fonts.label,
+    ...type.micro,
     color: colors.textMuted,
-    fontSize: 10,
   },
   trailMeta: {
+    ...type.micro,
+    letterSpacing: 0,
     color: colors.textMuted,
-    fontSize: 10,
   },
   trailMetaWarn: {
     color: colors.higher,
-    fontWeight: '700',
   },
   wager: {
     flexDirection: 'row',
     alignItems: 'center',
+    minHeight: MIN_TOUCH,
     gap: spacing.sm,
-    paddingVertical: 9,
+    paddingVertical: spacing.sm,
     paddingHorizontal: spacing.md,
     borderRadius: radius.md,
     backgroundColor: colors.card,
@@ -326,16 +357,16 @@ const makeStyles = (colors: Palette) => StyleSheet.create({
     opacity: 0.7,
   },
   wagerIcon: {
-    fontSize: 15,
+    fontSize: glyph.md,
   },
   wagerText: {
+    ...type.caption,
     color: colors.textSecondary,
-    fontSize: 12,
     flex: 1,
   },
   wagerTextOn: {
+    ...type.body,
     color: colors.gold,
-    fontWeight: '700',
   },
   done: {
     gap: spacing.sm,
@@ -350,16 +381,14 @@ const makeStyles = (colors: Palette) => StyleSheet.create({
     borderColor: colors.divider,
   },
   doneTitle: {
-    ...fonts.label,
+    ...type.heading,
     color: colors.correct,
-    fontSize: 14,
   },
   doneTitleOut: {
     color: colors.danger,
   },
   doneBody: {
+    ...type.sub,
     color: colors.textSecondary,
-    fontSize: 12,
-    lineHeight: 18,
   },
 });

@@ -4,6 +4,7 @@ import {
   Clipboard,
   Keyboard,
   LayoutChangeEvent,
+  ImageBackground,
   Modal,
   NativeScrollEvent,
   NativeSyntheticEvent,
@@ -25,6 +26,19 @@ import {MascotAvatar} from '../components/ui/Mascot';
 import {MessageBubble} from '../components/MessageBubble';
 import {MessageInput} from '../components/MessageInput';
 import {MessageActionsSheet} from '../components/MessageActionsSheet';
+import {ScheduleSheet} from '../components/ScheduleSheet';
+import {StickerSheet} from '../components/StickerSheet';
+import {WallpaperSheet} from '../components/WallpaperSheet';
+import {ConfirmSheet} from '../components/ConfirmSheet';
+import {wallpaperById} from '../config/wallpapers';
+import {describeFindings, findSensitive} from '../security/ContentGuard';
+import {
+  applyPolicy,
+  clearPolicy,
+  isTheirRule,
+  resolvePolicy,
+  screenGuardBus,
+} from '../security/ScreenPolicy';
 import {Screen} from '../components/ui/Screen';
 import {PeerProfileSheet} from '../components/PeerProfileSheet';
 import {AppText, DenseText} from '../components/AppText';
@@ -173,6 +187,28 @@ export function ChatScreen({route, navigation}: RootStackScreenProps<'Chat'>) {
 
   const identity = useAppStore(st => st.identity);
   const myInterests = useAppStore(st => st.settings.interests);
+  const settings = useAppStore(st => st.settings);
+
+  /** This conversation's wallpaper, and the palette it forces on every bubble. */
+  const wallpaper = wallpaperById(
+    conversationId ? settings.chatWallpapers?.[conversationId] : null,
+  );
+
+  /**
+   * The screenshot rule actually in force here: the stricter of the two phones.
+   *
+   * Recomputed rather than stored, so it follows a peer whose preference arrives with a
+   * later handshake — and so a chat with somebody we have never met falls back to our own
+   * choice alone rather than to nothing.
+   */
+  const screenPolicy = resolvePolicy(
+    settings.screenshotPolicy,
+    isGroup ? null : peer?.screenshotPolicy,
+  );
+  const theirRule = isTheirRule(
+    settings.screenshotPolicy,
+    isGroup ? null : peer?.screenshotPolicy,
+  );
 
   /**
    * peerId -> display name, for attributing group messages.
@@ -391,9 +427,81 @@ export function ChatScreen({route, navigation}: RootStackScreenProps<'Chat'>) {
     setShowJumpButton(distanceFromBottom > NEAR_BOTTOM_PX);
   }, []);
 
-  const onSend = useCallback(
+  /**
+   * Send Later, in three pieces of state.
+   *
+   * `armedFor` is a time chosen but not yet committed — the composer is holding it while
+   * you finish typing. `editingScheduled` is a message already held, whose time is being
+   * changed. `scheduleOpen` is just the sheet. Kept apart because the same picker serves
+   * both jobs and the difference is what happens when it is confirmed: one creates a held
+   * message, the other moves one.
+   */
+  const [stickersOpen, setStickersOpen] = useState(false);
+  const [wallpaperOpen, setWallpaperOpen] = useState(false);
+  /** A draft held back because it contains something worth a second look before sending. */
+  const [guarded, setGuarded] = useState<{text: string; summary: string} | null>(null);
+  /** Transient note when the OS reports a screenshot, on a chat set to notify. */
+  const [captured, setCaptured] = useState<number | null>(null);
+  /**
+   * Hold the window under this conversation's rule, and let it go on the way out.
+   *
+   * Applied here rather than app-wide because the rule belongs to the conversation: a
+   * chat with somebody who does not allow screenshots should not blank the whole app,
+   * and the Nearby list is nobody's private message. The cleanup is the load-bearing
+   * half — a FLAG_SECURE left set would make every other screen uncapturable with no
+   * explanation anywhere.
+   */
+  useEffect(() => {
+    void applyPolicy(screenPolicy);
+    return () => {
+      void clearPolicy();
+    };
+  }, [screenPolicy]);
+
+  useEffect(() => {
+    if (screenPolicy !== 'notify') {
+      return;
+    }
+    const off = screenGuardBus.on('captured', ({at}) => setCaptured(at));
+    return off;
+  }, [screenPolicy]);
+
+  useEffect(() => {
+    if (captured === null) {
+      return;
+    }
+    const timer = setTimeout(() => setCaptured(null), 6_000);
+    return () => clearTimeout(timer);
+  }, [captured]);
+
+  const [scheduleOpen, setScheduleOpen] = useState(false);
+  const [armedFor, setArmedFor] = useState<number | null>(null);
+  const [editingScheduled, setEditingScheduled] = useState<ChatMessage | null>(null);
+
+  /**
+   * Actually send, past the guard.
+   *
+   * Split from onSend so "Send anyway" has something to call that does not re-run the
+   * check it just answered — otherwise confirming would simply reopen the same sheet.
+   */
+  const commitSend = useCallback(
     (text: string) => {
       tick();
+      // A time is armed, so this tap commits to that moment rather than to now. Nothing
+      // reaches the radio: it becomes a held message in the thread, visible and editable
+      // until its time comes.
+      if (armedFor && conversationId) {
+        try {
+          bleChat.messages.schedule(conversationId, text, armedFor, groupId);
+        } catch (err) {
+          Alert.alert(
+            'Could not schedule',
+            err instanceof Error ? err.message : String(err),
+          );
+        }
+        setArmedFor(null);
+        return;
+      }
       const send = groupId
         ? bleChat.messages.sendToGroup(groupId, text)
         : peerId
@@ -406,7 +514,43 @@ export function ChatScreen({route, navigation}: RootStackScreenProps<'Chat'>) {
         );
       });
     },
-    [peerId, groupId],
+    [peerId, groupId, armedFor, conversationId],
+  );
+
+  /**
+   * The check that runs before anything leaves.
+   *
+   * A phone number typed into a chat with somebody met over Bluetooth cannot be unsent —
+   * there is no server holding a copy to delete — so this is the one moment it can be
+   * questioned. It asks; it does not refuse. A sticker or a one-tap suggestion skips it,
+   * because neither can carry a contact detail.
+   */
+  const onSend = useCallback(
+    (text: string) => {
+      if (settings.warnBeforeSharingContacts) {
+        const found = findSensitive(text);
+        if (found.length > 0) {
+          setGuarded({text, summary: describeFindings(found)});
+          return;
+        }
+      }
+      commitSend(text);
+    },
+    [commitSend, settings.warnBeforeSharingContacts],
+  );
+
+  /** Confirming the picker: arm the composer, or move a message already held. */
+  const onScheduleConfirm = useCallback(
+    (at: number) => {
+      setScheduleOpen(false);
+      if (editingScheduled && conversationId) {
+        bleChat.messages.reschedule(conversationId, editingScheduled.id, at);
+        setEditingScheduled(null);
+        return;
+      }
+      setArmedFor(at);
+    },
+    [editingScheduled, conversationId],
   );
 
   const onRetry = useCallback(
@@ -582,6 +726,27 @@ export function ChatScreen({route, navigation}: RootStackScreenProps<'Chat'>) {
 
   return (
     <Screen edges={['top', 'bottom']} style={styles.safe}>
+      {/*
+        The wallpaper, and the scrim that makes it safe to write on.
+
+        The scrim is not decoration: its opacity was derived from the image's own darkest
+        and lightest regions and raised until the ink over it clears WCAG AA at the worst
+        patch. Drawing the photo without it would leave the day dividers and receipts
+        legible on some wallpapers and invisible on others.
+      */}
+      {wallpaper ? (
+        <ImageBackground
+          source={wallpaper.source}
+          style={StyleSheet.absoluteFill}
+          resizeMode="cover">
+          <View
+            style={[
+              StyleSheet.absoluteFill,
+              {backgroundColor: wallpaper.scrim, opacity: wallpaper.scrimOpacity},
+            ]}
+          />
+        </ImageBackground>
+      ) : null}
       <View style={styles.flex} onLayout={onLayout}>
       {/*
         One header, not four strips.
@@ -729,12 +894,21 @@ export function ChatScreen({route, navigation}: RootStackScreenProps<'Chat'>) {
           </Touchable>
         ) : (
           peer?.peerId && (
+            /* A menu, not a hidden Block button. The "more" glyph promises choices, and
+               it used to be a single destructive action wearing the same icon every
+               other app uses for a list of them. */
             <Touchable
               scale={false}
-              onPress={onBlockPeer}
+              onPress={() =>
+                Alert.alert(peer.displayName ?? 'This chat', undefined, [
+                  {text: 'Wallpaper…', onPress: () => setWallpaperOpen(true)},
+                  {text: 'Block', style: 'destructive', onPress: onBlockPeer},
+                  {text: 'Cancel', style: 'cancel'},
+                ])
+              }
               hitSlop={12}
               style={styles.headerIconButton}
-              accessibilityLabel="Block this person">
+              accessibilityLabel="Chat options">
               <Icon name="more" color={theme.textFaint} size={20} />
             </Touchable>
           )
@@ -773,7 +947,10 @@ export function ChatScreen({route, navigation}: RootStackScreenProps<'Chat'>) {
           stickySectionHeadersEnabled={false}
           renderSectionHeader={({section}) => (
             <View style={styles.dayHeader}>
-              <AppText style={styles.dayLabel}>{section.title}</AppText>
+              <AppText
+                style={[styles.dayLabel, wallpaper ? {color: wallpaper.meta} : null]}>
+                {section.title}
+              </AppText>
             </View>
           )}
           onScroll={onListScroll}
@@ -810,7 +987,12 @@ export function ChatScreen({route, navigation}: RootStackScreenProps<'Chat'>) {
                   message={item}
                   onRetry={onRetry}
                   onLongPress={onMessageActions}
+                  onEditSchedule={m => {
+                    setEditingScheduled(m);
+                    setScheduleOpen(true);
+                  }}
                   showReceipt={item.id === lastOutgoingId}
+                  palette={wallpaper}
                   // Only in a group: in a one-to-one chat the header already names the
                   // only person who can be sending.
                   senderName={
@@ -887,6 +1069,22 @@ export function ChatScreen({route, navigation}: RootStackScreenProps<'Chat'>) {
           </View>
         )}
 
+        {/*
+          The OS told us a screenshot was taken, on a chat set to notify.
+
+          Shown on the phone that took it. Telling the OTHER phone would need a packet
+          type this protocol does not have, and inventing one that older builds silently
+          drop would be a notification that quietly does not arrive — worse than none.
+        */}
+        {captured !== null && (
+          <View style={styles.captureBanner}>
+            <Icon name="alert" color={theme.warn} size={13} strokeWidth={2.4} />
+            <DenseText style={styles.captureText} numberOfLines={2}>
+              Screenshot taken. This chat is set to flag them.
+            </DenseText>
+          </View>
+        )}
+
         {resumed !== null && (
           <View style={styles.resumedBanner}>
             <Icon name="check" color={theme.ok} size={13} strokeWidth={2.6} />
@@ -924,8 +1122,22 @@ export function ChatScreen({route, navigation}: RootStackScreenProps<'Chat'>) {
           draft={draft}
           tone={!isGroup && peer ? dotColor(peer.state, theme) : undefined}
           onSend={onSend}
+          onSchedulePress={conversationId ? () => setScheduleOpen(true) : undefined}
+          onStickerPress={conversationId ? () => setStickersOpen(true) : undefined}
+          scheduledFor={armedFor}
+          onClearSchedule={() => setArmedFor(null)}
         />
       </View>
+
+      <ScheduleSheet
+        visible={scheduleOpen}
+        initial={editingScheduled?.scheduledFor ?? armedFor}
+        onCancel={() => {
+          setScheduleOpen(false);
+          setEditingScheduled(null);
+        }}
+        onConfirm={onScheduleConfirm}
+      />
 
       <MessageActionsSheet
         message={actionsFor}
@@ -962,9 +1174,32 @@ export function ChatScreen({route, navigation}: RootStackScreenProps<'Chat'>) {
           actionsFor && conversationId
             ? () => {
                 const text = actionsFor.text;
+                // Editing a held message keeps its time: the words were wrong, not the
+                // moment. It comes back to the composer with the clock still armed.
+                if (actionsFor.status === 'scheduled' && actionsFor.scheduledFor) {
+                  setArmedFor(actionsFor.scheduledFor);
+                }
                 bleChat.messages.deleteLocal(conversationId, actionsFor.id);
                 setDraft({text, token: Date.now()});
                 setActionsFor(null);
+              }
+            : undefined
+        }
+        onSendNow={
+          actionsFor && conversationId
+            ? () => {
+                const target = actionsFor;
+                setActionsFor(null);
+                void bleChat.messages.releaseScheduled(conversationId, target.id);
+              }
+            : undefined
+        }
+        onEditSchedule={
+          actionsFor
+            ? () => {
+                setEditingScheduled(actionsFor);
+                setActionsFor(null);
+                setScheduleOpen(true);
               }
             : undefined
         }
@@ -998,6 +1233,73 @@ export function ChatScreen({route, navigation}: RootStackScreenProps<'Chat'>) {
           }}
         />
       )}
+      <StickerSheet
+        visible={stickersOpen}
+        onClose={() => setStickersOpen(false)}
+        onPick={sticker => {
+          setStickersOpen(false);
+          // The emoji is what travels; the receiver draws our art for it. A sticker can
+          // carry no contact detail, so it goes straight past the guard.
+          commitSend(sticker.emoji);
+        }}
+      />
+
+      <WallpaperSheet
+        visible={wallpaperOpen}
+        current={conversationId ? settings.chatWallpapers?.[conversationId] ?? null : null}
+        onClose={() => setWallpaperOpen(false)}
+        onPick={id => {
+          setWallpaperOpen(false);
+          if (!conversationId) {
+            return;
+          }
+          const next = {...(settings.chatWallpapers ?? {})};
+          if (id) {
+            next[conversationId] = id;
+          } else {
+            delete next[conversationId];
+          }
+          void bleChat.updateSettings({chatWallpapers: next});
+        }}
+      />
+
+      {/*
+        Asked, not refused.
+
+        People have entirely good reasons to swap a number with somebody they just met.
+        What this stops is doing it without noticing — and it names what it spotted, so
+        the answer is about the actual message rather than about a category.
+      */}
+      <ConfirmSheet
+        visible={guarded !== null}
+        tone="caution"
+        icon="shield"
+        title="Send this outside the app?"
+        body={
+          guarded
+            ? `This message contains ${guarded.summary}. BLE Chat needs no phone number and no account — once this reaches ${
+                group?.name ?? peer?.displayName ?? displayName
+              }, it is on their phone and cannot be taken back.`
+            : ''
+        }
+        confirmLabel="Send anyway"
+        cancelLabel="Let me change it"
+        onCancel={() => {
+          // The words go back to the composer rather than being thrown away: somebody
+          // who chose to reconsider wants to edit, not to retype.
+          if (guarded) {
+            setDraft({text: guarded.text, token: Date.now()});
+          }
+          setGuarded(null);
+        }}
+        onConfirm={() => {
+          const pending = guarded;
+          setGuarded(null);
+          if (pending) {
+            commitSend(pending.text);
+          }
+        }}
+      />
       </View>
     </Screen>
   );
@@ -1212,6 +1514,20 @@ const useStyles = makeStyles(t => ({
   resumedText: {
     ...typography.caption,
     color: t.ok,
+    fontSize: 11,
+    fontWeight: '600',
+    flex: 1,
+  },
+  captureBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: 7,
+  },
+  captureText: {
+    ...typography.caption,
+    color: t.warn,
     fontSize: 11,
     fontWeight: '600',
     flex: 1,

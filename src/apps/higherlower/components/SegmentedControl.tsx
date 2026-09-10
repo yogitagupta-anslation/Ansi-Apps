@@ -1,6 +1,6 @@
 import React from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
-import { Palette, fonts, radius, spacing } from '../theme/tokens';
+import { MIN_TOUCH, Palette, radius, spacing, type } from '../theme/tokens';
 import { useThemedStyles } from '../theme/ThemeProvider';
 
 export interface Segment<T extends string> {
@@ -53,33 +53,39 @@ const makeStyles = (colors: Palette) => StyleSheet.create({
   },
   item: {
     flex: 1,
+    minHeight: MIN_TOUCH,
     alignItems: 'center',
-    paddingVertical: 12,
-    paddingHorizontal: 6,
+    justifyContent: 'center',
+    paddingVertical: spacing.sm + spacing.xs,
+    paddingHorizontal: spacing.sm,
     borderRadius: radius.md,
     backgroundColor: colors.card,
     borderWidth: 1,
     borderColor: colors.cardBorder,
   },
+  // Two channels, not one: the chosen segment changes fill AND border weight,
+  // so the selection survives a screenshot in greyscale.
   itemSelected: {
     backgroundColor: colors.accentDim,
     borderColor: colors.accent,
+    borderWidth: 2,
   },
   pressed: {
     opacity: 0.7,
   },
   label: {
-    ...fonts.label,
+    ...type.body,
     color: colors.textSecondary,
-    fontSize: 13,
   },
   labelSelected: {
     color: colors.textPrimary,
   },
   hint: {
+    ...type.micro,
+    fontFamily: type.caption.fontFamily,
+    letterSpacing: 0,
     color: colors.textMuted,
-    fontSize: 10,
-    marginTop: 3,
+    marginTop: spacing.xxs,
   },
   hintSelected: {
     color: colors.accent,

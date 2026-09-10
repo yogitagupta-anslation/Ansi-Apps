@@ -77,6 +77,7 @@ export function buildHello(
     publicKey: string;
     interests?: string[];
     languages?: string[];
+    screenshotPolicy?: string;
   },
   capabilities: Capabilities,
   challenge: string,
@@ -101,6 +102,10 @@ export function buildHello(
       // handshake entirely. Capping here means we can never do that to a peer.
       interests: sanitiseInterests(self.interests),
       languages: sanitiseLanguages(self.languages),
+      // Optional and additive, exactly like interests: a build that does not send it is
+      // read as "no opinion", and the receiver's own choice stands alone. Older peers are
+      // unaffected — they simply ignore a field they do not know.
+      screenshotPolicy: self.screenshotPolicy,
       capabilities: {...capabilities},
       ephemeralKey,
     },
@@ -114,6 +119,7 @@ export function buildHelloAck(
     publicKey: string;
     interests?: string[];
     languages?: string[];
+    screenshotPolicy?: string;
   },
   destinationId: string,
   capabilities: Capabilities,
@@ -140,6 +146,7 @@ export function buildHelloAck(
       displayName: self.displayName,
       interests: sanitiseInterests(self.interests),
       languages: sanitiseLanguages(self.languages),
+      screenshotPolicy: self.screenshotPolicy,
       capabilities: {...capabilities},
       ephemeralKey,
     },

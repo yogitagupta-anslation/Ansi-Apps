@@ -3,7 +3,7 @@ import { Pressable, ScrollView, StyleSheet, Text, View, ViewStyle } from 'react-
 import { LinearGradient } from 'expo-linear-gradient';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { Palette, fonts, radius, spacing } from '../theme/tokens';
+import { HIT_SLOP, MIN_TOUCH, Palette, radius, spacing, type } from '../theme/tokens';
 import { useTheme, useThemedStyles } from '../theme/ThemeProvider';
 
 interface ScreenProps {
@@ -20,8 +20,12 @@ interface ScreenProps {
 }
 
 /**
- * Every screen's frame: gradient backdrop, safe-area padding, optional back
+ * Every screen's frame: gradient backdrop, safe-area padding, an optional back
  * button + title row, and a pinned footer slot for primary actions.
+ *
+ * The footer carries a hairline above it. Without one, a pinned button floating
+ * over a scrolled list reads as the end of the list rather than as a control
+ * that is always there — and the player scrolls looking for it.
  */
 export default function Screen({
   title,
@@ -46,12 +50,12 @@ export default function Screen({
               {onBack ? (
                 <Pressable
                   onPress={onBack}
-                  hitSlop={12}
+                  hitSlop={HIT_SLOP}
                   accessibilityRole="button"
                   accessibilityLabel="Go back"
                   style={({ pressed }) => [styles.backButton, pressed && styles.pressed]}
                 >
-                  <Ionicons name="chevron-back" size={20} color={colors.textSecondary} />
+                  <Ionicons name="chevron-back" size={22} color={colors.textPrimary} />
                 </Pressable>
               ) : null}
               {title ? (
@@ -76,6 +80,7 @@ export default function Screen({
             style={styles.fill}
             contentContainerStyle={[styles.content, styles.scrollContent, contentStyle]}
             showsVerticalScrollIndicator={false}
+            keyboardShouldPersistTaps="handled"
           >
             {children}
           </ScrollView>
@@ -100,7 +105,7 @@ const makeStyles = (colors: Palette) => StyleSheet.create({
     gap: spacing.sm,
     paddingHorizontal: spacing.lg,
     paddingTop: spacing.sm,
-    paddingBottom: spacing.sm,
+    paddingBottom: spacing.md,
   },
   headerLeft: {
     flexDirection: 'row',
@@ -109,30 +114,29 @@ const makeStyles = (colors: Palette) => StyleSheet.create({
     flexShrink: 1,
   },
   backButton: {
-    width: 34,
-    height: 34,
+    // A back button is the one control every screen has and the one most often
+    // pressed in a hurry. It gets the full target, not the 34px it had.
+    width: MIN_TOUCH,
+    height: MIN_TOUCH,
+    marginLeft: -spacing.sm,
     borderRadius: radius.pill,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: colors.buttonSecondary,
-    borderWidth: 1,
-    borderColor: colors.buttonSecondaryBorder,
   },
   pressed: {
-    opacity: 0.6,
+    opacity: 0.55,
   },
   titleBlock: {
     flexShrink: 1,
   },
   title: {
-    ...fonts.title,
+    ...type.title,
     color: colors.textPrimary,
-    fontSize: 17,
   },
   subtitle: {
+    ...type.caption,
     color: colors.textMuted,
-    fontSize: 12,
-    marginTop: 1,
+    marginTop: spacing.xxs,
   },
   content: {
     paddingHorizontal: spacing.lg,
@@ -142,8 +146,10 @@ const makeStyles = (colors: Palette) => StyleSheet.create({
   },
   footer: {
     paddingHorizontal: spacing.lg,
-    paddingTop: spacing.sm,
+    paddingTop: spacing.md,
     paddingBottom: spacing.sm,
     gap: spacing.sm,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: colors.divider,
   },
 });

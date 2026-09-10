@@ -1,5 +1,7 @@
 import React, {useEffect, useRef, useState} from 'react';
 import {ScrollView, TextInput, TouchableOpacity, View} from 'react-native';
+import {Touchable} from './Motion';
+import {describeSchedule} from '../utils/time';
 import {radius, spacing, typography} from '../config/theme';
 import {makeStyles, useTheme} from '../theme/ThemeProvider';
 import {DenseText} from './AppText';
@@ -31,6 +33,25 @@ interface Props {
   queueing?: boolean;
   queueingReason?: string;
   onSend: (text: string) => void;
+  /**
+   * Hold the send button to pick a time. Absent where scheduling makes no sense.
+   *
+   * A long press rather than a button of its own: sending is the thing this bar is for,
+   * and "send, but later" is a variation on it — not a second, equal action deserving its
+   * own permanent target next to the first.
+   */
+  onSchedulePress?: () => void;
+  /** Opens the sticker tray. Absent where there is no conversation to send one to. */
+  onStickerPress?: () => void;
+  /**
+   * A time already chosen, shown above the field until it is sent or cleared.
+   *
+   * While this is set the send button commits to that time instead of to now, which is
+   * why it is passed in rather than kept here: the screen owns the decision, the composer
+   * only reports it.
+   */
+  scheduledFor?: number | null;
+  onClearSchedule?: () => void;
   /** "Message Jaismeet" beats "Type a message...": it names where this is going. */
   placeholder?: string;
   /**
@@ -48,6 +69,10 @@ export function MessageInput({
   queueing = false,
   queueingReason,
   onSend,
+  onSchedulePress,
+  onStickerPress,
+  scheduledFor,
+  onClearSchedule,
   tone,
   placeholder,
 }: Props) {
@@ -98,9 +123,42 @@ export function MessageInput({
         </ScrollView>
       ) : null}
 
+      {/*
+        The time you picked, sitting where you can see it and take it back.
+
+        Between choosing a time and pressing send, the composer is in a mode — and an
+        invisible mode is how somebody schedules a message they meant to send now. The
+        chip is the mode made visible, and tapping it reopens the picker rather than
+        making you clear it and start again.
+      */}
+      {scheduledFor ? (
+        <View style={styles.scheduleChip}>
+          <Icon name="clock" color={theme.accent} size={13} strokeWidth={2.2} />
+          <Touchable
+            scale={false}
+            onPress={onSchedulePress}
+            style={styles.scheduleChipMain}
+            accessibilityRole="button"
+            accessibilityLabel={`Sending ${describeSchedule(scheduledFor)}. Change the time`}>
+            <DenseText style={styles.scheduleChipText} numberOfLines={1}>
+              {describeSchedule(scheduledFor)}
+            </DenseText>
+            <Icon name="chevronRight" color={theme.accent} size={13} strokeWidth={2.2} />
+          </Touchable>
+          <Touchable
+            scale={false}
+            onPress={onClearSchedule}
+            hitSlop={10}
+            accessibilityRole="button"
+            accessibilityLabel="Send now instead">
+            <Icon name="close" color={theme.textDim} size={14} strokeWidth={2.2} />
+          </Touchable>
+        </View>
+      ) : null}
+
       {/* Reassurance, not a warning. The message is going to be delivered — just not
           this second — so this says what will happen rather than what has failed. */}
-      {enabled && queueing && queueingReason ? (
+      {enabled && queueing && queueingReason && !scheduledFor ? (
         <View style={styles.queueing}>
           <Icon name="clock" color={theme.warn} size={14} strokeWidth={2.2} />
           <DenseText style={styles.queueingText}>{queueingReason}</DenseText>
@@ -108,6 +166,19 @@ export function MessageInput({
       ) : null}
 
       <View style={styles.row}>
+        {/* Left of the field, where an attachment button lives in every messenger the
+            reader already uses. Hidden once there is text: at that point the message is
+            words, and a sticker would replace them rather than join them. */}
+        {onStickerPress && !text.trim() ? (
+          <Touchable
+            scale={false}
+            onPress={onStickerPress}
+            style={styles.stickerButton}
+            accessibilityRole="button"
+            accessibilityLabel="Stickers">
+            <Icon name="sticker" color={theme.textDim} size={19} strokeWidth={1.9} />
+          </Touchable>
+        ) : null}
         <View
           style={[
             styles.inputWrap,
@@ -138,8 +209,21 @@ export function MessageInput({
             up rather than right: the message travels up into the thread. */}
         <TouchableOpacity
           onPress={submit}
+          onLongPress={
+            // Only worth offering once there is something to schedule. A long press on an
+            // empty composer that opens a time picker is a menu appearing out of nowhere.
+            onSchedulePress && enabled && text.trim() ? onSchedulePress : undefined
+          }
+          delayLongPress={350}
           disabled={!enabled || !text.trim()}
-          accessibilityLabel="Send message">
+          accessibilityLabel={
+            scheduledFor
+              ? `Schedule message for ${describeSchedule(scheduledFor)}`
+              : 'Send message'
+          }
+          accessibilityHint={
+            onSchedulePress && !scheduledFor ? 'Hold to send later' : undefined
+          }>
           {enabled && text.trim() ? (
             // Outlined amber rather than filled accent while the link is down: the tap
             // still works and the message is still kept, but a filled "send" would be
@@ -147,13 +231,21 @@ export function MessageInput({
             <View
               style={[
                 styles.send,
-                queueing
+                queueing && !scheduledFor
                   ? {borderWidth: 1.5, borderColor: theme.warn}
                   : {backgroundColor: theme.accent},
               ]}>
+              {/* A clock on the button while a time is armed: the same tap now commits to
+                  a moment rather than to now, and the button should say which. */}
               <Icon
-                name={queueing ? 'clock' : 'arrowUp'}
-                color={queueing ? theme.warn : theme.onAccent}
+                name={scheduledFor ? 'clock' : queueing ? 'clock' : 'arrowUp'}
+                color={
+                  scheduledFor
+                    ? theme.onAccent
+                    : queueing
+                    ? theme.warn
+                    : theme.onAccent
+                }
                 size={16}
                 strokeWidth={2.4}
               />
@@ -191,6 +283,21 @@ const useStyles = makeStyles(t => ({
     paddingHorizontal: 14,
   },
   chipText: {fontSize: 13, fontWeight: '500', color: t.accentQuiet},
+  // Reads as a control, not a warning: this is a choice you made, in the accent, with the
+  // way out sitting inside it.
+  scheduleChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    borderWidth: 1,
+    borderColor: t.accent,
+    borderRadius: radius.md,
+    paddingHorizontal: 11,
+    paddingVertical: 9,
+    marginBottom: 12,
+  },
+  scheduleChipMain: {flexDirection: 'row', alignItems: 'center', gap: 5, flex: 1},
+  scheduleChipText: {fontSize: 13, fontWeight: '500', color: t.accentQuiet},
   queueing: {
     flexDirection: 'row',
     alignItems: 'flex-start',
@@ -205,6 +312,13 @@ const useStyles = makeStyles(t => ({
     borderTopWidth: 1,
     borderTopColor: t.divider,
     paddingTop: 14,
+  },
+  stickerButton: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   inputWrap: {flex: 1, justifyContent: 'center'},
   input: {

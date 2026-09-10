@@ -80,6 +80,15 @@ export interface HelloPayload {
    * Sanitised and bounded on receipt — every byte is the other phone's choice.
    */
   languages?: string[];
+  /**
+   * What this peer permits a screenshot of the conversation to do.
+   *
+   * Optional and additive, like interests and languages: a build that does not send it is
+   * read as "no opinion", never as permission. The stricter of the two sides applies —
+   * see security/ScreenPolicy.ts. Validated on receipt, because every byte of it is the
+   * other phone's choice.
+   */
+  screenshotPolicy?: string;
   capabilities: Record<string, boolean>;
   /**
    * X25519 public key, hex — fresh for this link, never the identity key.

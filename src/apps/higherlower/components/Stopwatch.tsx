@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { StyleSheet, Text } from 'react-native';
 import { formatDuration } from '../util/format';
-import { Palette, fonts } from '../theme/tokens';
+import { Palette, tabular, type } from '../theme/tokens';
 import { useThemedStyles } from '../theme/ThemeProvider';
 
 /**
@@ -25,8 +25,8 @@ export default function Stopwatch({ startedAt, running }: { startedAt: number; r
 
 const makeStyles = (colors: Palette) => StyleSheet.create({
   text: {
-    ...fonts.numeric,
+    ...type.numCaption,
+    ...tabular,
     color: colors.textSecondary,
-    fontSize: 14,
   },
 });

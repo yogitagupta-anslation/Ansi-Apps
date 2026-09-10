@@ -6,7 +6,7 @@ import { ACHIEVEMENTS, averageGuesses, winRate } from '../game/progress';
 import { useStats } from '../store/StatsProvider';
 import { useSettings } from '../settings/SettingsProvider';
 import { formatDuration } from '../util/format';
-import { Palette, fonts, radius, spacing } from '../theme/tokens';
+import { Palette, glyph, radius, spacing, tabular, type } from '../theme/tokens';
 import { useThemedStyles } from '../theme/ThemeProvider';
 
 /** Career page: the numbers you have racked up and the badges you have earned. */
@@ -80,33 +80,32 @@ const makeStyles = (colors: Palette) => StyleSheet.create({
   },
   stat: {
     width: '31.5%',
-    paddingVertical: spacing.sm + 2,
-    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.md,
+    paddingHorizontal: spacing.sm + spacing.xs,
     borderRadius: radius.md,
     backgroundColor: colors.card,
     borderWidth: 1,
     borderColor: colors.cardBorder,
   },
   statValue: {
-    ...fonts.numeric,
+    ...type.numTitle,
+    ...tabular,
     color: colors.textPrimary,
-    fontSize: 19,
   },
   statLabel: {
+    ...type.micro,
+    letterSpacing: 0,
     color: colors.textMuted,
-    fontSize: 9,
-    marginTop: 2,
+    marginTop: spacing.xxs,
   },
   streak: {
-    ...fonts.label,
+    ...type.label,
     color: colors.higher,
-    fontSize: 12,
     marginTop: spacing.md,
   },
   sectionLabel: {
-    ...fonts.label,
+    ...type.label,
     color: colors.textMuted,
-    fontSize: 10,
     marginTop: spacing.lg,
     marginBottom: spacing.sm,
   },
@@ -117,7 +116,7 @@ const makeStyles = (colors: Palette) => StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.md,
-    padding: spacing.sm + 4,
+    padding: spacing.md,
     borderRadius: radius.md,
     backgroundColor: colors.card,
     borderWidth: 1,
@@ -130,7 +129,7 @@ const makeStyles = (colors: Palette) => StyleSheet.create({
     backgroundColor: colors.goldTint,
   },
   badgeIcon: {
-    fontSize: 20,
+    fontSize: glyph.lg,
   },
   badgeIconLocked: {
     opacity: 0.5,
@@ -139,22 +138,20 @@ const makeStyles = (colors: Palette) => StyleSheet.create({
     flex: 1,
   },
   badgeName: {
-    ...fonts.label,
+    ...type.body,
     color: colors.textSecondary,
-    fontSize: 12,
   },
   badgeNameOn: {
     color: colors.gold,
   },
   badgeBlurb: {
+    ...type.caption,
     color: colors.textMuted,
-    fontSize: 11,
-    marginTop: 1,
+    marginTop: spacing.xxs,
   },
   warning: {
+    ...type.caption,
     color: colors.higher,
-    fontSize: 11,
-    lineHeight: 16,
     marginTop: spacing.lg,
   },
   reset: {

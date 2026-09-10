@@ -1,6 +1,6 @@
 import React, { useEffect, useRef } from 'react';
 import { Animated, Easing, Pressable, StyleSheet, Text, View } from 'react-native';
-import { Palette, fonts, radius, spacing } from '../theme/tokens';
+import { MIN_TOUCH, Palette, glyph, radius, spacing, type } from '../theme/tokens';
 import { useThemedStyles } from '../theme/ThemeProvider';
 
 export const REACTIONS = ['😂', '😱', '🔥', '🤦', '👀'];
@@ -76,8 +76,12 @@ const makeStyles = (colors: Palette) => StyleSheet.create({
     gap: spacing.sm,
   },
   button: {
-    paddingHorizontal: 10,
-    paddingVertical: 5,
+    minWidth: MIN_TOUCH,
+    minHeight: MIN_TOUCH - spacing.sm,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: spacing.sm + spacing.xxs,
+    paddingVertical: spacing.xs,
     borderRadius: radius.pill,
     backgroundColor: colors.card,
     borderWidth: 1,
@@ -91,32 +95,31 @@ const makeStyles = (colors: Palette) => StyleSheet.create({
     opacity: 0.4,
   },
   emoji: {
-    fontSize: 16,
+    fontSize: glyph.lg,
   },
   stream: {
     position: 'absolute',
     right: spacing.md,
     bottom: spacing.xxl,
     alignItems: 'flex-end',
-    gap: 4,
+    gap: spacing.xs,
   },
   float: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
-    paddingHorizontal: 10,
-    paddingVertical: 5,
+    gap: spacing.xs,
+    paddingHorizontal: spacing.sm + spacing.xxs,
+    paddingVertical: spacing.xs + 1,
     borderRadius: radius.pill,
     backgroundColor: colors.panel,
     borderWidth: 1,
     borderColor: colors.panelBorder,
   },
   floatEmoji: {
-    fontSize: 18,
+    fontSize: glyph.lg,
   },
   floatName: {
-    ...fonts.label,
+    ...type.micro,
     color: colors.textSecondary,
-    fontSize: 10,
   },
 });

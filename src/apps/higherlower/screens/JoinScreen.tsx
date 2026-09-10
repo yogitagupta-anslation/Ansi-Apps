@@ -8,7 +8,7 @@ import { bleStatusLabel, useBle } from '../ble/BleProvider';
 import { normalizeCode } from '../ble/advertisement';
 import { DiscoveredRoom } from '../ble/transport';
 import { signalFor } from '../ble/signal';
-import { Palette, fonts, radius, spacing } from '../theme/tokens';
+import { MIN_TOUCH, Palette, radius, spacing, tabular, type } from '../theme/tokens';
 import { useTheme, useThemedStyles } from '../theme/ThemeProvider';
 
 interface JoinScreenProps {
@@ -181,28 +181,31 @@ const makeStyles = (colors: Palette) => StyleSheet.create({
     marginBottom: spacing.md,
   },
   codeLabel: {
-    ...fonts.label,
+    ...type.label,
     color: colors.textMuted,
-    fontSize: 10,
   },
   codeInput: {
-    ...fonts.numeric,
+    ...type.numDisplay,
+    ...tabular,
+    // See SettingsScreen: a lineHeight on a TextInput misaligns the text and the
+    // caret on Android.
+    lineHeight: undefined,
     color: colors.accent,
-    fontSize: 40,
-    letterSpacing: 8,
-    marginTop: 2,
-    marginLeft: 8,
-    paddingVertical: 2,
-    minWidth: 180,
+    letterSpacing: 10,
+    // The tracking is applied to the right of every glyph including the last,
+    // so the field sits visually left of centre without this compensation.
+    marginLeft: 10,
+    marginTop: spacing.xxs,
+    paddingVertical: spacing.xs,
+    minWidth: 200,
     textAlign: 'center',
   },
   codeHint: {
+    ...type.caption,
     color: colors.textMuted,
-    fontSize: 11,
     marginTop: spacing.xs,
     paddingHorizontal: spacing.md,
     textAlign: 'center',
-    lineHeight: 16,
   },
   error: {
     flexDirection: 'row',
@@ -210,15 +213,14 @@ const makeStyles = (colors: Palette) => StyleSheet.create({
     gap: spacing.sm,
     padding: spacing.md,
     borderRadius: radius.md,
-    backgroundColor: colors.panel,
+    backgroundColor: colors.dangerTint,
     borderWidth: 1,
-    borderColor: colors.danger,
+    borderColor: colors.dangerBorder,
     marginBottom: spacing.md,
   },
   errorText: {
+    ...type.caption,
     color: colors.textSecondary,
-    fontSize: 12,
-    lineHeight: 18,
     flex: 1,
   },
   empty: {
@@ -227,16 +229,14 @@ const makeStyles = (colors: Palette) => StyleSheet.create({
     paddingVertical: spacing.xl,
   },
   emptyTitle: {
-    ...fonts.label,
+    ...type.body,
     color: colors.textSecondary,
-    fontSize: 13,
     marginTop: spacing.sm,
   },
   emptyBody: {
+    ...type.caption,
     color: colors.textMuted,
-    fontSize: 12,
     textAlign: 'center',
-    lineHeight: 18,
   },
   list: {
     gap: spacing.sm,
@@ -244,6 +244,7 @@ const makeStyles = (colors: Palette) => StyleSheet.create({
   room: {
     flexDirection: 'row',
     alignItems: 'center',
+    minHeight: MIN_TOUCH + spacing.md,
     gap: spacing.md,
     padding: spacing.md,
     borderRadius: radius.md,
@@ -261,31 +262,30 @@ const makeStyles = (colors: Palette) => StyleSheet.create({
     opacity: 0.5,
   },
   roomIcon: {
-    paddingHorizontal: 10,
-    paddingVertical: 8,
+    paddingHorizontal: spacing.sm + spacing.xxs,
+    paddingVertical: spacing.sm,
     borderRadius: radius.sm,
     backgroundColor: colors.accentDim,
     borderWidth: 1,
     borderColor: colors.panelBorderStrong,
   },
   roomCode: {
-    ...fonts.numeric,
+    ...type.numBody,
+    ...tabular,
     color: colors.accent,
-    fontSize: 15,
     letterSpacing: 1,
   },
   roomBody: {
     flex: 1,
   },
   roomHost: {
+    ...type.body,
     color: colors.textPrimary,
-    fontSize: 14,
-    fontWeight: '700',
   },
   roomMeta: {
+    ...type.caption,
     color: colors.textMuted,
-    fontSize: 11,
-    marginTop: 2,
+    marginTop: spacing.xxs,
   },
   roomRight: {
     flexDirection: 'row',
@@ -293,13 +293,17 @@ const makeStyles = (colors: Palette) => StyleSheet.create({
     gap: spacing.sm,
   },
   blockedTag: {
-    ...fonts.label,
+    ...type.micro,
     color: colors.textMuted,
-    fontSize: 10,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.xxs,
+    borderRadius: radius.pill,
+    backgroundColor: colors.wash,
+    overflow: 'hidden',
   },
   scanning: {
+    ...type.caption,
     color: colors.textMuted,
-    fontSize: 11,
     textAlign: 'center',
     marginTop: spacing.sm,
   },

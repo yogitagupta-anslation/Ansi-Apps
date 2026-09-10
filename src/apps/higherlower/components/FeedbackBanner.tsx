@@ -2,7 +2,7 @@ import React, { useEffect, useRef } from 'react';
 import { Animated, Easing, StyleSheet, Text, View } from 'react-native';
 import { Verdict } from '../types/game';
 import { verdictIcon, verdictLabel } from '../game/engine';
-import { Palette, fonts, radius, spacing, verdictColor, verdictGlow } from '../theme/tokens';
+import { Palette, glyph, radius, spacing, type, verdictColor, verdictGlow } from '../theme/tokens';
 import { useTheme, useThemedStyles } from '../theme/ThemeProvider';
 
 interface FeedbackBannerProps {
@@ -71,7 +71,7 @@ const makeStyles = (colors: Palette) => StyleSheet.create({
     justifyContent: 'center',
     gap: spacing.sm,
     alignSelf: 'center',
-    paddingVertical: 10,
+    paddingVertical: spacing.sm + spacing.xs,
     paddingHorizontal: spacing.lg,
     borderRadius: radius.pill,
     borderWidth: 1.5,
@@ -82,15 +82,16 @@ const makeStyles = (colors: Palette) => StyleSheet.create({
     backgroundColor: 'transparent',
   },
   idleText: {
-    ...fonts.label,
+    ...type.label,
     color: colors.textMuted,
-    fontSize: 13,
   },
   icon: {
-    fontSize: 18,
+    fontSize: glyph.lg,
   },
+  // The one place the scale is deliberately exceeded: this word is the answer
+  // to the only question the player is asking, and it is read at arm's length.
   label: {
-    ...fonts.label,
+    ...type.title,
     fontSize: 20,
     letterSpacing: 2,
   },

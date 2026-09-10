@@ -1,6 +1,6 @@
 import React from 'react';
 import { StyleSheet, View } from 'react-native';
-import { Palette } from '../theme/tokens';
+import { Palette, spacing } from '../theme/tokens';
 import { useTheme, useThemedStyles } from '../theme/ThemeProvider';
 import { signalFor } from '../ble/signal';
 
@@ -10,9 +10,10 @@ export default function SignalBars({ rssi, size = 'md' }: { rssi: number; size?:
   const styles = useThemedStyles(makeStyles);
   const filled = signalFor(rssi).bars;
   const unit = size === 'sm' ? 3 : 4;
+  const label = signalFor(rssi).label;
 
   return (
-    <View style={styles.row}>
+    <View style={styles.row} accessibilityLabel={label}>
       {[1, 2, 3, 4].map((bar) => (
         <View
           key={bar}
@@ -34,7 +35,7 @@ const makeStyles = (colors: Palette) => StyleSheet.create({
   row: {
     flexDirection: 'row',
     alignItems: 'flex-end',
-    gap: 2,
+    gap: spacing.xxs,
   },
   bar: {
     borderRadius: 1,

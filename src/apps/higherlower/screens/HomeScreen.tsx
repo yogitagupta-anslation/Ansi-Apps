@@ -8,7 +8,8 @@ import { dailyChallenge, dailyKey } from '../game/daily';
 import { modifierById } from '../game/modifiers';
 import { useStats } from '../store/StatsProvider';
 import { formatDuration, plural } from '../util/format';
-import { Palette, fonts, radius, spacing } from '../theme/tokens';
+import { MAX_CAPACITY, MIN_CAPACITY } from '../ble/constants';
+import { HIT_SLOP, MIN_TOUCH, Palette, elevation, radius, spacing, tabular, type } from '../theme/tokens';
 import { useTheme, useThemedStyles } from '../theme/ThemeProvider';
 
 interface HomeScreenProps {
@@ -20,6 +21,14 @@ interface HomeScreenProps {
   onSettings: () => void;
 }
 
+/**
+ * The front door.
+ *
+ * The wordmark used to be two emoji arrows beside two words, which renders as a
+ * different pair of pictures on every OS version and turns the app's identity
+ * into a lottery. It is now drawn from the type and the palette the rest of the
+ * app already uses: amber HIGHER above blue LOWER, with real chevrons.
+ */
 export default function HomeScreen({
   onSolo,
   onMultiplayer,
@@ -42,12 +51,12 @@ export default function HomeScreen({
       <View style={styles.body}>
         <View style={styles.brand}>
           <View style={styles.wordRow}>
-            <Text style={styles.arrow}>⬆️</Text>
+            <Ionicons name="chevron-up" size={26} color={colors.higher} />
             <Text style={styles.word}>HIGHER</Text>
           </View>
-          <Text style={styles.or}>or</Text>
+          <Text style={styles.or}>OR</Text>
           <View style={styles.wordRow}>
-            <Text style={styles.arrow}>⬇️</Text>
+            <Ionicons name="chevron-down" size={26} color={colors.lower} />
             <Text style={[styles.word, styles.wordLower]}>LOWER</Text>
           </View>
           <Text style={styles.tagline}>One hidden number. Fewest guesses wins.</Text>
@@ -60,7 +69,10 @@ export default function HomeScreen({
           style={({ pressed }) => [styles.daily, pressed && styles.pressed]}
         >
           <View style={styles.dailyHead}>
-            <Text style={styles.dailyTitle}>☀️ DAILY CHALLENGE</Text>
+            <View style={styles.dailyTitleRow}>
+              <Ionicons name="sunny" size={14} color={colors.gold} />
+              <Text style={styles.dailyTitle}>DAILY CHALLENGE</Text>
+            </View>
             <Text style={styles.dailyDate}>{today.key}</Text>
           </View>
           <Text style={styles.dailyRange}>
@@ -97,7 +109,7 @@ export default function HomeScreen({
             icon="bluetooth-outline"
             title="Multiplayer"
             subtitle="Nearby phones race over Bluetooth"
-            meta="2–4 players"
+            meta={`${MIN_CAPACITY}–${MAX_CAPACITY} players`}
             onPress={onMultiplayer}
             accent={colors.correct}
           />
@@ -110,10 +122,17 @@ export default function HomeScreen({
         </View>
 
         {stats.played > 0 ? (
-          <Text style={styles.record}>
-            {stats.played} played · {stats.wins} won
-            {stats.streak > 1 ? ` · 🔥 ${stats.streak} streak` : ''}
-          </Text>
+          <View style={styles.record}>
+            <Text style={styles.recordText}>
+              {stats.played} played · {stats.wins} won
+            </Text>
+            {stats.streak > 1 ? (
+              <View style={styles.streak}>
+                <Ionicons name="flame" size={12} color={colors.higher} />
+                <Text style={styles.streakText}>{stats.streak} streak</Text>
+              </View>
+            ) : null}
+          </View>
         ) : null}
       </View>
     </Screen>
@@ -141,8 +160,12 @@ function ModeCard({
     <Pressable
       onPress={onPress}
       accessibilityRole="button"
-      accessibilityLabel={`${title}. ${subtitle}`}
-      style={({ pressed }) => [styles.card, { borderColor: accent }, pressed && styles.pressed]}
+      accessibilityLabel={`${title}. ${subtitle}. ${meta}`}
+      style={({ pressed }) => [
+        styles.card,
+        elevation('raised', colors),
+        pressed && styles.cardPressed,
+      ]}
     >
       <View style={[styles.cardIcon, { backgroundColor: `${accent}22`, borderColor: `${accent}55` }]}>
         <Ionicons name={icon} size={22} color={accent} />
@@ -150,11 +173,9 @@ function ModeCard({
       <View style={styles.cardBody}>
         <Text style={styles.cardTitle}>{title}</Text>
         <Text style={styles.cardSubtitle}>{subtitle}</Text>
-      </View>
-      <View style={styles.cardMeta}>
         <Text style={[styles.cardMetaText, { color: accent }]}>{meta}</Text>
-        <Ionicons name="chevron-forward" size={16} color={colors.textMuted} />
       </View>
+      <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
     </Pressable>
   );
 }
@@ -173,11 +194,12 @@ function LinkButton({
   return (
     <Pressable
       onPress={onPress}
+      hitSlop={HIT_SLOP}
       accessibilityRole="button"
       accessibilityLabel={label}
       style={({ pressed }) => [styles.link, pressed && styles.pressed]}
     >
-      <Ionicons name={icon} size={16} color={colors.textSecondary} />
+      <Ionicons name={icon} size={18} color={colors.textSecondary} />
       <Text style={styles.linkText}>{label}</Text>
     </Pressable>
   );
@@ -198,27 +220,22 @@ const makeStyles = (colors: Palette) => StyleSheet.create({
     alignItems: 'center',
     gap: spacing.sm,
   },
-  arrow: {
-    fontSize: 22,
-  },
   word: {
-    ...fonts.title,
+    ...type.display,
     color: colors.higher,
-    fontSize: 40,
     letterSpacing: 2,
   },
   wordLower: {
     color: colors.lower,
   },
   or: {
-    ...fonts.label,
+    ...type.label,
     color: colors.textMuted,
-    fontSize: 13,
-    marginVertical: 2,
+    marginVertical: spacing.xxs,
   },
   tagline: {
+    ...type.sub,
     color: colors.textSecondary,
-    fontSize: 13,
     marginTop: spacing.sm,
   },
   daily: {
@@ -226,43 +243,44 @@ const makeStyles = (colors: Palette) => StyleSheet.create({
     borderRadius: radius.lg,
     backgroundColor: colors.goldTint,
     borderWidth: 1,
-    borderColor: colors.gold,
-    gap: 4,
+    borderColor: colors.goldBorder,
+    gap: spacing.xs,
   },
   dailyHead: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
   },
+  dailyTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+  },
   dailyTitle: {
-    ...fonts.label,
+    ...type.label,
     color: colors.gold,
-    fontSize: 12,
   },
   dailyDate: {
-    ...fonts.numeric,
+    ...type.numCaption,
+    ...tabular,
     color: colors.textMuted,
-    fontSize: 10,
   },
   dailyRange: {
+    ...type.body,
     color: colors.textPrimary,
-    fontSize: 14,
-    fontWeight: '700',
   },
   dailyMods: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 6,
-    marginTop: 2,
+    gap: spacing.sm,
   },
   dailyMod: {
+    ...type.caption,
     color: colors.textSecondary,
-    fontSize: 11,
   },
   dailyFoot: {
+    ...type.caption,
     color: colors.textMuted,
-    fontSize: 11,
-    marginTop: 2,
   },
   modes: {
     gap: spacing.sm,
@@ -273,15 +291,24 @@ const makeStyles = (colors: Palette) => StyleSheet.create({
     gap: spacing.md,
     padding: spacing.md,
     borderRadius: radius.lg,
-    backgroundColor: colors.panel,
+    backgroundColor: colors.card,
     borderWidth: 1,
+    // The accent used to be the card's whole border, which made two static
+    // panels look like two different states of the same control. The colour now
+    // lives in the icon tile and the meta line, and the border is the neutral
+    // one every other card uses.
+    borderColor: colors.cardBorder,
+  },
+  cardPressed: {
+    opacity: 0.75,
+    transform: [{ scale: 0.99 }],
   },
   pressed: {
-    opacity: 0.7,
+    opacity: 0.6,
   },
   cardIcon: {
-    width: 42,
-    height: 42,
+    width: 46,
+    height: 46,
     borderRadius: radius.md,
     alignItems: 'center',
     justifyContent: 'center',
@@ -289,45 +316,57 @@ const makeStyles = (colors: Palette) => StyleSheet.create({
   },
   cardBody: {
     flex: 1,
+    gap: spacing.xxs,
   },
   cardTitle: {
-    ...fonts.title,
+    ...type.heading,
     color: colors.textPrimary,
-    fontSize: 18,
   },
   cardSubtitle: {
+    ...type.caption,
     color: colors.textSecondary,
-    fontSize: 12,
-    marginTop: 2,
-  },
-  cardMeta: {
-    alignItems: 'flex-end',
-    gap: 2,
   },
   cardMetaText: {
-    ...fonts.label,
-    fontSize: 11,
+    ...type.micro,
+    marginTop: spacing.xxs,
   },
   links: {
     flexDirection: 'row',
     justifyContent: 'center',
-    gap: spacing.md,
+    gap: spacing.xs,
   },
   link: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 5,
-    paddingVertical: spacing.sm,
-    paddingHorizontal: 6,
+    gap: spacing.xs,
+    minHeight: MIN_TOUCH,
+    paddingHorizontal: spacing.sm,
   },
   linkText: {
+    ...type.caption,
     color: colors.textSecondary,
-    fontSize: 12,
-    fontWeight: '600',
   },
   record: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: spacing.sm,
+  },
+  recordText: {
+    ...type.caption,
     color: colors.textMuted,
-    fontSize: 11,
-    textAlign: 'center',
+  },
+  streak: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xxs,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.xxs,
+    borderRadius: radius.pill,
+    backgroundColor: colors.higherTint,
+  },
+  streakText: {
+    ...type.micro,
+    color: colors.higher,
   },
 });

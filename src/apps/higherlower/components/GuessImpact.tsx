@@ -3,7 +3,7 @@ import { Animated, Easing, StyleSheet, Text, View } from 'react-native';
 import { Guess } from '../types/game';
 import { guessQuality } from '../game/search';
 import { heatLabel } from '../game/engine';
-import { Palette, fonts, radius, spacing } from '../theme/tokens';
+import { Palette, radius, spacing, tabular, type } from '../theme/tokens';
 import { useTheme, useThemedStyles } from '../theme/ThemeProvider';
 
 interface GuessImpactProps {
@@ -70,7 +70,7 @@ export default function GuessImpact({ guess, before, hideCounts = false }: Guess
 const makeStyles = (colors: Palette) => StyleSheet.create({
   wrap: {
     alignItems: 'center',
-    gap: 5,
+    gap: spacing.xs,
     alignSelf: 'stretch',
   },
   headline: {
@@ -78,15 +78,15 @@ const makeStyles = (colors: Palette) => StyleSheet.create({
     alignItems: 'baseline',
   },
   lead: {
+    ...type.caption,
     color: colors.textMuted,
-    fontSize: 12,
   },
   count: {
-    ...fonts.numeric,
-    fontSize: 16,
+    ...type.numHeading,
+    ...tabular,
   },
   bar: {
-    height: 5,
+    height: 6,
     alignSelf: 'stretch',
     borderRadius: radius.pill,
     backgroundColor: colors.track,
@@ -97,8 +97,7 @@ const makeStyles = (colors: Palette) => StyleSheet.create({
     borderRadius: radius.pill,
   },
   heat: {
-    ...fonts.label,
-    fontSize: 12,
-    marginTop: 2,
+    ...type.label,
+    marginTop: spacing.xxs,
   },
 });

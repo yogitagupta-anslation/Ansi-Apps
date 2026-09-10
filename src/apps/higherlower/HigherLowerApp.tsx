@@ -10,7 +10,10 @@
  */
 
 import React, { useEffect } from 'react';
+import { View } from 'react-native';
+import { useFonts } from 'expo-font';
 
+import { FONT_ASSETS } from './theme/fonts';
 import { SettingsProvider, useSettings } from './settings/SettingsProvider';
 import { BleProvider } from './ble/BleProvider';
 import { StatsProvider } from './store/StatsProvider';
@@ -20,6 +23,16 @@ import { soundManager } from './audio/SoundManager';
 import RootNavigator from './navigation/RootNavigator';
 
 export default function HigherLowerApp(): React.ReactElement {
+  const [fontsLoaded, fontError] = useFonts(FONT_ASSETS);
+
+  // A face that will not load is a cosmetic problem, not a reason to withhold a
+  // guessing game — fall through to the system font and carry on. The brief
+  // hold is only so the first frame is not laid out in the wrong metrics and
+  // then reflowed under the player.
+  if (!fontsLoaded && !fontError) {
+    return <View style={{ flex: 1, backgroundColor: '#05070E' }} />;
+  }
+
   return (
     <ThemeProvider>
       <SettingsProvider>

@@ -1,10 +1,10 @@
 import React from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, Text, View, ViewStyle } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { Palette, fonts, radius, spacing } from '../theme/tokens';
+import { MIN_TOUCH, Palette, elevation, radius, spacing, type } from '../theme/tokens';
 import { useTheme, useThemedStyles } from '../theme/ThemeProvider';
 
-type Variant = 'primary' | 'secondary' | 'ghost' | 'success';
+type Variant = 'primary' | 'secondary' | 'ghost' | 'success' | 'danger';
 
 interface ButtonProps {
   label: string;
@@ -18,6 +18,13 @@ interface ButtonProps {
   style?: ViewStyle;
 }
 
+/**
+ * The one button.
+ *
+ * Filled variants carry elevation, outlined ones do not — which is the whole
+ * hierarchy: on any screen exactly one control is lifted off the page, and it is
+ * the one the player came to press.
+ */
 export default function Button({
   label,
   onPress,
@@ -38,9 +45,13 @@ export default function Button({
       ? colors.onAccent
       : variant === 'success'
         ? colors.onSuccess
-        : variant === 'ghost'
-          ? colors.textSecondary
-          : colors.textPrimary;
+        : variant === 'danger'
+          ? colors.danger
+          : variant === 'ghost'
+            ? colors.textSecondary
+            : colors.textPrimary;
+
+  const filled = variant === 'primary' || variant === 'success';
 
   return (
     <Pressable
@@ -53,6 +64,9 @@ export default function Button({
         styles.base,
         compact && styles.compact,
         styles[variant],
+        // A disabled button that still floats looks pressable. Drop the shadow
+        // with the opacity so "unavailable" reads at a glance, not on tapping.
+        filled && !inert && elevation('raised', colors),
         pressed && !inert && styles.pressed,
         inert && styles.disabled,
         style,
@@ -60,8 +74,13 @@ export default function Button({
     >
       <View style={styles.row}>
         {busy ? <ActivityIndicator size="small" color={tint} /> : null}
-        {!busy && icon ? <Ionicons name={icon} size={18} color={tint} /> : null}
-        <Text style={[styles.label, compact && styles.labelCompact, { color: tint }]}>{label}</Text>
+        {!busy && icon ? <Ionicons name={icon} size={compact ? 16 : 18} color={tint} /> : null}
+        <Text
+          numberOfLines={1}
+          style={[styles.label, compact && styles.labelCompact, { color: tint }]}
+        >
+          {label}
+        </Text>
       </View>
     </Pressable>
   );
@@ -69,15 +88,17 @@ export default function Button({
 
 const makeStyles = (colors: Palette) => StyleSheet.create({
   base: {
+    minHeight: MIN_TOUCH + 4,
     borderRadius: radius.md,
-    paddingVertical: 16,
+    paddingVertical: spacing.md,
     paddingHorizontal: spacing.lg,
     borderWidth: 1,
     alignItems: 'center',
     justifyContent: 'center',
   },
   compact: {
-    paddingVertical: 11,
+    minHeight: MIN_TOUCH,
+    paddingVertical: spacing.sm + spacing.xs,
     paddingHorizontal: spacing.md,
     borderRadius: radius.sm,
   },
@@ -87,11 +108,11 @@ const makeStyles = (colors: Palette) => StyleSheet.create({
     gap: spacing.sm,
   },
   label: {
-    ...fonts.label,
-    fontSize: 15,
+    ...type.body,
   },
   labelCompact: {
-    fontSize: 13,
+    ...type.caption,
+    fontFamily: type.body.fontFamily,
   },
   primary: {
     backgroundColor: colors.accent,
@@ -105,15 +126,19 @@ const makeStyles = (colors: Palette) => StyleSheet.create({
     backgroundColor: colors.buttonSecondary,
     borderColor: colors.buttonSecondaryBorder,
   },
+  danger: {
+    backgroundColor: colors.dangerTint,
+    borderColor: colors.dangerBorder,
+  },
   ghost: {
     backgroundColor: 'transparent',
     borderColor: 'transparent',
   },
   pressed: {
-    opacity: 0.75,
+    opacity: 0.8,
     transform: [{ scale: 0.985 }],
   },
   disabled: {
-    opacity: 0.4,
+    opacity: 0.42,
   },
 });

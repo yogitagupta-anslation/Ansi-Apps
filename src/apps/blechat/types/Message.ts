@@ -4,13 +4,20 @@ export type MessageDirection = 'outgoing' | 'incoming';
  * Delivery state. Every transition is driven by a real transport event —
  * never by a timer that pretends progress happened.
  *
+ *  scheduled -> written, held on purpose until scheduledFor. Nothing has been attempted
  *  pending  -> queued in the app, no link yet
  *  sending  -> handed to the BLE transport, write in flight
  *  sent     -> the BLE write/notify completed successfully
  *  received -> the remote peer returned an application-level ACK
  *  failed   -> the write threw, or no ACK arrived within ACK_TIMEOUT_MS
+ *
+ * `scheduled` is the one state that is a decision rather than an observation, and it is
+ * deliberately the only one the app may leave on its own initiative. It never goes on the
+ * wire: a held message is a local note until its time comes, at which point it enters the
+ * ordinary send path and is subject to every other state above.
  */
 export type MessageStatus =
+  | 'scheduled'
   | 'pending'
   | 'sending'
   | 'sent'
@@ -95,4 +102,16 @@ export interface ChatMessage {
    * moves on, so the UI never shows a stale count next to a bubble that already resolved.
    */
   fragmentProgress?: {sent: number; total: number};
+
+  /**
+   * When a held message should enter the send path. Set only while `status` is
+   * `scheduled`, and cleared the moment it is released.
+   *
+   * This is our own clock, and it is a wish rather than a guarantee. Nothing about BLE
+   * can promise delivery at a moment: the phone has to be running, the other phone has to
+   * be in range, and if it is not the message lands in the outbox exactly as any other
+   * message would. What the app can honestly promise is that it will not go out BEFORE
+   * this time, and that is what the feature is for.
+   */
+  scheduledFor?: number;
 }

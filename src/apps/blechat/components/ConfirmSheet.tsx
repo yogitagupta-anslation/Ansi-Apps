@@ -27,6 +27,8 @@ export function ConfirmSheet({
   body,
   /** The word on the button. "Delete", not "OK" — a button should name what it does. */
   confirmLabel,
+  cancelLabel = 'Cancel',
+  tone = 'danger',
   onConfirm,
   onCancel,
 }: {
@@ -35,6 +37,17 @@ export function ConfirmSheet({
   title: string;
   body: string;
   confirmLabel: string;
+  /** "Cancel" is right for a deletion; a warning wants the way back named too. */
+  cancelLabel?: string;
+  /**
+   * Whether the confirm button is destroying something or merely proceeding.
+   *
+   * Red is a strong signal and it should stay attached to loss. A warning about sharing
+   * a phone number is asking somebody to think, not telling them they are about to break
+   * something — dressing it in the delete colour would spend the same alarm on both and
+   * teach people to tap through it.
+   */
+  tone?: 'danger' | 'caution';
   onConfirm: () => void;
   onCancel: () => void;
 }) {
@@ -57,7 +70,14 @@ export function ConfirmSheet({
           <View style={styles.grip} />
 
           <View style={styles.head}>
-            {icon ? <Icon name={icon} size={19} color={theme.error} strokeWidth={2} /> : null}
+            {icon ? (
+              <Icon
+                name={icon}
+                size={19}
+                color={tone === 'danger' ? theme.error : theme.warn}
+                strokeWidth={2}
+              />
+            ) : null}
             <AppText style={styles.title}>{title}</AppText>
           </View>
 
@@ -68,12 +88,16 @@ export function ConfirmSheet({
             onPress={onCancel}
             style={styles.cancel}
             accessibilityRole="button">
-            <DenseText style={styles.cancelText}>Cancel</DenseText>
+            <DenseText style={styles.cancelText}>{cancelLabel}</DenseText>
           </Touchable>
           <Touchable
             scale={false}
             onPress={onConfirm}
-            style={styles.confirm}
+            style={
+              tone === 'danger'
+                ? styles.confirm
+                : [styles.confirm, {backgroundColor: theme.warn}]
+            }
             accessibilityRole="button">
             <DenseText style={styles.confirmText}>{confirmLabel}</DenseText>
           </Touchable>

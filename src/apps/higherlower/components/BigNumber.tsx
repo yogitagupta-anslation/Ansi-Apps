@@ -1,6 +1,6 @@
 import React from 'react';
 import { StyleSheet, Text, View } from 'react-native';
-import { Palette, fonts, spacing } from '../theme/tokens';
+import { Palette, spacing, tabular, trackingFor, type } from '../theme/tokens';
 import { useTheme, useThemedStyles } from '../theme/ThemeProvider';
 
 interface BigNumberProps {
@@ -14,6 +14,14 @@ interface BigNumberProps {
   tone?: string;
   /** Dims the digits -- used while the entry is not yet committed. */
   muted?: boolean;
+  /**
+   * Ceiling for the type size, from the height the board can actually spare.
+   *
+   * Without one the readout is sized purely by digit count, overflows whatever
+   * box it was given on a short screen, and -- since a React Native View does
+   * not clip -- draws straight over the row beneath it.
+   */
+  maxSize?: number;
 }
 
 /** Font size shrinks as digits pile up so 1000 fits the same box as 7. */
@@ -34,6 +42,7 @@ export default function BigNumber({
   caption,
   tone,
   muted = false,
+  maxSize,
 }: BigNumberProps) {
   const { colors } = useTheme();
   const styles = useThemedStyles(makeStyles);
@@ -42,7 +51,7 @@ export default function BigNumber({
   const showing = empty ? placeholder : value;
   // At full weight and size a dash is a solid bar, which reads as content;
   // shrink and fade the placeholder so the field reads as waiting for input.
-  const baseSize = sizeFor(showing.length);
+  const baseSize = Math.min(sizeFor(showing.length), maxSize ?? Number.POSITIVE_INFINITY);
   const fontSize = baseSize * (empty ? 0.55 : 1);
 
   return (
@@ -55,6 +64,7 @@ export default function BigNumber({
           styles.number,
           {
             fontSize,
+            letterSpacing: trackingFor(fontSize),
             // Line box keeps the full height so typing the first digit does
             // not shove the banner below it down the screen.
             lineHeight: baseSize * 1.06,
@@ -77,14 +87,15 @@ const makeStyles = (colors: Palette) => StyleSheet.create({
     alignItems: 'center',
   },
   caption: {
-    ...fonts.label,
+    ...type.label,
     color: colors.textMuted,
-    fontSize: 11,
     marginBottom: spacing.xs,
   },
   number: {
-    ...fonts.numeric,
-    letterSpacing: -2,
+    ...type.numDisplay,
+    ...tabular,
+    // Size and line height are computed per render, so the scale's own values
+    // are overridden below -- what is inherited here is the family.
     textShadowOffset: { width: 0, height: 0 },
   },
 });
