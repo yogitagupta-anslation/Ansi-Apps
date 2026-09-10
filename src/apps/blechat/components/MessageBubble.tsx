@@ -1,5 +1,5 @@
 import React from 'react';
-import {TouchableOpacity, View} from 'react-native';
+import {Image, TouchableOpacity, View} from 'react-native';
 import {radius, spacing, typography} from '../config/theme';
 import {makeStyles, useTheme} from '../theme/ThemeProvider';
 import type {Theme} from '../config/theme';
@@ -7,12 +7,22 @@ import type {ChatMessage} from '../types/Message';
 import {AppText} from './AppText';
 import {LandIn} from './Motion';
 import {Icon, type IconName} from './ui/Icon';
+import {describeSchedule} from '../utils/time';
+import {stickerFor} from '../config/stickers';
 
 interface Props {
   message: ChatMessage;
   onRetry: (message: ChatMessage) => void;
   /** Copy / Retry / Delete — offered on any bubble, not just a failed one. */
   onLongPress?: (message: ChatMessage) => void;
+  /**
+   * Change when a held message goes out.
+   *
+   * Its own prop rather than a route through the long-press menu: "Edit" sits beside the
+   * time in the header, so it should do the thing the time is about. Everything else you
+   * might want to do with a held message is still a press and hold away.
+   */
+  onEditSchedule?: (message: ChatMessage) => void;
   /**
    * Who wrote this, for group conversations.
    *
@@ -33,6 +43,16 @@ interface Props {
   showReceipt?: boolean;
   /** Stable per-peer colour, so the eye can follow one speaker down the thread. */
   senderTint?: string;
+  /**
+   * Colours forced by this conversation's wallpaper, or null for the theme's own.
+   *
+   * Passed in rather than read from a context because the wallpaper belongs to the
+   * conversation, not to the app: two threads open in the same session can be drawn in
+   * different palettes, and a bubble should take its colours from the thread it is in.
+   * Every value here was derived from the image and checked for contrast — see
+   * config/wallpapers.ts.
+   */
+  palette?: {ink: string; meta: string; bubbleIn: string; bubbleOut: string} | null;
 }
 
 /**
@@ -40,6 +60,7 @@ interface Props {
  * "Sent" means a BLE write completed. "Delivered" means the peer returned an ACK.
  */
 const STATUS_TEXT: Record<ChatMessage['status'], string> = {
+  scheduled: 'Scheduled',
   pending: 'Waiting to send',
   sending: 'Sending',
   sent: 'Sent',
@@ -56,6 +77,7 @@ const STATUS_TEXT: Record<ChatMessage['status'], string> = {
  * "delivered" is exactly the thing a glyph alone cannot express.
  */
 const STATUS_ICON: Record<ChatMessage['status'], IconName> = {
+  scheduled: 'clock',
   pending: 'clock',
   sending: 'arrowUp',
   sent: 'check',
@@ -72,6 +94,7 @@ const STATUS_ICON: Record<ChatMessage['status'], IconName> = {
  * protocol's own vocabulary for the confirmation is not.
  */
 const STATUS_TICK: Record<ChatMessage['status'], string> = {
+  scheduled: '···',
   pending: '···',
   sending: '···',
   sent: '✓',
@@ -129,23 +152,65 @@ export function MessageBubble({
   message,
   onRetry,
   onLongPress,
+  onEditSchedule,
   senderName,
   senderTint,
   showReceipt = false,
+  palette,
 }: Props) {
   const styles = useStyles();
   const theme = useTheme();
   const outgoing = message.direction === 'outgoing';
 
-  const body = (
+  /**
+   * A message that is exactly one known emoji is drawn as the sticker it is.
+   *
+   * No bubble, no fill, no timestamp inside it — a sticker with chrome around it is just
+   * a small picture in a box. The receipt still appears under the last one, because
+   * "did that arrive" is as real a question for a sticker as for a sentence.
+   */
+  const sticker = outgoing || message.direction === 'incoming' ? stickerFor(message.text) : null;
+
+  const stickerBody = sticker ? (
+    <View style={outgoing ? styles.stickerWrapOut : styles.stickerWrapIn}>
+      {!outgoing && senderName ? (
+        <AppText
+          style={[styles.sender, senderTint ? {color: senderTint} : null]}
+          numberOfLines={1}>
+          {senderName}
+        </AppText>
+      ) : null}
+      <Image
+        source={sticker.source}
+        style={styles.sticker}
+        resizeMode="contain"
+        accessibilityRole="image"
+        accessibilityLabel={sticker.label}
+      />
+      <AppText
+        style={[styles.stickerTime, palette ? {color: palette.meta} : null]}
+        numberOfLines={1}>
+        {clock(message.receivedAt)}
+      </AppText>
+    </View>
+  ) : null;
+
+  const body = stickerBody ?? (
     <View
       style={[
         styles.bubble,
         outgoing ? styles.out : styles.in,
+        palette
+          ? {backgroundColor: outgoing ? palette.bubbleOut : palette.bubbleIn}
+          : null,
         // Nothing has gone out yet, so the bubble is not filled in yet either. A dashed
         // outline says "written, not sent" at a glance — where a solid accent bubble
         // with a small grey word under it says "sent" first and corrects itself second.
         outgoing && isWaiting(message.status) && styles.queued,
+        // Held on purpose, so it is drawn as an intention rather than as a problem: the
+        // same "not sent yet" dashed outline as a queued message, but in the accent
+        // instead of the warning grey. Nothing has gone wrong with this one.
+        message.status === 'scheduled' && styles.scheduled,
         message.status === 'failed' && styles.failed,
       ]}>
       {/*
@@ -166,14 +231,22 @@ export function MessageBubble({
         style={[
           styles.text,
           outgoing ? styles.textOut : styles.textIn,
+          // On a wallpaper, incoming text takes the derived ink; outgoing stays white,
+          // which every derived bubble colour was checked against at 4.5:1.
+          palette && !outgoing ? {color: palette.ink} : null,
           outgoing && isWaiting(message.status) && {color: theme.textDim},
+          message.status === 'scheduled' && {color: theme.accentQuiet},
         ]}>
         {message.text}
       </AppText>
 
       <View style={styles.footer}>
         <AppText
-          style={[styles.time, outgoing ? styles.metaOut : styles.metaIn]}
+          style={[
+            styles.time,
+            outgoing ? styles.metaOut : styles.metaIn,
+            palette && !outgoing ? {color: palette.meta} : null,
+          ]}
           numberOfLines={1}>
           {clock(message.receivedAt)}
         </AppText>
@@ -266,6 +339,33 @@ export function MessageBubble({
 
   return (
     <View style={[styles.row, outgoing ? styles.rowOut : styles.rowIn]}>
+      {/*
+        The header a held message needs, above the bubble rather than inside it.
+
+        A scheduled message is the one thing in a thread that has not happened yet, and
+        the time it will happen is more important than anything in the bubble — so it goes
+        where a day divider goes, and "Edit" sits beside it because changing your mind is
+        the most likely next action on something that has not been sent.
+      */}
+      {message.status === 'scheduled' && message.scheduledFor ? (
+        <View style={styles.scheduleHead}>
+          <AppText style={styles.scheduleTitle}>Send Later</AppText>
+          <View style={styles.scheduleWhenRow}>
+            <AppText style={styles.scheduleWhen}>
+              {describeSchedule(message.scheduledFor)}
+            </AppText>
+            {onEditSchedule ? (
+              <TouchableOpacity
+                onPress={() => onEditSchedule(message)}
+                hitSlop={{top: 8, bottom: 8, left: 8, right: 8}}
+                accessibilityRole="button"
+                accessibilityLabel="Edit scheduled message">
+                <AppText style={styles.scheduleEdit}>Edit</AppText>
+              </TouchableOpacity>
+            ) : null}
+          </View>
+        </View>
+      ) : null}
       <TouchableOpacity
         activeOpacity={onLongPress || (outgoing && message.status === 'failed') ? 0.7 : 1}
         onPress={
@@ -276,7 +376,9 @@ export function MessageBubble({
       </TouchableOpacity>
       {receipt ? (
         <LandIn token={receipt}>
-          <AppText style={styles.receiptLine} numberOfLines={1}>
+          <AppText
+            style={[styles.receiptLine, palette ? {color: palette.meta} : null]}
+            numberOfLines={1}>
             {receipt}
           </AppText>
         </LandIn>
@@ -298,6 +400,26 @@ const useStyles = makeStyles(t => ({
     marginRight: 2,
   },
   rowIn: {alignItems: 'flex-start'},
+
+  // A sticker sits on the page, not in a bubble. 96pt is large enough to read the
+  // drawing and small enough that three in a row do not become the conversation.
+  stickerWrapOut: {alignItems: 'flex-end'},
+  stickerWrapIn: {alignItems: 'flex-start'},
+  sticker: {width: 96, height: 96},
+  stickerTime: {...typography.caption, fontSize: 10.5, color: t.textFaint, marginTop: 1},
+
+  // Centred over the bubble, like a day divider — because that is what it is: a marker
+  // for a moment in the thread, except the moment has not arrived yet.
+  scheduleHead: {alignItems: 'center', alignSelf: 'stretch', marginBottom: 6, gap: 1},
+  scheduleTitle: {
+    ...typography.caption,
+    fontSize: 11,
+    fontWeight: '600',
+    color: t.textDim,
+  },
+  scheduleWhenRow: {flexDirection: 'row', alignItems: 'center', gap: 8},
+  scheduleWhen: {...typography.caption, fontSize: 11, color: t.textFaint},
+  scheduleEdit: {...typography.caption, fontSize: 11, fontWeight: '600', color: t.accent},
   bubble: {
     maxWidth: '78%',
     // Guarantees room for the timestamp row even behind a very short message, so the
@@ -311,6 +433,14 @@ const useStyles = makeStyles(t => ({
   },
   out: {backgroundColor: t.bubbleOut, borderBottomRightRadius: radius.sm},
   queued: {backgroundColor: 'transparent', borderWidth: 1.5, borderStyle: 'dashed', borderColor: t.dash},
+  // The same "not on the radio yet" outline as queued, in the accent: this one is waiting
+  // because you asked it to, not because anything went wrong.
+  scheduled: {
+    backgroundColor: 'transparent',
+    borderWidth: 1.5,
+    borderStyle: 'dashed',
+    borderColor: t.accent,
+  },
   // A fill, never a border. The incoming bubble used to be white with a hairline and a
   // shadow because it shared a colour with the thread behind it; giving it the sunk grey
   // instead separates it with no outline at all — and on dark, a hairline round a bubble

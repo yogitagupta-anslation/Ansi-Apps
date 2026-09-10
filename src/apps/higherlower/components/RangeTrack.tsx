@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Animated, Easing, StyleSheet, Text, View } from 'react-native';
 import { Guess, Range } from '../types/game';
 import { rangeSize } from '../game/engine';
-import { Palette, fonts, radius, spacing, verdictColor } from '../theme/tokens';
+import { Palette, radius, spacing, tabular, type, verdictColor } from '../theme/tokens';
 import { useTheme, useThemedStyles } from '../theme/ThemeProvider';
 
 interface RangeTrackProps {
@@ -15,10 +15,13 @@ interface RangeTrackProps {
 /**
  * The narrowing bar -- a picture of the player's own reasoning.
  *
- * Everything ruled out is struck through and greyed; what survives is lit and
- * labelled POSSIBLE, and it slides closed as the round goes on. Seeing the field
- * collapse by half is what makes "guess the middle" feel like a move rather than
- * a maths lesson.
+ * Everything ruled out is greyed; what survives is lit, and it slides closed as
+ * the round goes on. Seeing the field collapse by half is what makes "guess the
+ * middle" feel like a move rather than a maths lesson.
+ *
+ * The lit part used to carry the word POSSIBLE. A ten-pixel label inside a
+ * sixteen-pixel bar reads as a squeeze rather than a caption, and it said what
+ * the count directly above it already says -- so the bar is now just a bar.
  */
 export default function RangeTrack({ range, known, guesses }: RangeTrackProps) {
   const { colors } = useTheme();
@@ -54,9 +57,7 @@ export default function RangeTrack({ range, known, guesses }: RangeTrackProps) {
       </View>
 
       <View style={styles.track} onLayout={(e) => setWidth(e.nativeEvent.layout.width)}>
-        <Animated.View style={[styles.window, { left, width: size }]}>
-          {widthPx > 74 ? <Text style={styles.windowLabel}>POSSIBLE</Text> : null}
-        </Animated.View>
+        <Animated.View style={[styles.window, { left, width: size }]} />
 
         {guesses.map((guess, index) => {
           const isLast = index === guesses.length - 1;
@@ -81,7 +82,7 @@ export default function RangeTrack({ range, known, guesses }: RangeTrackProps) {
 
 const makeStyles = (colors: Palette) => StyleSheet.create({
   wrap: {
-    gap: 6,
+    gap: spacing.xs,
   },
   labels: {
     flexDirection: 'row',
@@ -89,17 +90,16 @@ const makeStyles = (colors: Palette) => StyleSheet.create({
     alignItems: 'center',
   },
   edge: {
-    ...fonts.numeric,
+    ...type.numCaption,
+    ...tabular,
     color: colors.textMuted,
-    fontSize: 11,
   },
   remaining: {
-    ...fonts.label,
+    ...type.label,
     color: colors.textSecondary,
-    fontSize: 11,
   },
   track: {
-    height: 16,
+    height: 14,
     borderRadius: radius.pill,
     backgroundColor: colors.track,
     borderWidth: 1,
@@ -112,22 +112,14 @@ const makeStyles = (colors: Palette) => StyleSheet.create({
     top: 0,
     bottom: 0,
     borderRadius: radius.pill,
+    // No border. An outlined pill on a track reads as a control you can drag,
+    // and this is a readout -- the fill alone says which part is still live.
     backgroundColor: colors.accentDim,
-    borderWidth: 1,
-    borderColor: colors.panelBorderStrong,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  windowLabel: {
-    ...fonts.label,
-    color: colors.accent,
-    fontSize: 8,
-    letterSpacing: 1.5,
   },
   tick: {
     position: 'absolute',
     width: 3,
-    height: 22,
+    height: 20,
     marginLeft: -1.5,
     borderRadius: 2,
   },

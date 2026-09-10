@@ -1,7 +1,7 @@
 import React from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { Palette, fonts, radius, spacing } from '../theme/tokens';
+import { MIN_TOUCH, Palette, radius, spacing, tabular, type } from '../theme/tokens';
 import { useTheme, useThemedStyles } from '../theme/ThemeProvider';
 
 interface StepperProps {
@@ -86,14 +86,13 @@ const makeStyles = (colors: Palette) => StyleSheet.create({
     flex: 1,
   },
   label: {
+    ...type.body,
     color: colors.textPrimary,
-    fontSize: 14,
-    fontWeight: '700',
   },
   hint: {
+    ...type.caption,
     color: colors.textMuted,
-    fontSize: 11,
-    marginTop: 2,
+    marginTop: spacing.xxs,
   },
   control: {
     flexDirection: 'row',
@@ -101,8 +100,10 @@ const makeStyles = (colors: Palette) => StyleSheet.create({
     gap: spacing.sm,
   },
   button: {
-    width: 32,
-    height: 32,
+    // Nudging a number is a repeated action, so the target is the full size
+    // rather than the 32px it was -- a miss here costs a whole extra tap.
+    width: MIN_TOUCH - spacing.sm,
+    height: MIN_TOUCH - spacing.sm,
     borderRadius: radius.pill,
     alignItems: 'center',
     justifyContent: 'center',
@@ -118,10 +119,10 @@ const makeStyles = (colors: Palette) => StyleSheet.create({
     borderColor: colors.divider,
   },
   value: {
-    ...fonts.numeric,
+    ...type.numHeading,
+    ...tabular,
     color: colors.textPrimary,
-    fontSize: 17,
-    minWidth: 44,
+    minWidth: 52,
     textAlign: 'center',
   },
 });

@@ -9,7 +9,7 @@ import { useSettings } from '../settings/SettingsProvider';
 import { feedback } from '../util/feedback';
 import { Range, RoundSummary } from '../types/game';
 import { ModifierId, rulesSummary } from '../game/modifiers';
-import { Palette, fonts, spacing } from '../theme/tokens';
+import { Palette, spacing, type } from '../theme/tokens';
 import { useThemedStyles } from '../theme/ThemeProvider';
 
 interface SoloGameScreenProps {
@@ -112,9 +112,8 @@ const makeStyles = (colors: Palette) => StyleSheet.create({
     alignItems: 'flex-end',
   },
   headerLabel: {
-    ...fonts.label,
+    ...type.micro,
     color: colors.textMuted,
-    fontSize: 9,
   },
   loading: {
     flex: 1,
@@ -122,7 +121,7 @@ const makeStyles = (colors: Palette) => StyleSheet.create({
     justifyContent: 'center',
   },
   loadingText: {
+    ...type.body,
     color: colors.textMuted,
-    fontSize: 14,
   },
 });

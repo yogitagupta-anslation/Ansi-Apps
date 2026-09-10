@@ -10,7 +10,7 @@ import { AI_PROFILES } from '../game/ai';
 import { parGuesses } from '../game/engine';
 import { resolveRules } from '../game/modifiers';
 import { Difficulty } from '../types/game';
-import { Palette, fonts, radius, spacing } from '../theme/tokens';
+import { Palette, radius, spacing, type } from '../theme/tokens';
 import { useThemedStyles } from '../theme/ThemeProvider';
 
 interface SoloSetupScreenProps {
@@ -119,9 +119,8 @@ const makeStyles = (colors: Palette) => StyleSheet.create({
     marginBottom: spacing.lg,
   },
   label: {
-    ...fonts.label,
+    ...type.label,
     color: colors.textMuted,
-    fontSize: 10,
   },
   modHead: {
     flexDirection: 'row',
@@ -129,16 +128,15 @@ const makeStyles = (colors: Palette) => StyleSheet.create({
     alignItems: 'center',
   },
   modCount: {
+    ...type.micro,
     color: colors.accent,
-    fontSize: 10,
-    fontWeight: '700',
   },
   hint: {
+    ...type.caption,
     color: colors.textMuted,
-    fontSize: 11,
   },
   brief: {
-    gap: 6,
+    gap: spacing.xs,
     padding: spacing.md,
     borderRadius: radius.md,
     backgroundColor: colors.panel,
@@ -146,14 +144,12 @@ const makeStyles = (colors: Palette) => StyleSheet.create({
     borderColor: colors.panelBorder,
   },
   briefTitle: {
-    ...fonts.label,
+    ...type.label,
     color: colors.accent,
-    fontSize: 11,
-    marginBottom: 2,
+    marginBottom: spacing.xxs,
   },
   briefLine: {
+    ...type.sub,
     color: colors.textSecondary,
-    fontSize: 12,
-    lineHeight: 18,
   },
 });

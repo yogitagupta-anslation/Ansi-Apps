@@ -5,6 +5,7 @@ import type {ThemeMode} from '../config/theme';
 import type {QueuedMessage} from '../messaging/MessageQueue';
 import type {Group} from '../messaging/Groups';
 import type {SecurityEvent} from '../security/SecurityLog';
+import type {ScreenshotPolicy} from '../security/ScreenPolicy';
 import {
   generateKeyPair,
   peerIdFromPublicKey,
@@ -91,6 +92,31 @@ export interface AppSettings {
    * say and ConnectionScheduler lowers this to whatever it actually grants.
    */
   maxConnections: number;
+  /**
+   * Warn before a message hands somebody a way to reach you off this app.
+   *
+   * On by default. The app's whole premise is that you can talk to a stranger three
+   * metres away without an account or a phone number, and a number typed into the
+   * composer undoes that permanently — there is no server holding a copy to delete.
+   * It is a warning rather than a block, and this switch turns even the warning off for
+   * anyone who finds it in the way.
+   */
+  warnBeforeSharingContacts: boolean;
+  /**
+   * What this phone permits a peer to do with a screenshot of a conversation.
+   *
+   * A preference, exchanged at handshake, and the STRICTER of the two sides applies to
+   * the conversation — so "not allowed" from either phone means not allowed for both.
+   * See ScreenPolicy.ts for what each level can actually be enforced.
+   */
+  screenshotPolicy: ScreenshotPolicy;
+  /**
+   * conversationId -> wallpaper id. Absent means the plain theme background.
+   *
+   * Per conversation rather than global: a wallpaper is how you tell one thread from
+   * another at a glance, which is worth more than a single decorated app.
+   */
+  chatWallpapers: Record<string, string>;
 }
 
 export interface KnownPeer {
@@ -132,6 +158,14 @@ export const DEFAULT_SETTINGS: AppSettings = {
   autoReconnect: true,
   relayEnabled: true,
   autoConnect: true,
+  // On: the app's premise is that you need no phone number to use it, so handing one over
+  // deserves a second look. It is a warning, never a block.
+  warnBeforeSharingContacts: true,
+  // The permissive default, because the strict one has to be a choice somebody made
+  // rather than one made for them — and because the stricter side of any conversation
+  // wins anyway, so a considered "not allowed" is never overridden by this.
+  screenshotPolicy: 'allowed',
+  chatWallpapers: {},
   maxConnections: LINK_BUDGET_DEFAULT,
 };
 

@@ -111,6 +111,9 @@ export class MessageService {
   private metricsFor: ((peerId: string) => LinkMetrics) | null = null;
   private onQueuePersist: (() => void) | null = null;
 
+  /** One timer for every held message, armed on the soonest. See `armScheduleTimer`. */
+  private scheduleTimer: ReturnType<typeof setTimeout> | null = null;
+
   constructor(private readonly router: MessageRouter) {}
 
   setMetricsProvider(provider: (peerId: string) => LinkMetrics): void {
@@ -545,6 +548,15 @@ export class MessageService {
       this.conversations.set(id, messages);
     }
     logger.info(TAG, `hydrated ${ids.length} conversation(s)`);
+
+    /*
+      Held messages survive the app being closed, which is most of the point of holding
+      one: "send this at 10am tomorrow" is worthless if it only works while the app is
+      open. Anything whose time passed while the process was gone goes out on the first
+      tick after this, which is the honest behaviour — late, and sent, rather than
+      silently dropped.
+    */
+    this.armScheduleTimer();
   }
 
   getMessages(conversationId: string): ChatMessage[] {
@@ -775,6 +787,170 @@ export class MessageService {
     this.conversations.set(conversationId, next);
     this.persist(conversationId);
     this.bus.emit('messagesChanged', {conversationId, messages: next});
+    // Deleting a held message is how it is cancelled, so the clock has to be reconsidered.
+    this.armScheduleTimer();
+  }
+
+  // ---- send later -------------------------------------------------------
+
+  /**
+   * Write it now, send it then.
+   *
+   * The message is appended to the conversation immediately — you can see it, edit it and
+   * cancel it — but nothing touches the radio until `at`. That is the whole trick, and it
+   * is why this needs no protocol change: a held message is a local note, and the moment
+   * it is released it becomes an ordinary message going out the ordinary way.
+   *
+   * `convSeq` is deliberately NOT assigned here. It is the author's position in the
+   * conversation, and the position a message occupies is where it is SENT, not where it
+   * was typed — assigning it now would leave a hole in the other side's numbering for
+   * however many hours the message sits here, and a hole is exactly what the receiver
+   * reads as a lost message.
+   */
+  schedule(
+    conversationId: string,
+    text: string,
+    at: number,
+    groupId?: string,
+  ): ChatMessage {
+    if (!this.identity) {
+      throw new Error('MessageService has no identity');
+    }
+    const trimmed = text.trim();
+    if (trimmed.length === 0) {
+      throw new Error('Cannot schedule an empty message');
+    }
+    if (!Number.isFinite(at)) {
+      throw new Error('Cannot schedule without a time');
+    }
+
+    const now = Date.now();
+    const message: ChatMessage = {
+      id: uuidv4(),
+      conversationId,
+      originId: this.identity.peerId,
+      senderId: this.identity.peerId,
+      destinationId: conversationId,
+      text: trimmed,
+      timestamp: now,
+      // Composed now, so it sorts to the bottom of today rather than jumping forward into
+      // a day heading that has not happened. The bubble carries its own send time.
+      receivedAt: now,
+      direction: 'outgoing',
+      status: 'scheduled',
+      scheduledFor: at,
+      protocolVersion: PROTOCOL_VERSION,
+      ttl: DEFAULT_TTL,
+      hopCount: 0,
+      retryCount: 0,
+      ...(groupId ? {groupId, deliveredTo: []} : {}),
+    };
+
+    this.append(conversationId, message);
+    logger.info(
+      TAG,
+      `holding ${shortId(message.id)} for ${new Date(at).toISOString()}`,
+    );
+    this.armScheduleTimer();
+    return message;
+  }
+
+  /** Move a held message to a different time. Only meaningful while it is still held. */
+  reschedule(conversationId: string, messageId: string, at: number): void {
+    const message = this.find(conversationId, messageId);
+    if (!message || message.status !== 'scheduled') {
+      return;
+    }
+    message.scheduledFor = at;
+    this.persist(conversationId);
+    this.bus.emit('messagesChanged', {
+      conversationId,
+      messages: [...(this.conversations.get(conversationId) ?? [])],
+    });
+    this.armScheduleTimer();
+  }
+
+  /** Every message still waiting on the clock, soonest first. */
+  scheduledMessages(): Array<{conversationId: string; message: ChatMessage}> {
+    const out: Array<{conversationId: string; message: ChatMessage}> = [];
+    for (const [conversationId, list] of this.conversations) {
+      for (const message of list) {
+        if (message.status === 'scheduled') {
+          out.push({conversationId, message});
+        }
+      }
+    }
+    return out.sort(
+      (a, b) => (a.message.scheduledFor ?? 0) - (b.message.scheduledFor ?? 0),
+    );
+  }
+
+  /**
+   * Let a held message go now, whatever its clock said.
+   *
+   * Implemented as delete-then-send rather than by flipping the status in place, so a
+   * released message travels the exact path every other message travels — same convSeq
+   * assignment, same reachability check, same outbox on a dropped link. A second
+   * near-identical send path is how the two drift apart.
+   */
+  async releaseScheduled(conversationId: string, messageId: string): Promise<void> {
+    const message = this.find(conversationId, messageId);
+    if (!message || message.status !== 'scheduled') {
+      return;
+    }
+    const {text, groupId} = message;
+    this.deleteLocal(conversationId, messageId);
+    try {
+      if (groupId) {
+        await this.sendToGroup(groupId, text);
+      } else {
+        await this.send(conversationId, text);
+      }
+    } catch (err) {
+      // send() already records a failure against the message it created; this is only
+      // for a throw before that message exists, which would otherwise vanish silently.
+      logger.warn(TAG, `scheduled send failed: ${String(err)}`);
+    }
+  }
+
+  /**
+   * One timer for the whole app, armed on the soonest message.
+   *
+   * A timer per message would be N timers to leak and N to rebuild on every hydrate; the
+   * queue only ever moves forward, so the earliest deadline is the only one worth
+   * holding. Anything already overdue — the app was closed, the phone was asleep — goes
+   * out on the next tick rather than waiting for its moment to come round again.
+   */
+  private armScheduleTimer(): void {
+    if (this.scheduleTimer) {
+      clearTimeout(this.scheduleTimer);
+      this.scheduleTimer = null;
+    }
+    const next = this.scheduledMessages()[0];
+    if (!next) {
+      return;
+    }
+    const due = next.message.scheduledFor ?? 0;
+    // setTimeout is clamped to a 32-bit millisecond delay; anything beyond that is
+    // re-armed when the shorter timer fires rather than firing immediately at a wrapped
+    // negative delay.
+    const delay = Math.min(Math.max(0, due - Date.now()), 0x7fffffff);
+    this.scheduleTimer = setTimeout(() => {
+      this.scheduleTimer = null;
+      void this.releaseDue();
+    }, delay);
+  }
+
+  /** Send everything whose time has come, then re-arm on whatever is left. */
+  private async releaseDue(): Promise<void> {
+    const now = Date.now();
+    const due = this.scheduledMessages().filter(
+      s => (s.message.scheduledFor ?? 0) <= now,
+    );
+    for (const {conversationId, message} of due) {
+      await this.releaseScheduled(conversationId, message.id);
+    }
+    this.armScheduleTimer();
   }
 
   private armAckTimeout(
@@ -984,6 +1160,9 @@ export class MessageService {
    * `received` outranks `failed` so a late ACK correctly promotes a timed-out message.
    */
   private static readonly STATUS_RANK: Record<MessageStatus, number> = {
+    // Below pending: a held message has not been attempted, and releasing it into the
+    // ordinary path must never look like a regression.
+    scheduled: -1,
     pending: 0,
     sending: 1,
     sent: 2,
@@ -1088,6 +1267,10 @@ export class MessageService {
       clearTimeout(timer);
     }
     this.pendingAcks.clear();
+    if (this.scheduleTimer) {
+      clearTimeout(this.scheduleTimer);
+      this.scheduleTimer = null;
+    }
   }
 }
 

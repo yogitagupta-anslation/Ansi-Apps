@@ -2,7 +2,7 @@ import React from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { feedback } from '../util/feedback';
-import { Palette, fonts, radius, spacing } from '../theme/tokens';
+import { MIN_TOUCH, Palette, elevation, radius, spacing, tabular, type } from '../theme/tokens';
 import { useTheme, useThemedStyles } from '../theme/ThemeProvider';
 
 interface KeypadProps {
@@ -46,11 +46,11 @@ export default function Keypad({ value, onChange, onSubmit, maxDigits, canSubmit
       ))}
 
       <Key
-        label="⌫"
+        label="backspace"
+        icon="backspace-outline"
         onPress={backspace}
         onLongPress={() => onChange('')}
         disabled={disabled || value.length === 0}
-        muted
         accessibilityLabel="Delete digit"
       />
       <Key label="0" onPress={() => press('0')} disabled={disabled} />
@@ -67,19 +67,19 @@ export default function Keypad({ value, onChange, onSubmit, maxDigits, canSubmit
 
 function Key({
   label,
+  icon,
   onPress,
   onLongPress,
   disabled,
   accent,
-  muted,
   accessibilityLabel,
 }: {
   label: string;
+  icon?: React.ComponentProps<typeof Ionicons>['name'];
   onPress: () => void;
   onLongPress?: () => void;
   disabled?: boolean;
   accent?: boolean;
-  muted?: boolean;
   accessibilityLabel?: string;
 }) {
   const { colors } = useTheme();
@@ -95,14 +95,19 @@ function Key({
       style={({ pressed }) => [
         styles.key,
         accent && styles.keyAccent,
+        // The submit key is the only lifted thing on the board, which is what
+        // makes it findable without looking away from the number.
+        accent && !disabled && elevation('raised', colors),
         pressed && !disabled && styles.keyPressed,
         disabled && styles.keyDisabled,
       ]}
     >
-      {label === 'submit' ? (
+      {icon ? (
+        <Ionicons name={icon} size={24} color={colors.textSecondary} />
+      ) : label === 'submit' ? (
         <Ionicons name="arrow-forward" size={26} color={colors.onAccent} />
       ) : (
-        <Text style={[styles.keyLabel, muted && styles.keyLabelMuted]}>{label}</Text>
+        <Text style={styles.keyLabel}>{label}</Text>
       )}
     </Pressable>
   );
@@ -118,12 +123,13 @@ const makeStyles = (colors: Palette) => StyleSheet.create({
   key: {
     width: '31.5%',
     aspectRatio: 1.75,
+    minHeight: MIN_TOUCH,
     borderRadius: radius.md,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: colors.card,
+    backgroundColor: colors.raised,
     borderWidth: 1,
-    borderColor: colors.cardBorder,
+    borderColor: colors.raisedBorder,
   },
   keyAccent: {
     backgroundColor: colors.accent,
@@ -137,12 +143,10 @@ const makeStyles = (colors: Palette) => StyleSheet.create({
     opacity: 0.35,
   },
   keyLabel: {
-    ...fonts.numeric,
+    ...type.numDisplay,
+    ...tabular,
     color: colors.textPrimary,
     fontSize: 26,
-  },
-  keyLabelMuted: {
-    color: colors.textSecondary,
-    fontSize: 22,
+    lineHeight: 30,
   },
 });

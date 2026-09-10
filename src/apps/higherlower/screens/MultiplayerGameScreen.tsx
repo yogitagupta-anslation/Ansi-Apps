@@ -13,7 +13,7 @@ import { RaceMode } from '../types/game';
 import { useSettings } from '../settings/SettingsProvider';
 import { feedback } from '../util/feedback';
 import { RoundSummary } from '../types/game';
-import { Palette } from '../theme/tokens';
+import { Palette, spacing, type } from '../theme/tokens';
 import { useThemedStyles } from '../theme/ThemeProvider';
 import { IncomingRound } from './LobbyScreen';
 
@@ -143,7 +143,10 @@ export default function MultiplayerGameScreen({ round, onQuit, onFinish }: Multi
 
         case 'end':
           if (msg.rid !== roundIdRef.current) return;
-          dispatch({ type: 'end' });
+          // The winner travels with the call. Dropping it -- which is what this
+          // did -- left every phone ranking the finish by its own arrival order,
+          // so a photo finish could crown a different player on each screen.
+          dispatch({ type: 'end', winnerId: msg.id });
           return;
 
         case 'rx': {
@@ -261,7 +264,7 @@ export default function MultiplayerGameScreen({ round, onQuit, onFinish }: Multi
 const makeStyles = (colors: Palette) => StyleSheet.create({
   headerRight: {
     alignItems: 'flex-end',
-    gap: 3,
+    gap: spacing.xxs,
   },
   loading: {
     flex: 1,
@@ -269,7 +272,7 @@ const makeStyles = (colors: Palette) => StyleSheet.create({
     justifyContent: 'center',
   },
   loadingText: {
+    ...type.body,
     color: colors.textMuted,
-    fontSize: 14,
   },
 });

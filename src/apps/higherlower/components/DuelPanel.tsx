@@ -4,7 +4,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { Racer } from '../types/game';
 import { verdictIcon } from '../game/engine';
 import { formatDuration } from '../util/format';
-import { Palette, fonts, radius, spacing, verdictColor } from '../theme/tokens';
+import { Palette, radius, spacing, tabular, type, verdictColor } from '../theme/tokens';
 import { useTheme, useThemedStyles } from '../theme/ThemeProvider';
 
 interface DuelPanelProps {
@@ -123,7 +123,7 @@ const makeStyles = (colors: Palette) => StyleSheet.create({
   wrap: {
     flexDirection: 'row',
     alignItems: 'center',
-    padding: spacing.sm + 2,
+    padding: spacing.md,
     borderRadius: radius.md,
     backgroundColor: colors.card,
     borderWidth: 1,
@@ -137,63 +137,62 @@ const makeStyles = (colors: Palette) => StyleSheet.create({
     paddingHorizontal: spacing.sm,
   },
   vs: {
-    ...fonts.label,
+    ...type.micro,
     color: colors.textMuted,
-    fontSize: 10,
   },
   nameRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 4,
+    gap: spacing.xs,
   },
   name: {
-    ...fonts.label,
+    ...type.micro,
     color: colors.textMuted,
-    fontSize: 10,
   },
   nameWin: {
     color: colors.gold,
   },
   count: {
-    ...fonts.numeric,
+    ...type.numDisplay,
+    ...tabular,
     fontSize: 26,
     lineHeight: 30,
   },
   countLabel: {
+    ...type.micro,
+    letterSpacing: 0,
     color: colors.textMuted,
-    fontSize: 9,
-    marginTop: -2,
+    marginTop: -spacing.xxs,
   },
   time: {
-    ...fonts.numeric,
+    ...type.numCaption,
+    ...tabular,
     color: colors.textSecondary,
-    fontSize: 12,
-    marginTop: 2,
+    marginTop: spacing.xxs,
   },
   timeOff: {
     color: colors.higher,
-    fontSize: 10,
   },
   bar: {
-    height: 4,
+    height: 5,
     alignSelf: 'stretch',
     borderRadius: radius.pill,
     backgroundColor: colors.track,
     overflow: 'hidden',
-    marginTop: 5,
+    marginTop: spacing.xs,
   },
   barFill: {
     height: '100%',
     borderRadius: radius.pill,
   },
   last: {
-    ...fonts.numeric,
-    fontSize: 13,
-    marginTop: 3,
+    ...type.numCaption,
+    ...tabular,
+    marginTop: spacing.xxs,
   },
   lastIdle: {
+    ...type.caption,
     color: colors.textMuted,
-    fontSize: 13,
-    marginTop: 3,
+    marginTop: spacing.xxs,
   },
 });
