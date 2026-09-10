@@ -376,12 +376,28 @@ export type MapZoom = 'overview' | 'venue' | 'hall' | 'nearby';
  * Connections
  * ------------------------------------------------------------------ */
 
+/**
+ * Where a connection stands.
+ *
+ * `none` is the absence of a record. The four outcomes after it are terminal
+ * for one attempt; a new attempt starts a new record rather than reviving an old
+ * one, so a late message from a finished exchange can never resurrect it.
+ *
+ * NOTE that `connected` means the other phone said yes over BLE. A live GATT
+ * link is NOT a connection: the transport being up only means bytes can move.
+ */
 export type ConnectionState =
   | 'none'
   | 'outgoing_pending'
   | 'incoming_pending'
   | 'connected'
-  | 'declined';
+  | 'declined'
+  /** We withdrew our own request before they answered. */
+  | 'cancelled'
+  /** Nobody answered inside the request window. */
+  | 'expired'
+  /** The link could not be established, or broke before an answer arrived. */
+  | 'failed';
 
 export interface Connection {
   id: string;
@@ -394,6 +410,25 @@ export interface Connection {
   note?: string;
   /** Queued while offline, flushed by the sync worker. */
   pendingSync?: boolean;
+  /**
+   * The BLE request this record came from, so a late accept or reject can be
+   * matched to the exchange that produced it rather than to the person.
+   */
+  requestId?: string;
+  /** When a pending request stops being valid. Absent once settled. */
+  expiresAt?: number;
+  /**
+   * What the far side told us about themselves, captured at request time.
+   *
+   * Offline there is no directory to look them up in, so without this an
+   * incoming request would render as "Someone nearby wants to connect".
+   */
+  card?: {
+    profileId: ProfileId;
+    name: string;
+    role?: string;
+    company?: string;
+  };
 }
 
 /* ------------------------------------------------------------------ *

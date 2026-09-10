@@ -359,6 +359,8 @@ function DiscoverProfileSheet({
       starter={queries.starterFor(attendee.profile.id)}
       onClose={onClose}
       onConnect={() => void actions.connect(attendee.profile.id)}
+      onCancelRequest={() => void actions.cancelConnectionRequest(attendee.profile.id)}
+      onDeclineRequest={() => void actions.rejectConnectionRequest(attendee.profile.id)}
       onNavigate={() => {
         if (!live) return;
         actions.startNavigation(live.peerId);

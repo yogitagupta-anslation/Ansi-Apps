@@ -29,6 +29,7 @@ import { OnboardingCardScreen } from '../screens/OnboardingCardScreen';
 import { actions, queries } from './services';
 import { AppText } from '../components/primitives';
 import { Toast } from '../components/Toast';
+import { IncomingRequestSheet } from '../components/IncomingRequestSheet';
 import { sessionStore } from '../state/stores';
 import { useStore } from '../state/store';
 import { useTheme } from '../theme/ThemeProvider';
@@ -59,6 +60,15 @@ export function RootNavigator(): React.ReactElement {
   );
 
   const event = useStore(sessionStore, (state) => state.event);
+  /**
+   * Requests live at the root, not inside a screen.
+   *
+   * Someone can send you a request while you are reading a profile, filtering
+   * Discover or editing your own card. Rendering the sheet here means it reaches
+   * the user wherever they are, and — because it sits above the tab tree — it
+   * cannot be lost behind a screen that happens to be unmounted.
+   */
+  const incomingRequests = useStore(sessionStore, (state) => state.incomingRequests);
   const profile = useStore(sessionStore, (state) => state.profile);
   const saved = useStore(sessionStore, (state) => state.saved);
   const cardsOpened = useStore(sessionStore, (state) => state.cardsOpened);
@@ -218,6 +228,25 @@ export function RootNavigator(): React.ReactElement {
           })}
         </View>
       </SafeAreaView>
+
+      <IncomingRequestSheet
+        request={incomingRequests[0] ?? null}
+        waiting={Math.max(0, incomingRequests.length - 1)}
+        onAccept={() => {
+          const request = incomingRequests[0];
+          if (request) void actions.acceptConnectionRequest(request.profileId);
+        }}
+        onDecline={() => {
+          const request = incomingRequests[0];
+          if (request) void actions.rejectConnectionRequest(request.profileId);
+        }}
+        onDismiss={() => {
+          // Dismissing is not answering. The request stays pending and stays in
+          // Connections until it is answered or expires - swiping a sheet away
+          // must not silently decline someone.
+          setTab('connections');
+        }}
+      />
 
       <Toast />
     </View>

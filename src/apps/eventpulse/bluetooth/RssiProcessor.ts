@@ -202,8 +202,16 @@ export function classifyBand(
     return distance >= ceiling + hysteresisMeters ? naive : previous;
   }
 
-  // Moving inward: require dropping below the new band's ceiling by the margin.
-  const ceiling = BANDS[nextIndex].maxDistance;
+  // Moving inward: require dropping below the boundary we are *leaving* by the
+  // margin — that is, the ceiling of the band one step inside the previous one.
+  //
+  // Reading it off `BANDS[nextIndex]` instead was correct only for a single-band
+  // step, where the two are the same value. Across a multi-band jump they
+  // diverge and the margin stops being a 0.75 m anti-flicker guard and becomes a
+  // lock: leaving "far" would demand <= 2.25 m rather than <= 11.25 m, so a peer
+  // measured at 2.5 m kept reporting "Farther / 12 m+" while the same peer at
+  // 11 m reported "Nearby". That made the band non-monotonic in distance.
+  const ceiling = BANDS[prevIndex - 1].maxDistance;
   return distance <= ceiling - hysteresisMeters ? naive : previous;
 }
 

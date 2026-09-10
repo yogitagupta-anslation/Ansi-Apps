@@ -44,11 +44,20 @@ export const REPORT_REASONS: { value: ReportInput['reason']; label: string }[] =
   { value: 'other', label: 'Something else' },
 ];
 
+/** A report the server has not accepted yet. Persisted so it survives a restart. */
+export interface PendingReport {
+  profileId: ProfileId;
+  reason: ReportInput['reason'];
+  details?: string;
+  queuedAt: number;
+}
+
 export class BlockService {
   private readonly db: LocalDatabase;
   private readonly api: EventPulseApi;
   private readonly listeners = new Set<(blocked: Set<ProfileId>) => void>();
   private blocks = new Map<ProfileId, BlockRecord>();
+  private reports: PendingReport[] = [];
   private loaded = false;
 
   constructor(db: LocalDatabase, api: EventPulseApi) {
@@ -60,6 +69,7 @@ export class BlockService {
     if (this.loaded) return;
     const stored = (await this.db.get<BlockRecord[]>(keys.blocklist)) ?? [];
     this.blocks = new Map(stored.map((record) => [record.profileId, record]));
+    this.reports = (await this.db.get<PendingReport[]>(keys.reportQueue)) ?? [];
     this.loaded = true;
     this.emit();
   }
@@ -84,6 +94,12 @@ export class BlockService {
 
   /** Takes effect immediately and locally; the server is told when reachable. */
   async block(profileId: ProfileId, reason?: string): Promise<void> {
+    // Every mutator hydrates first. `persist()` writes the whole in-memory map,
+    // so blocking before `load()` has resolved — the user tapping Block while
+    // bootstrap is still running — used to overwrite the stored list with a
+    // single entry and silently unblock everyone blocked on a previous run.
+    // `load()` is idempotent, so this costs nothing once hydrated.
+    await this.load();
     if (this.blocks.has(profileId)) return;
     this.blocks.set(profileId, {
       profileId,
@@ -105,6 +121,7 @@ export class BlockService {
   }
 
   async unblock(profileId: ProfileId): Promise<void> {
+    await this.load();
     if (!this.blocks.delete(profileId)) return;
     await this.persist();
     this.emit();
@@ -116,17 +133,36 @@ export class BlockService {
     }
   }
 
+  /**
+   * Report someone, and — separately — block them.
+   *
+   * The two halves have different failure modes and the caller has to be able to
+   * tell them apart. Blocking is local and always succeeds; it is the half that
+   * actually protects the user. Delivering the report is not local, so when it
+   * fails the report is queued and the failure is re-thrown: swallowing it left
+   * every caller free to say "Report sent" about a report that had gone nowhere
+   * and was not even retained to be retried.
+   */
   async report(input: ReportInput): Promise<void> {
+    await this.load();
     if (input.alsoBlock !== false) await this.block(input.profileId, input.reason);
     try {
       await this.api.reportUser(input.profileId, input.reason, input.details);
-    } catch {
-      // A report that cannot be delivered right now must not undo the block.
+    } catch (error) {
+      this.reports.push({
+        profileId: input.profileId,
+        reason: input.reason,
+        details: input.details,
+        queuedAt: Date.now(),
+      });
+      await this.persistReports();
+      throw error;
     }
   }
 
-  /** Retry any blocks the server has not acknowledged. */
+  /** Retry any blocks the server has not acknowledged, then any queued reports. */
   async flush(): Promise<void> {
+    await this.load();
     const pending = [...this.blocks.values()].filter((record) => record.pendingSync);
     for (const record of pending) {
       try {
@@ -137,10 +173,38 @@ export class BlockService {
       }
     }
     if (pending.length) await this.persist();
+    await this.flushReports();
+  }
+
+  /** Queued reports, oldest first. Exposed so the UI can say how many are waiting. */
+  pendingReports(): PendingReport[] {
+    return [...this.reports];
+  }
+
+  private async flushReports(): Promise<void> {
+    if (this.reports.length === 0) return;
+    const remaining = [...this.reports];
+    while (remaining.length > 0) {
+      const report = remaining[0];
+      try {
+        await this.api.reportUser(report.profileId, report.reason, report.details);
+        remaining.shift();
+      } catch {
+        break; // still offline; the rest stay queued
+      }
+    }
+    if (remaining.length !== this.reports.length) {
+      this.reports = remaining;
+      await this.persistReports();
+    }
   }
 
   private async persist(): Promise<void> {
     await this.db.set(keys.blocklist, [...this.blocks.values()]);
+  }
+
+  private async persistReports(): Promise<void> {
+    await this.db.set(keys.reportQueue, this.reports);
   }
 
   private emit(): void {

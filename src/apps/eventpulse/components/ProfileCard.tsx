@@ -109,6 +109,9 @@ export function ProfileCard({
   connectionState,
   onClose,
   onConnect,
+  connectNotice,
+  onCancelRequest,
+  onDeclineRequest,
   onNavigate,
   onBlock,
   onReport,
@@ -120,6 +123,18 @@ export function ProfileCard({
   connectionState: ConnectionState;
   onClose: () => void;
   onConnect: () => void;
+  /**
+   * Why the last Connect attempt did not work.
+   *
+   * Rendered here rather than left to the toast: this card is a `Modal`, and a
+   * toast mounted at the root paints behind it. A failure the user cannot see
+   * is indistinguishable from a button that does nothing.
+   */
+  connectNotice?: string | null;
+  /** Withdraw a request already sent. Omitted where the screen offers no cancel. */
+  onCancelRequest?: () => void;
+  /** Decline a request from this person, when they have sent one. */
+  onDeclineRequest?: () => void;
   onNavigate: () => void;
   onBlock: () => void;
   onReport: (input: ReportInput) => void;
@@ -380,15 +395,36 @@ export function ProfileCard({
         </ScrollView>
 
         <View style={[styles.sheetFooter, { borderTopColor: colors.border }]}>
+          {connectNotice ? (
+            <View style={[styles.connectNotice, { backgroundColor: colors.surfaceElevated, borderColor: colors.danger, borderWidth: StyleSheet.hairlineWidth }]}>
+              <AppText variant="micro" tone="secondary">
+                {connectNotice}
+              </AppText>
+            </View>
+          ) : null}
           <View style={styles.sheetActions}>
             <Button label="Find me" icon="🧭" variant="secondary" onPress={onNavigate} full />
             <Button
               label={connectionActionLabel(connectionState)}
-              icon="🤝"
               onPress={onConnect}
+              /*
+               * Disabled while a request is in flight or already answered.
+               * `outgoing_pending` reads "Request sent" and must not invite a
+               * second tap: sending twice would open a second exchange the far
+               * side has no way to tell from the first.
+               */
               disabled={connectionState === 'connected' || connectionState === 'outgoing_pending'}
-              full
             />
+            {connectionState === 'outgoing_pending' && onCancelRequest ? (
+              <Button
+                label="Cancel request"
+                variant="ghost"
+                onPress={onCancelRequest}
+              />
+            ) : null}
+            {connectionState === 'incoming_pending' && onDeclineRequest ? (
+              <Button label="Decline" variant="secondary" onPress={onDeclineRequest} />
+            ) : null}
           </View>
 
           {/* "BLE uncertainty is communicated, never disguised" — the actions
@@ -525,6 +561,12 @@ const styles = StyleSheet.create({
     padding: space.lg,
     gap: space.sm,
     borderTopWidth: StyleSheet.hairlineWidth,
+  },
+  connectNotice: {
+    paddingHorizontal: space.md,
+    paddingVertical: space.sm,
+    borderRadius: radius.md,
+    marginBottom: space.sm,
   },
   sheetActions: { flexDirection: 'row', gap: space.md },
   whyBlock: {

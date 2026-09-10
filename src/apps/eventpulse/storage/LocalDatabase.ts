@@ -222,12 +222,19 @@ export const keys = {
   peerMap: (eventId: string) => `event:${eventId}:peer-map`,
   directorySync: (eventId: string) => `event:${eventId}:directory-sync`,
   connections: (eventId: string) => `event:${eventId}:connections`,
+  // BLE connection requests in flight. Event-scoped like the connections they
+  // become, so ending an event disposes of them with everything else.
+  connectionRequests: (eventId: string) => `event:${eventId}:connection-requests`,
   // Device-local by design; see SavedPeopleService. Deliberately not in the
   // outbox, because a save is never synced anywhere.
   savedPeople: (eventId: string) => `event:${eventId}:saved`,
   eventStats: (eventId: string) => `event:${eventId}:stats`,
   outbox: 'sync:outbox',
   blocklist: 'security:blocklist',
+  // Reports that could not be delivered. Local and device-scoped like the
+  // blocklist: a report the network ate must survive to be retried rather than
+  // be silently dropped after the user was told it had been sent.
+  reportQueue: 'security:report-queue',
   eventList: 'events:list',
   lastEvent: 'events:last',
 };
