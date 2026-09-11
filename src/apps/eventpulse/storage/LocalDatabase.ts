@@ -95,11 +95,40 @@ export class LocalDatabase {
     this.ready = true;
   }
 
+  /**
+   * Rows that a version bump must NOT drop.
+   *
+   * Dropping used to be unconditionally safe, and the comment above still says
+   * why: everything here was a cache that a sync could rebuild. That stopped
+   * being true. These three cannot be rebuilt from anywhere, because there is
+   * nowhere to rebuild them from:
+   *
+   *  - a conversation exists only on the two phones that had it;
+   *  - the local profile id IS this install's identity, and minting a new one
+   *    makes the user a stranger to everyone who already connected to them;
+   *  - a blocklist that quietly emptied itself would unblock every person the
+   *    user deliberately blocked, which is a safety failure, not a cache miss.
+   */
+  private static preservedOnMigrate(key: string): boolean {
+    return (
+      key.includes(':chat:') ||
+      key === namespaced(keys.localProfileId) ||
+      key === namespaced(keys.blocklist) ||
+      key === namespaced(keys.reportQueue)
+    );
+  }
+
   private async migrate(from: number | null): Promise<void> {
     if (from === null) return; // fresh install
-    // Every collection here is a rebuildable cache. Dropping is the safe move.
+    // Caches are dropped rather than guessed at; the handful of rows that are
+    // not caches are kept, because losing them costs more than one sync.
     const keys = await this.adapter.getAllKeys();
-    const ours = keys.filter((key) => key.startsWith('eventpulse:') && key !== VERSION_KEY);
+    const ours = keys.filter(
+      (key) =>
+        key.startsWith('eventpulse:') &&
+        key !== VERSION_KEY &&
+        !LocalDatabase.preservedOnMigrate(key),
+    );
     if (this.adapter.multiRemove) await this.adapter.multiRemove(ours);
     else for (const key of ours) await this.adapter.removeItem(key);
     this.cache.clear();
@@ -210,6 +239,10 @@ function namespaced(key: string): string {
 /** Canonical key builders — one place to change the layout. */
 export const keys = {
   userProfile: 'user:profile',
+  // Who this install is to other people. Kept out of the profile row on
+  // purpose: editing or resetting a profile must not change the identity that
+  // peers have already connected to. See profile/LocalIdentity.ts.
+  localProfileId: 'user:profile-id',
   privacySettings: 'user:privacy',
   themePreference: 'user:theme',
   // Set once the first-run card has been completed or skipped.
@@ -225,6 +258,15 @@ export const keys = {
   // BLE connection requests in flight. Event-scoped like the connections they
   // become, so ending an event disposes of them with everything else.
   connectionRequests: (eventId: string) => `event:${eventId}:connection-requests`,
+  /**
+   * One conversation, keyed by the STABLE profileId of the other person.
+   *
+   * Not the peer id and not the device id: both rotate, and a conversation that
+   * forked every time the radio changed its mind about a name would lose the
+   * history the moment it mattered. Event-scoped like the connection it belongs
+   * to, so leaving an event disposes of both together.
+   */
+  conversation: (eventId: string, profileId: string) => `event:${eventId}:chat:${profileId}`,
   // Device-local by design; see SavedPeopleService. Deliberately not in the
   // outbox, because a save is never synced anywhere.
   savedPeople: (eventId: string) => `event:${eventId}:saved`,

@@ -119,7 +119,7 @@ class EventPulseBleModule(private val reactContext: ReactApplicationContext) :
         if (!reactContext.packageManager.hasSystemFeature(PackageManager.FEATURE_BLUETOOTH_LE)) {
             return "unsupported"
         }
-        if (!hasScanPermission()) return "unauthorized"
+        if (!hasBlePermissions()) return "unauthorized"
 
         return when (currentAdapter.state) {
             BluetoothAdapter.STATE_ON -> "powered_on"
@@ -129,18 +129,64 @@ class EventPulseBleModule(private val reactContext: ReactApplicationContext) :
         }
     }
 
-    private fun hasScanPermission(): Boolean {
+    /**
+     * Every permission the BLE features actually need, not just the ones the
+     * scanner needs.
+     *
+     * BLUETOOTH_CONNECT used to be missing here, and its absence was invisible
+     * precisely because this gate is what the app asks. Two things need it:
+     * opening a GATT connection, and writing the adapter name — which the
+     * peripheral library does on every advertisement to put the rotating peer
+     * id on the air. Without the permission that write throws, the library
+     * catches it and logs a warning, and advertising starts anyway carrying
+     * whatever name the adapter had before. The far side then matches the wrong
+     * name against its radar and reports the person as unreachable, with
+     * nothing anywhere saying why.
+     *
+     * So a gate that answered "granted" while CONNECT was missing was not a
+     * partial answer, it was a wrong one.
+     */
+    private fun hasBlePermissions(): Boolean {
         val permissions =
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                listOf(Manifest.permission.BLUETOOTH_SCAN, Manifest.permission.BLUETOOTH_ADVERTISE)
+                listOf(
+                    Manifest.permission.BLUETOOTH_SCAN,
+                    Manifest.permission.BLUETOOTH_ADVERTISE,
+                    Manifest.permission.BLUETOOTH_CONNECT,
+                )
             } else {
                 // Pre-Android 12 the OS gates BLE scanning behind location, even
-                // though we neither want nor derive a location from it.
+                // though we neither want nor derive a location from it. CONNECT
+                // did not exist yet; BLUETOOTH and BLUETOOTH_ADMIN are
+                // install-time and need no runtime check.
                 listOf(Manifest.permission.ACCESS_FINE_LOCATION)
             }
 
         return permissions.all {
             ContextCompat.checkSelfPermission(reactContext, it) == PackageManager.PERMISSION_GRANTED
+        }
+    }
+
+    /**
+     * Which of the required permissions are missing, for diagnostics.
+     *
+     * Reported rather than inferred: "denied" on its own sent a whole session
+     * looking in the wrong place.
+     */
+    private fun missingBlePermissions(): List<String> {
+        val permissions =
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                listOf(
+                    Manifest.permission.BLUETOOTH_SCAN,
+                    Manifest.permission.BLUETOOTH_ADVERTISE,
+                    Manifest.permission.BLUETOOTH_CONNECT,
+                )
+            } else {
+                listOf(Manifest.permission.ACCESS_FINE_LOCATION)
+            }
+
+        return permissions.filter {
+            ContextCompat.checkSelfPermission(reactContext, it) != PackageManager.PERMISSION_GRANTED
         }
     }
 
@@ -151,12 +197,46 @@ class EventPulseBleModule(private val reactContext: ReactApplicationContext) :
      */
     @ReactMethod
     fun requestPermissions(promise: Promise) {
-        promise.resolve(if (hasScanPermission()) "granted" else "denied")
+        promise.resolve(if (hasBlePermissions()) "granted" else "denied")
     }
 
     @ReactMethod
     fun getPermissionState(promise: Promise) {
-        promise.resolve(if (hasScanPermission()) "granted" else "undetermined")
+        promise.resolve(if (hasBlePermissions()) "granted" else "undetermined")
+    }
+
+    /**
+     * What is actually missing, and what the adapter is currently called.
+     *
+     * A bare "denied" is what made the last failure take a day to find. Naming
+     * the missing permission turns it into one line of log.
+     *
+     * `adapter.name` is here for the same reason: it is what the peripheral
+     * library overwrites to put the rotating peer id on the air, and reading it
+     * needs BLUETOOTH_CONNECT on API 31+ — the very permission whose absence
+     * breaks the write. So a null here is itself the diagnosis, not a gap in it.
+     */
+    @ReactMethod
+    fun getPermissionDiagnostics(promise: Promise) {
+        val map = Arguments.createMap()
+        val missing = Arguments.createArray()
+        for (permission in missingBlePermissions()) {
+            missing.pushString(permission.removePrefix("android.permission."))
+        }
+
+        map.putArray("missing", missing)
+        map.putBoolean("granted", missingBlePermissions().isEmpty())
+        map.putInt("sdkInt", Build.VERSION.SDK_INT)
+
+        val name =
+            try {
+                adapter?.name
+            } catch (e: SecurityException) {
+                null
+            }
+        if (name == null) map.putNull("adapterName") else map.putString("adapterName", name)
+
+        promise.resolve(map)
     }
 
     @ReactMethod
@@ -194,7 +274,7 @@ class EventPulseBleModule(private val reactContext: ReactApplicationContext) :
             promise.reject("adapter_off", "Bluetooth is not enabled")
             return
         }
-        if (!hasScanPermission()) {
+        if (!hasBlePermissions()) {
             promise.reject("permission_denied", "Bluetooth scan permission not granted")
             return
         }

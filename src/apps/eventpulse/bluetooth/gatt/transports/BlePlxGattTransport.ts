@@ -40,6 +40,8 @@
 
 import { Platform } from 'react-native';
 
+import { trace } from '../../../runtime/diagnostics';
+
 import { base64ToBytes, bytesToBase64 } from '../../../utils/base64';
 import {
   ANDROID_REQUESTED_MTU,
@@ -117,11 +119,6 @@ interface PlxManager {
 }
 
 interface PeripheralManagerModule {
-  /**
-   * Must be called once before anything else, and it can leave its promise
-   * pending for ever on some devices — hence the race in `startPeripheral`.
-   */
-  start(): Promise<void>;
   addService(uuid: string, primary: boolean): void;
   removeService(uuid: string): void;
   /**
@@ -138,8 +135,20 @@ interface PeripheralManagerModule {
     permissions: number,
     valueBase64: string,
   ): void;
-  startAdvertising(options: { name?: string; serviceUuids?: string[] }): Promise<void>;
-  stopAdvertising(): Promise<void>;
+  /**
+   * NOTE THE KEY NAMES: `localName` and `serviceUUIDs`, spelled exactly as the
+   * package declares them
+   * (`react-native-ble-peripheral-manager/src/index.tsx:48-53`).
+   *
+   * The options object is `JSON.stringify`d and read back on the native side
+   * with `optString`/`optJSONArray`, so a misspelled key is not an error — it
+   * is a default. Get `serviceUUIDs` wrong and the device advertises with no
+   * service UUID at all, invisible to every UUID-filtered scan, while
+   * `startAdvertising` still resolves successfully.
+   */
+  startAdvertising(options: { localName?: string; serviceUUIDs?: string[] }): Promise<void>;
+  /** Synchronous and void on both platforms, despite the name. */
+  stopAdvertising(): void;
   updateValueBase64(
     serviceUuid: string,
     characteristicUuid: string,
@@ -147,19 +156,49 @@ interface PeripheralManagerModule {
     centralUuids?: string[],
   ): Promise<boolean>;
   respondToRequestBase64(requestId: number, status: number, valueBase64: string): void;
+  /**
+   * NOTE THE PAYLOAD SHAPE. The id used to answer the ATT request rides on the
+   * EVENT, not on the individual requests, and every identifier is a flat
+   * string rather than a nested object:
+   *
+   *   { requestId, requests: [{ centralUUID, characteristicUUID, serviceUUID, offset, value }] }
+   *
+   * Identical on both platforms — `BlePeripheralManagerModule.kt:371-383` and
+   * `SwiftBlePeripheralManager.swift:642-662`. Reading a field that is not
+   * there yields `undefined` in silence, so this shape has to be right.
+   */
   onDidReceiveWriteRequests(
     listener: (event: {
-      requests: { requestId: number; central?: { uuid?: string }; valueBase64?: string }[];
+      requestId: number;
+      requests?: { centralUUID?: string; characteristicUUID?: string; value?: string }[];
     }) => void,
   ): { remove(): void };
   onDidSubscribeToCharacteristic(
-    listener: (event: { central?: { uuid?: string }; characteristic?: { uuid?: string } }) => void,
+    listener: (event: { centralUUID?: string; characteristicUUID?: string }) => void,
   ): { remove(): void };
   onDidUnsubscribeFromCharacteristic(
-    listener: (event: { central?: { uuid?: string } }) => void,
+    listener: (event: { centralUUID?: string }) => void,
   ): { remove(): void };
+  /**
+   * Fires when the adapter confirms advertising began, or refused.
+   *
+   * The reliable signal. See `startPeripheral` for why the promise is not.
+   * Payload matches `EventDidStartAdvertising`
+   * (`react-native-ble-peripheral-manager/src/NativeBlePeripheralManager.ts:110-113`).
+   */
+  onDidStartAdvertising(listener: (event: { success: boolean; error?: string }) => void): {
+    remove(): void;
+  };
   onReadyToUpdateSubscribers(listener: () => void): { remove(): void };
 }
+
+/**
+ * How long to wait for the adapter to confirm advertising began.
+ *
+ * Generous, because the confirmation crosses the bridge after the radio has
+ * actually started; bounded, because the alternative is the hang this replaces.
+ */
+const ADVERTISE_CONFIRM_TIMEOUT_MS = 8_000;
 
 const ATT_SUCCESS = 0;
 
@@ -175,7 +214,6 @@ const PERMISSION_READABLE = 0x01;
 const PERMISSION_WRITEABLE = 0x02;
 
 /** `start()` can never settle on some devices; do not wait on it for ever. */
-const NATIVE_START_TIMEOUT_MS = 3_000;
 
 interface Link {
   peer: GattPeer;
@@ -195,9 +233,10 @@ export class BlePlxGattTransport implements GattTransport {
   private readonly links = new Map<string, Link>();
   private readonly listeners = new Set<Partial<GattTransportEvents>>();
   private readonly nativeSubscriptions: { remove(): void }[] = [];
+  /** Resolved by the next `onDidStartAdvertising`. See `startPeripheral`. */
+  private advertisingWaiters: ((ok: boolean, error?: string) => void)[] = [];
 
   private servicePublished = false;
-  private nativeStarted = false;
   private advertising = false;
   private scanning = false;
   /** Resolves when the peripheral stack says its transmit queue has drained. */
@@ -238,16 +277,11 @@ export class BlePlxGattTransport implements GattTransport {
   async startPeripheral(options: { displayName?: string } = {}): Promise<void> {
     const peripheral = this.requirePeripheral();
 
-    if (!this.nativeStarted) {
-      // The module needs an explicit start, and on some devices that promise
-      // never settles. Racing a timeout and carrying on is what Treasure Hunt
-      // learned to do here; blocking for ever would hang the caller instead.
-      await Promise.race([
-        peripheral.start().catch(() => undefined),
-        new Promise<void>((resolve) => setTimeout(resolve, NATIVE_START_TIMEOUT_MS)),
-      ]);
-      this.nativeStarted = true;
-    }
+    trace('GATT', 'peripheral start requested', {
+      displayName: options.displayName,
+      peripheralModule: this.peripheral !== null,
+      servicePublished: this.servicePublished,
+    });
 
     if (!this.servicePublished) {
       // Remove OUR service only, never `removeAllServices()`.
@@ -286,27 +320,103 @@ export class BlePlxGattTransport implements GattTransport {
 
       this.attachPeripheralListeners(peripheral);
       this.servicePublished = true;
+      trace('GATT', 'service created', {
+        service: GATT_SERVICE_UUID,
+        tx: GATT_CHAR_TX_UUID,
+        rx: GATT_CHAR_RX_UUID,
+      });
     }
 
+    /*
+     * Clear the advertiser before claiming it.
+     *
+     * The module holds exactly one advertisement — one callback, one
+     * `isCurrentlyAdvertising` flag — and rejects a second `startAdvertising`
+     * with "Already advertising" rather than replacing it
+     * (`BlePeripheralManagerModule.kt:567`). Re-applying the advertising plan
+     * has to replace what is on the air, not stack onto it.
+     */
     try {
-      await peripheral.startAdvertising({
-        name: options.displayName,
-        serviceUuids: [GATT_SERVICE_UUID],
+      peripheral.stopAdvertising();
+    } catch {
+      // Nothing was advertising. Expected on the first call.
+    }
+
+    /*
+     * Settle on the EVENT, not the promise.
+     *
+     * The module builds its `AdvertiseCallback` once and captures the promise
+     * from the call that created it
+     * (`BlePeripheralManagerModule.kt:266-281`), then keeps that callback for
+     * the life of the process (`clearPendingAdvertisingPipeline(keepCallback =
+     * true)`). Every later `startAdvertising` therefore stores a promise that
+     * nothing will ever resolve. Measured on two emulators: five native
+     * advertisements, five `Advertising started successfully`, zero promises
+     * settled — and because this call was awaited, the scan below never ran and
+     * Connect could never find anyone.
+     *
+     * `onDidStartAdvertising` fires correctly every time. Racing it against the
+     * promise keeps a genuine native rejection immediate, and the timeout means
+     * a silent adapter costs eight seconds rather than the session. This is the
+     * shape Treasure Hunt already uses
+     * (`treasure-hunt/ble/transport/PeripheralTransport.ts:339-372`).
+     */
+    const confirmed = new Promise<void>((resolve, reject) => {
+      this.advertisingWaiters.push((ok, error) => {
+        if (ok) resolve();
+        else reject(new GattTransportError('advertise_failed', error ?? 'advertising failed'));
       });
+    });
+
+    const nativeCall = peripheral.startAdvertising({
+      localName: options.displayName,
+      serviceUUIDs: [GATT_SERVICE_UUID],
+    });
+    // A rejection that arrives after the race has been decided still needs a
+    // handler, or it surfaces as an unhandled rejection warning.
+    void nativeCall.catch(() => undefined);
+
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timeout = new Promise<never>((_resolve, reject) => {
+      timer = setTimeout(
+        () =>
+          reject(
+            new GattTransportError(
+              'advertise_failed',
+              'the adapter did not confirm advertising in time',
+            ),
+          ),
+        ADVERTISE_CONFIRM_TIMEOUT_MS,
+      );
+    });
+
+    try {
+      await Promise.race([confirmed, nativeCall, timeout]);
       this.advertising = true;
+      trace('GATT', 'advertising STARTED', {
+        localName: options.displayName,
+        serviceUUIDs: GATT_SERVICE_UUID,
+      });
     } catch (error) {
+      trace('GATT', 'advertising FAILED', {
+        localName: options.displayName,
+        error: error instanceof Error ? error.message : String(error),
+        raw: JSON.stringify(error ?? null).slice(0, 300),
+      });
       throw new GattTransportError(
         'advertise_failed',
         'Could not start advertising the EventPulse service. Some Android chipsets have no BLE advertiser at all.',
         { cause: error },
       );
+    } finally {
+      if (timer) clearTimeout(timer);
     }
   }
 
   async stopPeripheral(): Promise<void> {
     if (!this.peripheral || !this.advertising) return;
     try {
-      await this.peripheral.stopAdvertising();
+      this.peripheral.stopAdvertising();
     } catch {
       // Stopping an advertiser that already stopped is not worth surfacing.
     }
@@ -315,9 +425,17 @@ export class BlePlxGattTransport implements GattTransport {
 
   private attachPeripheralListeners(peripheral: PeripheralManagerModule): void {
     this.nativeSubscriptions.push(
+      peripheral.onDidStartAdvertising((event) => {
+        const waiters = this.advertisingWaiters;
+        this.advertisingWaiters = [];
+        for (const waiter of waiters) waiter(event.success !== false, event.error);
+      }),
+    );
+
+    this.nativeSubscriptions.push(
       peripheral.onDidSubscribeToCharacteristic((event) => {
-        const centralId = event.central?.uuid;
-        if (!centralId || event.characteristic?.uuid?.toLowerCase() !== GATT_CHAR_TX_UUID) return;
+        const centralId = event.centralUUID;
+        if (!centralId || event.characteristicUUID?.toLowerCase() !== GATT_CHAR_TX_UUID) return;
         // A central subscribing to TX is the moment an inbound link becomes
         // usable: before that there is nowhere to notify.
         this.openInboundLink(centralId);
@@ -326,23 +444,43 @@ export class BlePlxGattTransport implements GattTransport {
 
     this.nativeSubscriptions.push(
       peripheral.onDidUnsubscribeFromCharacteristic((event) => {
-        const centralId = event.central?.uuid;
+        const centralId = event.centralUUID;
         if (centralId) this.dropLink(centralId, 'remote');
       }),
     );
 
     this.nativeSubscriptions.push(
       peripheral.onDidReceiveWriteRequests((event) => {
-        for (const request of event.requests) {
-          const centralId = request.central?.uuid;
-          if (centralId && request.valueBase64) {
-            this.ingest(centralId, base64ToBytes(request.valueBase64));
+        trace('GATT', 'write REQUEST received', {
+          requestId: event.requestId,
+          count: event.requests?.length ?? 0,
+          centralUUID: event.requests?.[0]?.centralUUID,
+          bytes: event.requests?.[0]?.value?.length ?? 0,
+        });
+        for (const request of event.requests ?? []) {
+          const centralId = request.centralUUID;
+          if (centralId && request.value) {
+            this.ingest(centralId, base64ToBytes(request.value));
           }
-          try {
-            peripheral.respondToRequestBase64(request.requestId, ATT_SUCCESS, '');
-          } catch {
-            // The central may already be gone; the write still counted.
-          }
+        }
+
+        /*
+         * Answer exactly once, with the id from the event.
+         *
+         * The native side files the whole batch under that single id, so it is
+         * what `respondToRequestBase64` resolves against. Answering is not
+         * optional and it is not best-effort: a write that asked for a response
+         * and never gets one holds the central's only ATT transaction slot open
+         * until the thirty-second spec timeout, and the far side reports a
+         * failed write long after we have forgotten the request.
+         */
+        try {
+          peripheral.respondToRequestBase64(event.requestId, ATT_SUCCESS, '');
+        } catch (error) {
+          trace('GATT', 'respond FAILED', {
+            requestId: event.requestId,
+            error: error instanceof Error ? error.message : String(error),
+          });
         }
       }),
     );
@@ -357,6 +495,7 @@ export class BlePlxGattTransport implements GattTransport {
   }
 
   private openInboundLink(centralId: string): void {
+    trace('GATT', 'inbound link opening', { centralId, already: this.links.has(centralId) });
     if (this.links.has(centralId)) return;
     const link = new GattLink(centralId, Date.now());
     link.event({ kind: 'connect' }, Date.now());
@@ -389,8 +528,14 @@ export class BlePlxGattTransport implements GattTransport {
   async startScan(): Promise<void> {
     if (this.scanning) return;
     this.scanning = true;
+    trace('GATT', 'scanner START', { filterServiceUuid: GATT_SERVICE_UUID });
     this.plx.startDeviceScan([GATT_SERVICE_UUID], { allowDuplicates: false }, (error, device) => {
       if (error) {
+        trace('GATT', 'scanner ERROR', {
+          error: (error as { message?: string } | null)?.message ?? String(error),
+          reason: (error as { reason?: string } | null)?.reason,
+          errorCode: (error as { errorCode?: number } | null)?.errorCode,
+        });
         this.emit(
           'onError',
           new GattTransportError('internal', 'BLE scan failed', { cause: error }),
@@ -398,6 +543,14 @@ export class BlePlxGattTransport implements GattTransport {
         return;
       }
       if (!device) return;
+      // Logged BEFORE anything is filtered or interpreted, so the raw truth of
+      // what the scanner handed back is visible even when nothing follows.
+      trace('GATT', 'scanner DISCOVERED', {
+        deviceId: device.id,
+        localName: device.localName,
+        name: device.name,
+        rssi: device.rssi,
+      });
       this.emit('onDiscovery', {
         deviceId: device.id,
         displayName: device.localName ?? device.name ?? undefined,
@@ -437,6 +590,7 @@ export class BlePlxGattTransport implements GattTransport {
     };
     this.links.set(deviceId, entry);
 
+    trace('GATT', 'connect attempt', { deviceId, timeoutMs: options.timeoutMs });
     try {
       const device = await this.plx.connectToDevice(deviceId, {
         timeout: options.timeoutMs ?? CONNECT_TIMEOUT_MS,
@@ -662,6 +816,7 @@ export class BlePlxGattTransport implements GattTransport {
       }
     }
     this.nativeSubscriptions.length = 0;
+    this.advertisingWaiters = [];
     this.listeners.clear();
     // NOT plx.destroy(): react-native-ble-plx's BleManager is a process-wide
     // singleton shared with the other BLE apps in this hub. Destroying it here

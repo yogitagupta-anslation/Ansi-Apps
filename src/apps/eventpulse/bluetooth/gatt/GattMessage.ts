@@ -55,6 +55,14 @@ export const GattMessageType = {
   ConnectionAccept: 0x11,
   /** "No." Never discloses a block or a privacy setting as the reason. */
   ConnectionReject: 0x12,
+  /**
+   * One chat message between two people who are already connected.
+   *
+   * A separate type rather than a flag on the others, so a build that predates
+   * chat decodes it as unknown and ignores it instead of misreading it as a
+   * connection request. Payload lives in `connections/ChatProtocol`.
+   */
+  ChatMessage: 0x13,
 } as const;
 
 export type GattMessageTypeValue = (typeof GattMessageType)[keyof typeof GattMessageType];

@@ -18,6 +18,7 @@ import type {
   EventZone,
   PersonCategory,
   Profile,
+  ProfileId,
 } from '../types';
 import { eventCodeFromId } from '../bluetooth/BleProtocol';
 import { fnv1a32 } from '../utils/bytes';
@@ -483,10 +484,18 @@ export function generateEvents(now = Date.now()): EventDetail[] {
 }
 
 /** The signed-in user's own starting profile. */
-export function defaultUserProfile(): Profile {
+/**
+ * The card a brand-new install starts from.
+ *
+ * The identity is passed in rather than written here. It used to be the
+ * literal `'me'`, which made every install claim the same person the moment it
+ * spoke to another phone; minting it belongs to `profile/LocalIdentity.ts`,
+ * which persists it separately from the editable profile.
+ */
+export function defaultUserProfile(profileId: ProfileId): Profile {
   return {
-    id: 'me',
-    userId: 'me',
+    id: profileId,
+    userId: profileId,
     name: 'Yogita Gupta',
     pronouns: 'she/her',
     role: 'Software Engineer',
