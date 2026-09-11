@@ -58,6 +58,7 @@ export type IconName =
   | 'arrowDown'
   | 'star'
   | 'starFilled'
+  | 'sticker'
   | 'unlock';
 
 interface IconProps {
@@ -355,6 +356,22 @@ const ICONS: Record<IconName, (p: StrokeProps, color: string) => React.ReactNode
     <>
       <Path {...p} d="M12 5v13" />
       <Path {...p} d="M6 13l6 6 6-6" />
+    </>
+  ),
+  /**
+   * A face, for the sticker tray.
+   *
+   * Its own glyph rather than borrowing `star`, which means "favourite" on the peer card
+   * and in Nearby — one mark cannot mean two things in the same app without teaching the
+   * reader that marks do not mean anything. Drawn open-mouthed so it reads as a sticker
+   * at 19px rather than as a generic status dot.
+   */
+  sticker: (p, color) => (
+    <>
+      <Circle {...p} cx={12} cy={12} r={8.5} />
+      <Circle cx={9.2} cy={10} r={0.95} fill={color} stroke="none" />
+      <Circle cx={14.8} cy={10} r={0.95} fill={color} stroke="none" />
+      <Path {...p} d="M8.4 14.1a4.3 4.3 0 0 0 7.2 0" />
     </>
   ),
   star: p => (

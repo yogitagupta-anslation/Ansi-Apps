@@ -54,6 +54,7 @@ function peer(patch: Partial<Peer>): Peer {
     attempts: 0,
     failures: 0,
     reconnectAttempt: 0,
+    screenshotPolicy: null,
     ...patch,
   };
 }

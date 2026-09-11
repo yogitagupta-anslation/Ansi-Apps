@@ -3,7 +3,7 @@ import { Animated, Easing, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Racer } from '../types/game';
 import { verdictIcon } from '../game/engine';
-import { Palette, fonts, radius, spacing, verdictColor } from '../theme/tokens';
+import { Palette, radius, spacing, tabular, type, verdictColor } from '../theme/tokens';
 import { useTheme, useThemedStyles } from '../theme/ThemeProvider';
 
 interface RacerLaneProps {
@@ -90,8 +90,8 @@ const makeStyles = (colors: Palette) => StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.sm,
-    paddingVertical: 9,
-    paddingHorizontal: spacing.sm + 2,
+    paddingVertical: spacing.sm + spacing.xs,
+    paddingHorizontal: spacing.md,
     borderRadius: radius.md,
     backgroundColor: colors.card,
     borderWidth: 1,
@@ -102,44 +102,41 @@ const makeStyles = (colors: Palette) => StyleSheet.create({
     backgroundColor: colors.goldTint,
   },
   avatar: {
-    width: 30,
-    height: 30,
+    width: 32,
+    height: 32,
     borderRadius: radius.pill,
     borderWidth: 1.5,
     alignItems: 'center',
     justifyContent: 'center',
   },
   initial: {
-    ...fonts.title,
-    fontSize: 13,
+    ...type.body,
   },
   body: {
     flex: 1,
-    gap: 6,
+    gap: spacing.xs,
   },
   nameRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
+    gap: spacing.xs,
   },
   name: {
+    ...type.body,
     color: colors.textPrimary,
-    fontSize: 13,
-    fontWeight: '700',
     flexShrink: 1,
   },
   tag: {
-    ...fonts.label,
+    ...type.micro,
     color: colors.textMuted,
-    fontSize: 9,
     borderWidth: 1,
     borderColor: colors.divider,
     borderRadius: radius.sm,
-    paddingHorizontal: 4,
+    paddingHorizontal: spacing.xs + 1,
     paddingVertical: 1,
   },
   bar: {
-    height: 4,
+    height: 5,
     borderRadius: radius.pill,
     backgroundColor: colors.track,
     overflow: 'hidden',
@@ -153,33 +150,33 @@ const makeStyles = (colors: Palette) => StyleSheet.create({
     minWidth: 74,
   },
   lastGuess: {
-    ...fonts.numeric,
-    fontSize: 16,
+    ...type.numHeading,
+    ...tabular,
   },
   waiting: {
+    ...type.caption,
     color: colors.textMuted,
-    fontSize: 12,
     fontStyle: 'italic',
   },
   note: {
+    ...type.micro,
+    letterSpacing: 0,
     color: colors.textMuted,
-    fontSize: 10,
     fontStyle: 'italic',
     maxWidth: 120,
   },
   out: {
-    ...fonts.label,
+    ...type.micro,
     color: colors.danger,
-    fontSize: 9,
   },
   off: {
-    ...fonts.label,
+    ...type.micro,
     color: colors.higher,
-    fontSize: 9,
   },
   count: {
+    ...type.micro,
+    letterSpacing: 0,
     color: colors.textMuted,
-    fontSize: 10,
     marginTop: 1,
   },
 });

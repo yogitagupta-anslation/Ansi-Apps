@@ -9,7 +9,7 @@ import { bleStatusLabel, useBle } from '../ble/BleProvider';
 import { MAX_CAPACITY, MIN_CAPACITY } from '../ble/constants';
 import { useSettings } from '../settings/SettingsProvider';
 import { plural } from '../util/format';
-import { Palette, fonts, radius, spacing } from '../theme/tokens';
+import { Palette, radius, spacing, type } from '../theme/tokens';
 import { useTheme, useThemedStyles } from '../theme/ThemeProvider';
 
 interface MultiplayerScreenProps {
@@ -123,14 +123,13 @@ const makeStyles = (colors: Palette) => StyleSheet.create({
     paddingVertical: spacing.lg,
   },
   heroTitle: {
-    ...fonts.title,
+    ...type.title,
     color: colors.textPrimary,
-    fontSize: 19,
+    textAlign: 'center',
   },
   heroBody: {
+    ...type.sub,
     color: colors.textSecondary,
-    fontSize: 13,
-    lineHeight: 19,
     textAlign: 'center',
   },
   error: {
@@ -139,15 +138,14 @@ const makeStyles = (colors: Palette) => StyleSheet.create({
     gap: spacing.sm,
     padding: spacing.md,
     borderRadius: radius.md,
-    backgroundColor: colors.panel,
+    backgroundColor: colors.dangerTint,
     borderWidth: 1,
-    borderColor: colors.danger,
+    borderColor: colors.dangerBorder,
     marginBottom: spacing.md,
   },
   errorText: {
+    ...type.caption,
     color: colors.textSecondary,
-    fontSize: 12,
-    lineHeight: 18,
     flex: 1,
   },
   hostBlock: {
@@ -169,20 +167,19 @@ const makeStyles = (colors: Palette) => StyleSheet.create({
     gap: spacing.sm,
   },
   factText: {
+    ...type.caption,
     color: colors.textSecondary,
-    fontSize: 12,
     flex: 1,
   },
   note: {
     flexDirection: 'row',
-    gap: 6,
+    gap: spacing.xs,
     alignItems: 'flex-start',
     marginTop: spacing.md,
   },
   noteText: {
+    ...type.caption,
     color: colors.textMuted,
-    fontSize: 11,
     flex: 1,
-    lineHeight: 16,
   },
 });

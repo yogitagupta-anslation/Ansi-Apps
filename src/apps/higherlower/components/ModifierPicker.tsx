@@ -1,7 +1,7 @@
 import React from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { MODIFIERS, ModifierId } from '../game/modifiers';
-import { Palette, fonts, radius, spacing } from '../theme/tokens';
+import { MIN_TOUCH, Palette, glyph, radius, spacing, type } from '../theme/tokens';
 import { useThemedStyles } from '../theme/ThemeProvider';
 
 interface ModifierPickerProps {
@@ -57,16 +57,19 @@ const makeStyles = (colors: Palette) => StyleSheet.create({
   },
   chip: {
     width: '48.5%',
-    padding: spacing.sm + 2,
+    minHeight: MIN_TOUCH + spacing.md,
+    padding: spacing.md,
     borderRadius: radius.md,
     backgroundColor: colors.card,
     borderWidth: 1,
     borderColor: colors.cardBorder,
-    gap: 3,
+    gap: spacing.xs,
   },
   chipOn: {
     backgroundColor: colors.accentDim,
     borderColor: colors.accent,
+    borderWidth: 2,
+    padding: spacing.md - 1,
   },
   chipBlocked: {
     opacity: 0.45,
@@ -77,22 +80,21 @@ const makeStyles = (colors: Palette) => StyleSheet.create({
   chipHead: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
+    gap: spacing.xs,
   },
   icon: {
-    fontSize: 14,
+    fontSize: glyph.md,
   },
   name: {
-    ...fonts.label,
+    ...type.body,
     color: colors.textSecondary,
-    fontSize: 12,
+    flexShrink: 1,
   },
   nameOn: {
     color: colors.textPrimary,
   },
   blurb: {
+    ...type.caption,
     color: colors.textMuted,
-    fontSize: 10,
-    lineHeight: 14,
   },
 });

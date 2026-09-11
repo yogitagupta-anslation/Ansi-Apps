@@ -32,7 +32,7 @@ const path = require('path');
 
 const { addReactPackages } = require('./addReactPackages');
 
-const ANDROID_SOURCE_DIRS = ['bleperipheral', 'bleclient', 'presence', 'securestore'];
+const ANDROID_SOURCE_DIRS = ['bleperipheral', 'bleclient', 'presence', 'securestore', 'screenguard'];
 const ANDROID_PACKAGE_SEGMENTS = ['com', 'blechat'];
 const IOS_SOURCES = ['BlePeripheral.swift', 'BlePeripheral.m'];
 
@@ -41,6 +41,7 @@ const REACT_PACKAGES = [
   'com.blechat.bleclient.BleClientPackage',
   'com.blechat.presence.PresencePackage',
   'com.blechat.securestore.SecureStorePackage',
+  'com.blechat.screenguard.ScreenGuardPackage',
 ];
 
 /* ------------------------------------------------------------------ *

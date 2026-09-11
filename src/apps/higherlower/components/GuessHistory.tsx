@@ -2,7 +2,7 @@ import React from 'react';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Guess } from '../types/game';
 import { verdictIcon } from '../game/engine';
-import { Palette, fonts, radius, spacing, verdictColor } from '../theme/tokens';
+import { Palette, glyph, radius, spacing, tabular, type, verdictColor } from '../theme/tokens';
 import { useTheme, useThemedStyles } from '../theme/ThemeProvider';
 
 /** Your own trail of guesses, newest first so the latest never scrolls away. */
@@ -44,31 +44,31 @@ const makeStyles = (colors: Palette) => StyleSheet.create({
   row: {
     flexDirection: 'row',
     gap: spacing.sm,
-    paddingVertical: 2,
+    paddingVertical: spacing.xxs,
   },
   chip: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 5,
-    paddingVertical: 6,
-    paddingHorizontal: 10,
+    gap: spacing.xs,
+    paddingVertical: spacing.xs + 2,
+    paddingHorizontal: spacing.sm + spacing.xxs,
     borderRadius: radius.pill,
     borderWidth: 1,
     backgroundColor: colors.wash,
   },
   value: {
-    ...fonts.numeric,
-    fontSize: 15,
+    ...type.numBody,
+    ...tabular,
   },
   icon: {
-    fontSize: 11,
+    fontSize: glyph.sm,
   },
   empty: {
     height: 34,
     justifyContent: 'center',
   },
   emptyText: {
+    ...type.caption,
     color: colors.textMuted,
-    fontSize: 12,
   },
 });

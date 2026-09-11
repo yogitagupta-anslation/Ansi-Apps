@@ -5,7 +5,7 @@ import Screen from '../components/Screen';
 import { judge, verdictIcon, verdictLabel } from '../game/engine';
 import { MODIFIERS } from '../game/modifiers';
 import { RANGE_PRESETS, formatRange, presetPar } from '../settings/SettingsProvider';
-import { Palette, fonts, radius, spacing, verdictColor } from '../theme/tokens';
+import { Palette, glyph, radius, spacing, tabular, type, verdictColor } from '../theme/tokens';
 import { useTheme, useThemedStyles } from '../theme/ThemeProvider';
 
 /** The worked example, judged by the real engine so the docs cannot drift. */
@@ -186,18 +186,18 @@ const makeStyles = (colors: Palette) => StyleSheet.create({
     gap: spacing.sm,
   },
   sectionTitle: {
-    ...fonts.label,
+    ...type.label,
     color: colors.accent,
-    fontSize: 11,
   },
   body: {
+    ...type.sub,
     color: colors.textSecondary,
-    fontSize: 13,
-    lineHeight: 20,
   },
+  // Weight comes from the family, never from fontWeight: Android will not
+  // synthesise a bold face for a custom family and silently renders regular.
   bold: {
+    fontFamily: type.body.fontFamily,
     color: colors.textPrimary,
-    fontWeight: '700',
   },
   example: {
     padding: spacing.md,
@@ -214,18 +214,17 @@ const makeStyles = (colors: Palette) => StyleSheet.create({
     borderBottomColor: colors.divider,
   },
   targetLabel: {
-    ...fonts.label,
+    ...type.micro,
     color: colors.textMuted,
-    fontSize: 10,
   },
   targetValue: {
-    ...fonts.numeric,
+    ...type.numDisplay,
+    ...tabular,
     color: colors.gold,
-    fontSize: 40,
   },
   targetHint: {
+    ...type.caption,
     color: colors.textMuted,
-    fontSize: 10,
     fontStyle: 'italic',
   },
   exampleRow: {
@@ -234,31 +233,29 @@ const makeStyles = (colors: Palette) => StyleSheet.create({
     gap: spacing.md,
   },
   exampleGuess: {
-    ...fonts.numeric,
+    ...type.numTitle,
+    ...tabular,
     color: colors.textPrimary,
-    fontSize: 20,
-    width: 44,
+    width: 48,
   },
   exampleVerdict: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
-    paddingVertical: 4,
-    paddingHorizontal: 10,
+    gap: spacing.xs,
+    paddingVertical: spacing.xs,
+    paddingHorizontal: spacing.sm + spacing.xxs,
     borderRadius: radius.pill,
     borderWidth: 1,
   },
   exampleIcon: {
-    fontSize: 11,
+    fontSize: glyph.sm,
   },
   exampleVerdictText: {
-    ...fonts.label,
-    fontSize: 12,
+    ...type.micro,
   },
   caption: {
+    ...type.caption,
     color: colors.textMuted,
-    fontSize: 11,
-    lineHeight: 16,
   },
   table: {
     padding: spacing.md,
@@ -266,7 +263,7 @@ const makeStyles = (colors: Palette) => StyleSheet.create({
     backgroundColor: colors.panel,
     borderWidth: 1,
     borderColor: colors.panelBorder,
-    gap: 6,
+    gap: spacing.sm,
   },
   tableRow: {
     flexDirection: 'row',
@@ -274,26 +271,26 @@ const makeStyles = (colors: Palette) => StyleSheet.create({
     gap: spacing.sm,
   },
   tableKey: {
-    ...fonts.label,
+    ...type.caption,
+    fontFamily: type.body.fontFamily,
     color: colors.textPrimary,
-    fontSize: 12,
-    width: 74,
+    width: 80,
   },
   tableMid: {
-    ...fonts.numeric,
+    ...type.numCaption,
+    ...tabular,
     color: colors.textSecondary,
-    fontSize: 12,
     flex: 1,
   },
   tableValue: {
-    ...fonts.numeric,
+    ...type.numCaption,
+    ...tabular,
     color: colors.accent,
-    fontSize: 12,
   },
   points: {
-    ...fonts.numeric,
-    fontSize: 13,
-    width: 52,
+    ...type.numCaption,
+    ...tabular,
+    width: 56,
   },
   pointsGood: {
     color: colors.correct,
@@ -302,8 +299,8 @@ const makeStyles = (colors: Palette) => StyleSheet.create({
     color: colors.danger,
   },
   scoreLabel: {
+    ...type.caption,
     color: colors.textSecondary,
-    fontSize: 12,
     flex: 1,
   },
   mods: {
@@ -315,21 +312,19 @@ const makeStyles = (colors: Palette) => StyleSheet.create({
     alignItems: 'flex-start',
   },
   modIcon: {
-    fontSize: 15,
-    width: 22,
+    fontSize: glyph.md,
+    width: 24,
   },
   modBody: {
     flex: 1,
   },
   modName: {
-    ...fonts.label,
+    ...type.body,
     color: colors.textPrimary,
-    fontSize: 12,
   },
   modBlurb: {
+    ...type.caption,
     color: colors.textMuted,
-    fontSize: 11,
-    lineHeight: 15,
-    marginTop: 1,
+    marginTop: spacing.xxs,
   },
 });

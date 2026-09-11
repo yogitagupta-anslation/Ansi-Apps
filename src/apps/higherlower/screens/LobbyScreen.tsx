@@ -15,7 +15,7 @@ import { parGuesses } from '../game/engine';
 import { modifierById, multiplayerSafe } from '../game/modifiers';
 import { RaceMode } from '../types/game';
 import { plural } from '../util/format';
-import { Palette, fonts, radius, spacing } from '../theme/tokens';
+import { MIN_TOUCH, Palette, radius, spacing, tabular, type } from '../theme/tokens';
 import { useTheme, useThemedStyles } from '../theme/ThemeProvider';
 
 export interface IncomingRound {
@@ -287,21 +287,22 @@ const makeStyles = (colors: Palette) => StyleSheet.create({
     marginBottom: spacing.md,
   },
   codeLabel: {
-    ...fonts.label,
+    ...type.label,
     color: colors.textMuted,
-    fontSize: 10,
   },
   code: {
-    ...fonts.numeric,
+    ...type.numDisplay,
+    ...tabular,
     color: colors.accent,
-    fontSize: 42,
-    letterSpacing: 8,
-    marginTop: 2,
-    marginLeft: 8,
+    letterSpacing: 10,
+    // Tracking is applied after the last glyph too, so nudge the block right by
+    // one space to keep it optically centred.
+    marginLeft: 10,
+    marginTop: spacing.xxs,
   },
   codeHint: {
+    ...type.caption,
     color: colors.textMuted,
-    fontSize: 11,
     marginTop: spacing.xs,
     paddingHorizontal: spacing.md,
     textAlign: 'center',
@@ -312,15 +313,14 @@ const makeStyles = (colors: Palette) => StyleSheet.create({
     gap: spacing.sm,
     padding: spacing.md,
     borderRadius: radius.md,
-    backgroundColor: colors.panel,
+    backgroundColor: colors.dangerTint,
     borderWidth: 1,
-    borderColor: colors.danger,
+    borderColor: colors.dangerBorder,
     marginBottom: spacing.md,
   },
   errorText: {
+    ...type.caption,
     color: colors.textSecondary,
-    fontSize: 12,
-    lineHeight: 18,
     flex: 1,
   },
   rosterHeader: {
@@ -329,17 +329,16 @@ const makeStyles = (colors: Palette) => StyleSheet.create({
     alignItems: 'center',
   },
   sectionLabel: {
-    ...fonts.label,
+    ...type.label,
     color: colors.textMuted,
-    fontSize: 10,
     marginBottom: spacing.sm,
   },
   spacedLabel: {
     marginTop: spacing.md,
   },
   sectionMeta: {
+    ...type.caption,
     color: colors.textMuted,
-    fontSize: 10,
     marginBottom: spacing.sm,
   },
   roster: {
@@ -349,8 +348,9 @@ const makeStyles = (colors: Palette) => StyleSheet.create({
   player: {
     flexDirection: 'row',
     alignItems: 'center',
+    minHeight: MIN_TOUCH + spacing.sm,
     gap: spacing.md,
-    padding: spacing.sm + 4,
+    padding: spacing.md,
     borderRadius: radius.md,
     backgroundColor: colors.card,
     borderWidth: 1,
@@ -370,9 +370,8 @@ const makeStyles = (colors: Palette) => StyleSheet.create({
     backgroundColor: colors.accentDim,
   },
   initial: {
-    ...fonts.title,
+    ...type.body,
     color: colors.textSecondary,
-    fontSize: 14,
   },
   initialYou: {
     color: colors.accent,
@@ -381,34 +380,32 @@ const makeStyles = (colors: Palette) => StyleSheet.create({
     flex: 1,
   },
   playerName: {
+    ...type.body,
     color: colors.textPrimary,
-    fontSize: 14,
-    fontWeight: '700',
   },
   playerRole: {
+    ...type.caption,
     color: colors.textMuted,
-    fontSize: 11,
-    marginTop: 1,
+    marginTop: spacing.xxs,
   },
   readyPill: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 3,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
+    gap: spacing.xxs,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.xs,
     borderRadius: radius.pill,
     backgroundColor: colors.correctTint,
     borderWidth: 1,
     borderColor: colors.correctBorder,
   },
   readyText: {
-    ...fonts.label,
+    ...type.micro,
     color: colors.correct,
-    fontSize: 9,
   },
   waitingText: {
+    ...type.caption,
     color: colors.textMuted,
-    fontSize: 11,
     fontStyle: 'italic',
   },
   slot: {
@@ -416,11 +413,12 @@ const makeStyles = (colors: Palette) => StyleSheet.create({
     backgroundColor: 'transparent',
   },
   slotText: {
+    ...type.caption,
     color: colors.textMuted,
-    fontSize: 12,
+    flex: 1,
   },
   settings: {
-    gap: 6,
+    gap: spacing.sm,
     padding: spacing.md,
     borderRadius: radius.md,
     backgroundColor: colors.panel,
@@ -433,18 +431,17 @@ const makeStyles = (colors: Palette) => StyleSheet.create({
     justifyContent: 'space-between',
   },
   settingKey: {
+    ...type.caption,
     color: colors.textSecondary,
-    fontSize: 13,
   },
   settingValue: {
-    ...fonts.numeric,
+    ...type.numCaption,
+    ...tabular,
     color: colors.textPrimary,
-    fontSize: 13,
   },
   settingNote: {
+    ...type.caption,
     color: colors.textMuted,
-    fontSize: 11,
-    lineHeight: 16,
-    marginTop: 4,
+    marginTop: spacing.xs,
   },
 });

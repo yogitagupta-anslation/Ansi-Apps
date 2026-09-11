@@ -281,6 +281,9 @@ class BleChatService {
     this.peerManager.setCapabilitiesProvider(() => this.currentCapabilities());
     this.peerManager.setInterestsProvider(() => this.settings.interests);
     this.peerManager.setLanguagesProvider(() => this.settings.languages);
+    // Read fresh at each handshake, so changing the setting takes effect on the next
+    // link rather than only after a restart.
+    this.peerManager.setScreenshotPolicyProvider(() => this.settings.screenshotPolicy);
     this.peerManager.setQueuedCountProvider(peerId =>
       this.messages.queue.countFor(peerId),
     );

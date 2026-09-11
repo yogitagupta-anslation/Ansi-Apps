@@ -18,6 +18,13 @@ export interface RaceState {
   racers: Racer[];
   /** First racer to land on the number. The mode decides who actually wins. */
   winnerId: string | null;
+  /**
+   * The winner the host called, once it closed the round.
+   *
+   * It outranks anything this device worked out for itself, because the host is
+   * the only device that saw every finish. Null until the round is called.
+   */
+  calledWinnerId: string | null;
   rules: RoundRules;
   mode: RaceMode;
 }
@@ -57,8 +64,11 @@ export type RaceAction =
   /**
    * Close the round now: the host called it, or the player stopped waiting on a
    * straggler. Whoever has not finished is left unfinished.
+   *
+   * `winnerId` is set when the host called it, and is adopted verbatim -- that
+   * is what settles a photo finish identically on every phone.
    */
-  | { type: 'end' }
+  | { type: 'end'; winnerId?: string | null }
   /** A peer's link dropped or recovered. Their progress is untouched. */
   | { type: 'connection'; racerId: string; online: boolean }
   | { type: 'reset' };
@@ -70,6 +80,7 @@ export const emptyRace: RaceState = {
   startedAt: 0,
   racers: [],
   winnerId: null,
+  calledWinnerId: null,
   rules: NO_MODIFIERS,
   mode: 'speed',
 };
@@ -93,6 +104,7 @@ export function raceReducer(state: RaceState, action: RaceAction): RaceState {
         startedAt: action.now,
         racers: action.racers.map(seedRacer),
         winnerId: null,
+        calledWinnerId: null,
         rules: action.rules ?? NO_MODIFIERS,
         mode: action.mode ?? 'speed',
       };
@@ -103,6 +115,21 @@ export function raceReducer(state: RaceState, action: RaceAction): RaceState {
 
       const racer = state.racers.find((r) => r.id === action.racerId);
       if (!racer || settled(racer)) return state;
+
+      // The same number twice in a row cannot tell anybody anything they were
+      // not already told, so it is treated as the duplicated notification it
+      // almost certainly is -- a radio re-delivering a packet is far likelier
+      // than a deliberate repeat, and counting it twice inflates a lane and
+      // hands Fewest-guesses mode to the wrong player.
+      //
+      // Moving Target is the exception: there the number can have moved out
+      // from under the previous answer, so a repeat is informative. It is a
+      // solo-only modifier, and a solo round has no radio to duplicate
+      // anything, so the two cases never overlap.
+      const previous = racer.guesses[racer.guesses.length - 1];
+      if (previous && previous.value === action.value && state.rules.movesEvery === null) {
+        return state;
+      }
 
       // Impact is measured against what was still possible *before* this guess.
       const known = knownRange(state.range, racer.guesses);
@@ -159,10 +186,16 @@ export function raceReducer(state: RaceState, action: RaceAction): RaceState {
       return { ...state, racers: state.racers.filter((r) => r.id !== action.racerId) };
 
     case 'finished': {
-      if (state.status !== 'running') return state;
+      if (state.status === 'idle') return state;
       const racer = state.racers.find((r) => r.id === action.racerId);
-      if (!racer || settled(racer)) return state;
+      if (!racer || racer.eliminated) return state;
 
+      // This is the only authoritative finish time there is. A racer's own
+      // winning guess is judged on their phone against their own round clock;
+      // the copy that reaches everybody else is stamped when it *arrived*,
+      // which makes a peer on a quick link look faster than they were and has
+      // every device ranking the finish differently. So a 'fin' overwrites what
+      // the relayed guess implied, rather than being ignored as redundant.
       const racers = state.racers.map((r) => (r.id === racer.id ? { ...r, finishedAt: action.at } : r));
       return {
         ...state,
@@ -181,7 +214,12 @@ export function raceReducer(state: RaceState, action: RaceAction): RaceState {
       };
 
     case 'end':
-      return state.status === 'idle' ? state : { ...state, status: 'finished' };
+      if (state.status === 'idle') return state;
+      return {
+        ...state,
+        status: 'finished',
+        calledWinnerId: action.winnerId ?? state.calledWinnerId,
+      };
 
     case 'reset':
       return emptyRace;
@@ -201,7 +239,8 @@ export function summarize(state: RaceState): RoundSummary {
     mode: state.mode,
     modifiers: state.rules.modifiers,
   };
-  // Speed hands it to the first finisher; the other modes only know once the
-  // whole board is in.
-  return { ...base, winnerId: winnerFor(base) ?? state.winnerId };
+  // The host's call wins outright when there is one: it is the only verdict
+  // every phone is guaranteed to have heard the same way. Failing that, speed
+  // hands it to the first finisher and the other modes wait for the full board.
+  return { ...base, winnerId: state.calledWinnerId ?? winnerFor(base) ?? state.winnerId };
 }

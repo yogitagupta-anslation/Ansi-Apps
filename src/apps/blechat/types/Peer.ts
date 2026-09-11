@@ -1,3 +1,4 @@
+import type {ScreenshotPolicy} from '../security/ScreenPolicy';
 import type {LinkMetricsSnapshot} from '../peers/LinkMetrics';
 import type {
   LinkId,
@@ -50,6 +51,12 @@ export interface Peer {
   agreedCapabilities: PeerCapabilities | null;
   /** Set when the versions did not line up exactly. */
   compatibilityNote: string | null;
+  /**
+   * What this peer permits a screenshot of the conversation to do, or null when they did
+   * not say — an older build, or one that has never handshaken with us. Null is "no
+   * opinion", never permission: the stricter of the two sides is what applies.
+   */
+  screenshotPolicy: ScreenshotPolicy | null;
   /** The peer's Ed25519 public key, once its identity has been proven. */
   publicKey: string | null;
   /** True once a signature over our challenge has verified. */

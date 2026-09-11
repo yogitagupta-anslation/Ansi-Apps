@@ -24,6 +24,8 @@ export type AppId =
   | 'higherlower'
   | 'attendance'
   | 'treasurehunt'
+  | 'hitch'
+  /** Debug-only; appended to `APPS` under `__DEV__` rather than declared in it. */
   | 'bletest';
 
 /** A capability badge on a card. Both are facts about every app that carries them. */
@@ -348,6 +350,69 @@ export const APPS: HubApp[] = [
       require('../apps/treasure-hunt/assets/bg-results.png'),
     ],
     screen: lazy(() => import('../apps/treasure-hunt/TreasureHuntApp')),
+  },
+  {
+    id: 'hitch',
+    name: 'Hitch',
+    tagline: 'Rides from phones nearby',
+    description:
+      'Find a ride from someone in the street around you over Bluetooth. No booking server, no account, no internet — the two phones are the whole system.',
+    icon: '🛺',
+    tags: ['Travel', 'Social'],
+    accent: '#34D399',
+    accentSoft: 'rgba(52,211,153,0.16)',
+    keywords: [
+      'ride',
+      'rides',
+      'auto',
+      'rickshaw',
+      'bike',
+      'cab',
+      'taxi',
+      'travel',
+      'passenger',
+      'rider',
+      'driver',
+      'bluetooth',
+      'offline',
+      'commute',
+    ],
+    badges: ['bluetooth', 'offline'],
+    about:
+      'Hitch matches a passenger with a rider using nothing but the radios in their two phones. It shows what is around you by how strongly each vehicle is heard rather than by pinning it to a street, because proximity is what Bluetooth can honestly report — and it works in a basement car park, a power cut, or on a road with no signal at all.',
+    features: [
+      {
+        glyph: '📡',
+        title: 'Riders found over the radio',
+        body: 'Vehicles are discovered directly between phones. There is no dispatch server in the middle.',
+      },
+      {
+        glyph: '🗺️',
+        title: 'A map that does not invent things',
+        body: 'Vehicles sit on proximity rings rather than on streets. The radio knows near and far, never direction.',
+      },
+      {
+        glyph: '🧑',
+        title: 'Passenger or rider',
+        body: 'Two onboarding flows and two home screens, switchable at any time from your profile.',
+      },
+      {
+        glyph: '🔎',
+        title: 'A vehicle you can identify',
+        body: 'Number, model, colour and photos, so a passenger knows which vehicle is theirs before getting in.',
+      },
+    ],
+    permissions: [
+      { name: 'Bluetooth', why: 'finding riders nearby, and being findable as one' },
+      { name: 'Photos', why: 'optional profile and vehicle pictures. They never leave the phone' },
+      {
+        name: 'Location (Android 12+)',
+        why: 'required by the platform BLE stack. The app never reads a position',
+      },
+      { name: 'No network access', why: 'a ride is arranged between two handsets and nowhere else' },
+    ],
+    previews: [],
+    screen: lazy(() => import('../apps/hitch/HitchApp')),
   },
 ];
 

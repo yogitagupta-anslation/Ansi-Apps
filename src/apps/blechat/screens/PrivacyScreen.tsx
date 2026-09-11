@@ -13,6 +13,11 @@ import {storage} from '../storage/LocalStorage';
 import {useAppStore} from '../state/appStore';
 import {hashPin} from '../security/AppLock';
 import {describeKind, isAlarming} from '../security/SecurityLog';
+import {
+  SCREENSHOT_POLICIES,
+  canDetectCaptures,
+  type ScreenshotPolicy,
+} from '../security/ScreenPolicy';
 import {relativeTime} from '../utils/time';
 import type {RootStackScreenProps} from '../navigation/types';
 
@@ -32,6 +37,26 @@ export function PrivacyScreen({navigation}: RootStackScreenProps<'Privacy'>) {
   const blockedPeerIds = useAppStore(s => s.blockedPeerIds);
   const peers = useAppStore(s => s.peers);
   const securityEvents = useAppStore(s => s.securityEvents);
+  const settings = useAppStore(s => s.settings);
+
+  /**
+   * Whether this Android can report a screenshot at all.
+   *
+   * Asked once, because it is a property of the OS version rather than of the moment.
+   * Null while unknown, so the "tell me" option is not disabled before the answer is in.
+   */
+  const [canDetect, setCanDetect] = useState<boolean | null>(null);
+  useEffect(() => {
+    let alive = true;
+    void canDetectCaptures().then(v => {
+      if (alive) {
+        setCanDetect(v);
+      }
+    });
+    return () => {
+      alive = false;
+    };
+  }, []);
 
   const [lockEnabled, setLockEnabled] = useState(false);
   const [lockSetupVisible, setLockSetupVisible] = useState(false);
@@ -123,6 +148,76 @@ export function PrivacyScreen({navigation}: RootStackScreenProps<'Privacy'>) {
             accessibilityLabel="Lock the app"
           />
         </View>
+
+        {/*
+          What leaves a conversation, and what may be captured of it.
+
+          Both sit under Privacy because both are about the same thing: this app gives you
+          a way to talk to a stranger without handing over anything that outlives walking
+          away, and these are the two ordinary ways that gets undone.
+        */}
+        <DenseText style={styles.sectionLabel}>WHAT YOU SHARE</DenseText>
+        <View style={styles.row}>
+          <Disc icon="shield" />
+          <View style={styles.rowText}>
+            <AppText style={styles.rowLabel}>Check before sharing contacts</AppText>
+            <DenseText style={styles.rowHint}>
+              Warns when a message contains a phone number, email, handle or payment
+              details. You can still send it.
+            </DenseText>
+          </View>
+          <Switch
+            value={settings.warnBeforeSharingContacts}
+            onValueChange={v => void bleChat.updateSettings({warnBeforeSharingContacts: v})}
+            trackColor={{false: theme.border, true: theme.accent}}
+            thumbColor="#ffffff"
+            accessibilityLabel="Check before sharing contacts"
+          />
+        </View>
+
+        <DenseText style={styles.sectionLabel}>SCREENSHOTS</DenseText>
+        <DenseText style={styles.sectionNote}>
+          Applies to every chat on this phone. The stricter of the two people in a
+          conversation wins — if either of you says not allowed, it is not allowed for
+          both.
+        </DenseText>
+        {SCREENSHOT_POLICIES.map(option => {
+          const on = settings.screenshotPolicy === option.value;
+          // "Tell me" needs an OS that can report a capture, which arrived in Android 14.
+          // Offering it on a phone that cannot would be a setting that quietly does
+          // nothing, which is worse than not offering it.
+          const unavailable = option.value === 'notify' && canDetect === false;
+          return (
+            <Touchable
+              key={option.value}
+              scale={false}
+              onPress={() =>
+                void bleChat.updateSettings({
+                  screenshotPolicy: option.value as ScreenshotPolicy,
+                })
+              }
+              disabled={unavailable}
+              style={styles.row}
+              accessibilityRole="radio"
+              accessibilityState={{selected: on, disabled: unavailable}}>
+              <Disc
+                icon={on ? 'check' : 'block'}
+                tone={on ? theme.ok : theme.textFaint}
+              />
+              <View style={styles.rowText}>
+                <AppText
+                  style={[styles.rowLabel, unavailable ? {color: theme.textFaint} : null]}>
+                  {option.label}
+                </AppText>
+                <DenseText style={styles.rowHint}>
+                  {unavailable
+                    ? 'Needs Android 14 or newer — this phone cannot report a screenshot.'
+                    : option.detail}
+                </DenseText>
+              </View>
+            </Touchable>
+          );
+        })}
 
         <DenseText style={styles.sectionLabel}>BLOCKED</DenseText>
         {blockedPeerIds.length === 0 ? (
@@ -296,6 +391,12 @@ const useStyles = makeStyles(t => ({
   title: {fontSize: 28, fontWeight: '600', letterSpacing: -1, color: t.text, flex: 1},
   content: {paddingBottom: spacing.xl},
 
+  sectionNote: {
+    ...typography.caption,
+    color: t.textDim,
+    paddingHorizontal: 18,
+    marginBottom: spacing.sm,
+  },
   sectionLabel: {
     ...typography.overline,
     color: t.textDim,

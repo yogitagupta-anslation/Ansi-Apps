@@ -6,7 +6,7 @@ import OptionGrid from '../components/OptionGrid';
 import { RANGE_PRESETS, formatRange, presetPar, useSettings } from '../settings/SettingsProvider';
 import { AI_PROFILES } from '../game/ai';
 import { Difficulty } from '../types/game';
-import { Palette, fonts, radius, spacing } from '../theme/tokens';
+import { MIN_TOUCH, Palette, radius, spacing, type } from '../theme/tokens';
 import { Appearance, useTheme, useThemedStyles } from '../theme/ThemeProvider';
 
 const DIFFICULTIES: Difficulty[] = ['easy', 'normal', 'hard', 'adaptive'];
@@ -120,9 +120,8 @@ const makeStyles = (colors: Palette) => StyleSheet.create({
     marginBottom: spacing.lg,
   },
   label: {
-    ...fonts.label,
+    ...type.label,
     color: colors.textMuted,
-    fontSize: 10,
   },
   input: {
     borderRadius: radius.md,
@@ -130,15 +129,18 @@ const makeStyles = (colors: Palette) => StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.inputBorder,
     color: colors.textPrimary,
-    fontSize: 16,
-    fontWeight: '600',
+    ...type.body,
+    // Android centres a TextInput's text against the input box, not against the
+    // line box -- a lineHeight here rides the text high and leaves the caret
+    // behind. Padding does the vertical spacing instead.
+    lineHeight: undefined,
+    minHeight: MIN_TOUCH,
     paddingHorizontal: spacing.md,
-    paddingVertical: 12,
+    paddingVertical: spacing.sm + spacing.xs,
   },
   hint: {
+    ...type.caption,
     color: colors.textMuted,
-    fontSize: 11,
-    lineHeight: 16,
   },
   rowSpaced: {
     marginTop: spacing.sm,
@@ -146,6 +148,7 @@ const makeStyles = (colors: Palette) => StyleSheet.create({
   row: {
     flexDirection: 'row',
     alignItems: 'center',
+    minHeight: MIN_TOUCH + spacing.md,
     gap: spacing.md,
     padding: spacing.md,
     borderRadius: radius.md,
@@ -155,16 +158,15 @@ const makeStyles = (colors: Palette) => StyleSheet.create({
   },
   rowBody: {
     flex: 1,
-    gap: 2,
+    gap: spacing.xxs,
   },
   rowTitle: {
+    ...type.body,
     color: colors.textPrimary,
-    fontSize: 14,
-    fontWeight: '700',
   },
   footnote: {
+    ...type.caption,
     color: colors.textMuted,
-    fontSize: 11,
     textAlign: 'center',
     marginTop: spacing.lg,
   },

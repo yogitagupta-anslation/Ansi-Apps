@@ -50,6 +50,7 @@ import type {Peer, PeerIdentity, SignalStrength} from '../types/Peer';
 import {EventBus} from '../utils/EventBus';
 import {logger} from '../utils/logger';
 import {sanitiseInterests} from '../config/interests';
+import {parsePolicy, type ScreenshotPolicy} from '../security/ScreenPolicy';
 import {sanitiseLanguages} from '../config/languages';
 import {peerIdPrefix, shortId, shouldDial} from '../utils/id';
 import {makeFailure, toLinkFailure} from '../utils/linkFailure';
@@ -114,6 +115,8 @@ interface Negotiated {
   /** Sanitised: the peer chose these bytes, so they are bounded before we keep them. */
   interests: string[];
   languages: string[];
+  /** Their screenshot preference, or null when they did not state one. */
+  screenshotPolicy: ScreenshotPolicy | null;
 }
 
 /**
@@ -170,6 +173,7 @@ function blankPeer(linkId: LinkId, state: LinkState): Peer {
     attempts: 0,
     failures: 0,
     reconnectAttempt: 0,
+    screenshotPolicy: null,
     protocolVersion: null,
     capabilities: null,
     agreedCapabilities: null,
@@ -228,6 +232,7 @@ export class PeerManager implements PeerRouteResolver {
    * reaches the next peer you meet without restarting anything.
    */
   private interestsProvider: () => string[] = () => [];
+  private screenshotPolicyProvider: () => string = () => 'allowed';
   private languagesProvider: () => string[] = () => [];
 
   /**
@@ -316,6 +321,7 @@ export class PeerManager implements PeerRouteResolver {
         attempts: 0,
         failures: 0,
         reconnectAttempt: 0,
+        screenshotPolicy: null,
         displayName: entry.displayName,
         // No link: it is remembered, not reachable. A Connect action only appears once
         // it advertises again and a real linkId is attached.
@@ -438,6 +444,17 @@ export class PeerManager implements PeerRouteResolver {
 
   setInterestsProvider(provider: () => string[]): void {
     this.interestsProvider = provider;
+  }
+
+  /**
+   * Our screenshot preference, read fresh at each handshake.
+   *
+   * A provider rather than a stored value for the same reason interests are one: the
+   * setting can change between links, and a peer connected after the change should hear
+   * the current answer, not the one that was true at start-up.
+   */
+  setScreenshotPolicyProvider(provider: () => string): void {
+    this.screenshotPolicyProvider = provider;
   }
 
   setQueuedCountProvider(provider: (peerId: string) => number): void {
@@ -739,6 +756,7 @@ export class PeerManager implements PeerRouteResolver {
           ...this.identity,
           interests: this.interestsProvider(),
           languages: this.languagesProvider(),
+          screenshotPolicy: this.screenshotPolicyProvider(),
         },
         this.capabilitiesProvider(),
         session.ourChallenge,
@@ -1054,6 +1072,7 @@ export class PeerManager implements PeerRouteResolver {
           ...this.identity,
           interests: this.interestsProvider(),
           languages: this.languagesProvider(),
+          screenshotPolicy: this.screenshotPolicyProvider(),
         },
       payload.peerId,
       this.capabilitiesProvider(),
@@ -1312,6 +1331,7 @@ export class PeerManager implements PeerRouteResolver {
       peerId: string;
       displayName: string;
       protocolVersion: number;
+      screenshotPolicy?: string;
       minProtocolVersion?: number;
       capabilities?: Record<string, boolean>;
       publicKey?: string;
@@ -1404,6 +1424,9 @@ export class PeerManager implements PeerRouteResolver {
       // Bounded and de-duplicated here rather than at the UI, so nothing downstream ever
       // handles an unbounded list a stranger sent us.
       interests: sanitiseInterests(payload.interests),
+      // Widened to a value this app knows, or null. An unrecognised string from another
+      // build is "no opinion", never permission.
+      screenshotPolicy: parsePolicy(payload.screenshotPolicy),
     };
   }
 
@@ -1498,6 +1521,9 @@ export class PeerManager implements PeerRouteResolver {
       attempts: 0,
       failures: 0,
       reconnectAttempt: 0,
+      // What they told us at the handshake. Null when they said nothing, which the UI
+      // reads as "no opinion" and never as permission.
+      screenshotPolicy: info.screenshotPolicy,
     };
     this.peers.set(info.peerId, peer);
 
