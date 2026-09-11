@@ -23,7 +23,7 @@ export function Toast(): React.ReactElement | null {
   const { colors } = useTheme();
   const toast = useStore(sessionStore, (state) => state.toast);
   const opacity = useRef(new Animated.Value(0)).current;
-  const offset = useRef(new Animated.Value(12)).current;
+  const offset = useRef(new Animated.Value(-12)).current;
 
   useEffect(() => {
     if (!toast) return;
@@ -41,7 +41,7 @@ export function Toast(): React.ReactElement | null {
     const timer = setTimeout(() => {
       Animated.parallel([
         Animated.timing(opacity, { toValue: 0, duration: 200, useNativeDriver: true }),
-        Animated.timing(offset, { toValue: 12, duration: 200, useNativeDriver: true }),
+        Animated.timing(offset, { toValue: -12, duration: 200, useNativeDriver: true }),
       ]).start(() => dismissToast(toast.id));
     }, VISIBLE_MS);
 
@@ -54,7 +54,7 @@ export function Toast(): React.ReactElement | null {
     toast.tone === 'error' ? colors.danger : toast.tone === 'success' ? colors.accent : colors.border;
 
   return (
-    <SafeAreaView edges={['bottom']} style={styles.wrapper} pointerEvents="none">
+    <SafeAreaView edges={['top']} style={styles.wrapper} pointerEvents="none">
       <Animated.View
         accessibilityLiveRegion="polite"
         style={[
@@ -74,8 +74,22 @@ const styles = StyleSheet.create({
     position: 'absolute',
     left: 0,
     right: 0,
-    bottom: 72,
+    /*
+     * Top, not bottom. The bottom of the radar is where the person preview bar
+     * and the tab bar live, so a chip down there landed on top of whichever
+     * control the user had just been aiming at — including the Profile button
+     * of the person they had only just acted on.
+     */
+    top: 0,
     alignItems: 'center',
+    /*
+     * Above the screen underneath it. Being last in the tree was enough while
+     * this sat at the bottom over the map canvas; at the top it overlaps the
+     * event header, which carries its own elevation and was painting over the
+     * chip — present in the view tree, invisible on the glass.
+     */
+    zIndex: 100,
+    elevation: 24,
   },
   toast: {
     maxWidth: '90%',

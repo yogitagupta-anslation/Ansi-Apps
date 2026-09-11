@@ -32,6 +32,7 @@ import { GoalsSheet } from '../components/GoalsSheet';
 import { WorthWalkingOver, type WalkCandidate } from '../components/WorthWalkingOver';
 import { ArrivedSheet, SaveWithNoteSheet } from '../components/ArrivedSheet';
 import { AppText, Button, EmptyState } from '../components/primitives';
+import { provisionalKeyFor } from '../connections/ConnectionRequestCoordinator';
 import { zoomIn, zoomOut } from '../positioning/Clustering';
 import { useDeviceSensors } from '../positioning/useDeviceSensors';
 import {
@@ -336,9 +337,29 @@ export function EventMapScreen({
   );
 
   const connectionState = useMemo(() => {
-    const profileId = selectedPerson?.profileId;
-    if (!profileId) return 'none' as const;
-    return connectionService.stateFor(profileId);
+    if (!selectedPerson) return 'none' as const;
+
+    // Resolved by the directory: ask about the person directly.
+    if (selectedPerson.profileId) return connectionService.stateFor(selectedPerson.profileId);
+
+    /*
+     * Unresolved, which offline is the normal case — nothing maps a rotating
+     * peer id to a person without a directory. Returning 'none' here, as this
+     * used to, made the button read "Connect" for someone already connected or
+     * already asked: every tap then reached `dial`, threw `already_connected` or
+     * `already_pending`, and left the sheet sitting open on an error about a
+     * request that had in fact gone out.
+     *
+     * Both halves of the exchange are still findable. While it is in flight it
+     * is filed under the provisional key `connectToPeer` dialled with; once they
+     * accept, `reconcile` re-files it onto their real profileId, which the
+     * coordinator can still name from the link it answered on.
+     */
+    const pending = connectionService.stateFor(provisionalKeyFor(selectedPerson.peerId));
+    if (pending !== 'none') return pending;
+
+    const settled = queries.profileForPeer(selectedPerson.peerId);
+    return settled ? connectionService.stateFor(settled) : ('none' as const);
     // `connections` participates so the button label updates when a request lands.
   }, [selectedPerson, connections]);
 
@@ -379,7 +400,11 @@ export function EventMapScreen({
     setConnectNotice(null);
     if (!selectedPerson) return;
 
-    haptics.success();
+    /*
+     * No haptic yet. Success used to fire here, on press, so a dial that could
+     * not find the peer still buzzed *Success* before painting a red notice —
+     * the phone congratulating the user for a request that never left.
+     */
 
     /*
      * Two ways to address the same request.
@@ -395,7 +420,36 @@ export function EventMapScreen({
       : actions.connectToPeer(selectedPerson.peerId);
 
     void attempt.then((outcome) => {
-      setConnectNotice(outcome.ok ? null : (outcome.message ?? null));
+      if (outcome.ok) {
+        /*
+         * Sent: buzz, close, and let the radar carry the news.
+         *
+         * The confirmation is the root toast rather than anything in this card,
+         * which is why the card has to go first — a `Modal` paints over the
+         * toast, so a chip shown while this is open would be invisible. Closing
+         * also returns the user to the radar, which is where they were heading:
+         * nothing here navigates to Chat or to Connections.
+         */
+        haptics.success();
+        setConnectNotice(null);
+        setProfileOpen(false);
+        /*
+         * Clear the selection too, so the radar comes back to rest.
+         *
+         * Dismissing the card alone leaves `PersonPreviewBar` sitting at the
+         * bottom — still that person, still a sheet — which reads as "it did not
+         * close". Nothing is lost by dropping it: their node keeps its pending
+         * badge, and one tap brings the card back.
+         */
+        actions.selectPerson(null);
+        return;
+      }
+      /*
+       * Failed: stay put. A failure is a thing to read, and the notice below
+       * the actions is the only place it is legible — see `connectNotice`.
+       */
+      haptics.warn();
+      setConnectNotice(outcome.message ?? null);
     });
   }, [selectedPerson]);
 

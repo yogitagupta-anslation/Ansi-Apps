@@ -18,9 +18,25 @@ import Constants from 'expo-constants';
 export type ApiMode = 'mock' | 'http';
 export type BleMode = 'native' | 'simulated';
 
+/**
+ * Which GATT stack carries a connection.
+ *
+ *  - `ble-plx`  the transport EventPulse shipped with: react-native-ble-plx for
+ *               the central role, react-native-ble-peripheral-manager for the
+ *               server. Still the default, so nothing changes until this is set.
+ *  - `blechat`  the same BLE work done by BleChat's native Kotlin modules —
+ *               `BleClient` for connect and write, `BlePeripheral` for the
+ *               server — with EventPulse's own service UUIDs.
+ *
+ * Both implement the same `GattTransport` interface and speak the same wire
+ * format, so this switch is a rollback, not a migration.
+ */
+export type GattStack = 'ble-plx' | 'blechat';
+
 export interface AppConfig {
   api: ApiMode;
   ble: BleMode;
+  gattStack: GattStack;
   apiBaseUrl: string;
   /**
    * Bearer token sent to the backend. A development placeholder; a real build
@@ -81,6 +97,17 @@ export const config: AppConfig = {
     (process.env.EXPO_PUBLIC_EVENTPULSE_API as ApiMode) ??
     (process.env.EXPO_PUBLIC_EVENTPULSE_API_URL ? 'http' : 'mock'),
   ble: (process.env.EXPO_PUBLIC_EVENTPULSE_BLE as BleMode) ?? 'native',
+  /*
+   * Defaults to the transport that is already in the build.
+   *
+   * The BleChat-backed stack is the one expected to fix phone-to-phone
+   * connections, but it has only been exercised on emulators so far. Making it
+   * opt-in means a phone that regresses is one environment variable away from
+   * the previous behaviour, rather than a rebuild.
+   *
+   *   EXPO_PUBLIC_EVENTPULSE_GATT=blechat
+   */
+  gattStack: (process.env.EXPO_PUBLIC_EVENTPULSE_GATT as GattStack) ?? 'ble-plx',
   apiBaseUrl: resolveApiBaseUrl(),
   // The backend fails closed on an unknown token, so an unauthenticated client
   // would 401 on every call. `demo` is the seeded development identity.

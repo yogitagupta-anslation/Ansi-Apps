@@ -50,7 +50,39 @@ const eventpulse = {
   rootDir: __dirname,
   roots: ['<rootDir>/src/apps/eventpulse'],
   testEnvironment: 'node',
-  testPathIgnorePatterns: ['/node_modules/', '/__tests__/support/'],
+  // `__tests__/native/` covers the transports that bind react-native and a BLE
+  // package, so it cannot run here — this project deliberately has no preset and
+  // no mocks. It gets its own project below.
+  testPathIgnorePatterns: ['/node_modules/', '/__tests__/support/', '/__tests__/native/'],
+};
+
+/**
+ * The EventPulse code that does touch react-native.
+ *
+ * Only the GATT transports qualify: they bind `NativeModules` and ble-plx, so
+ * they need the React Native preset. Everything they depend on is injected,
+ * which keeps these tests about the adapter's own behaviour — addressing,
+ * framing, link bookkeeping, event translation — rather than about a radio.
+ */
+const eventpulseNative = {
+  ...shared,
+  displayName: 'eventpulse-native',
+  roots: ['<rootDir>/src/apps/eventpulse/__tests__/native'],
+};
+
+/**
+ * The isolated BLE proof-of-concept, on the same bare-node footing as EventPulse.
+ *
+ * Only its pure modules are covered — the base64 codec the harness hand-rolls,
+ * because `btoa`/`atob` are not guaranteed on Hermes. Everything else in there
+ * talks to a real radio and is proved on two physical phones, not in Jest.
+ */
+const bletest = {
+  displayName: 'bletest',
+  rootDir: __dirname,
+  roots: ['<rootDir>/src/apps/bletest'],
+  testEnvironment: 'node',
+  testPathIgnorePatterns: ['/node_modules/'],
 };
 
 module.exports = {
@@ -66,5 +98,7 @@ module.exports = {
       roots: ['<rootDir>/src/apps/attendance'],
     },
     eventpulse,
+    eventpulseNative,
+    bletest,
   ],
 };

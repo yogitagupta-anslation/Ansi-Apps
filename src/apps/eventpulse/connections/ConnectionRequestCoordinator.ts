@@ -927,6 +927,66 @@ export class ConnectionRequestCoordinator {
     }
   }
 
+  /**
+   * The device a person is currently reachable on, or null.
+   *
+   * A read of what this class already tracks, added because it is the only
+   * component that knows it. `deviceToProfile` is written when we dial out
+   * (`request`), when a request arrives, and again on accept — where it is
+   * re-pointed from a provisional `peer:` key onto the real profileId. So after
+   * a completed handshake it holds exactly the mapping a conversation needs,
+   * and rebuilding it anywhere else would be a second copy that drifts.
+   *
+   * A scan rather than a reverse index: this map holds one entry per live link,
+   * of which there are a handful at most, and a second map maintained alongside
+   * the first is precisely the kind of thing that goes stale.
+   */
+  deviceFor(profileId: ProfileId): string | null {
+    for (const [deviceId, id] of this.deviceToProfile) {
+      if (id === profileId) return deviceId;
+    }
+    return null;
+  }
+
+  /**
+   * Which person a live link belongs to, or null. The forward read of `deviceFor`.
+   *
+   * A direct `.get` where `deviceFor` must scan, because the map is already
+   * keyed this way. Two things are deliberately reported as unknown.
+   *
+   * A provisional `peer:` key is a rotating id, not a person; a conversation
+   * filed under one would be persisted to disk under a name that stops meaning
+   * anything at the next epoch.
+   *
+   * And an entry whose exchange has not settled as connected is not an
+   * attribution yet. `deviceToProfile` is written on the first sight of a
+   * request - BEFORE the block check and before the privacy check - and again
+   * on an outgoing dial before the radio is touched. Answering from it
+   * unguarded would hand chat a person we blocked, refused, or never finished
+   * greeting, and route their messages into the UI.
+   */
+  profileForDevice(deviceId: string): ProfileId | null {
+    const profileId = this.deviceToProfile.get(deviceId) ?? null;
+    if (profileId === null || isProvisionalKey(profileId)) return null;
+    return this.hasSettledAsConnected(profileId) ? profileId : null;
+  }
+
+  /**
+   * Who a peer on the radar turned out to be, once a connection settled.
+   *
+   * Offline a radar entry is a rotating peer id and nothing else — no directory
+   * maps it to a person — so a screen holding one cannot ask
+   * `connectionService` anything about them. This composes the two things the
+   * coordinator already knows: which device is advertising that peer id right
+   * now, and which person answered on that device. Read-only, and it inherits
+   * `profileForDevice`'s guards, so it stays null until the exchange has
+   * actually settled as connected.
+   */
+  profileForPeer(peerId: PeerId): ProfileId | null {
+    const deviceId = this.findDeviceForPeer(peerId);
+    return deviceId ? this.profileForDevice(deviceId) : null;
+  }
+
   /** Drop a link that no longer has a live exchange on it. */
   private async closeIfIdle(deviceId: string): Promise<void> {
     const profileId = this.deviceToProfile.get(deviceId);

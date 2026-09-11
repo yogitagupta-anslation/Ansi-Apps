@@ -126,9 +126,10 @@ export function ProfileCard({
   /**
    * Why the last Connect attempt did not work.
    *
-   * Rendered here rather than left to the toast: this card is a `Modal`, and a
-   * toast mounted at the root paints behind it. A failure the user cannot see
-   * is indistinguishable from a button that does nothing.
+   * Failures only. This card is a `Modal`, and a toast mounted at the root
+   * paints behind it, so a failure left to the toast is indistinguishable from
+   * a button that does nothing. A success needs no notice here because the card
+   * closes — the confirmation chip is on the radar, where it is visible.
    */
   connectNotice?: string | null;
   /** Withdraw a request already sent. Omitted where the screen offers no cancel. */
@@ -246,9 +247,14 @@ export function ProfileCard({
 
           {!attendee ? (
             <View style={[styles.notice, { borderColor: colors.border }]}>
+              {/* Do not promise a sync that may never come. There is no
+                  server in the offline case, so "it will fill in as the
+                  attendee list finishes syncing" was a wait with no end —
+                  and it hid the one thing that actually does exchange
+                  details between two phones in a room. */}
               <AppText variant="body" tone="secondary">
-                This person is broadcasting, but their event profile has not reached your device
-                yet. It will fill in as the attendee list finishes syncing.
+                This person is broadcasting, but has not shared their profile with this device.
+                Connecting exchanges cards directly between your two phones.
               </AppText>
             </View>
           ) : null}
@@ -396,8 +402,25 @@ export function ProfileCard({
 
         <View style={[styles.sheetFooter, { borderTopColor: colors.border }]}>
           {connectNotice ? (
-            <View style={[styles.connectNotice, { backgroundColor: colors.surfaceElevated, borderColor: colors.danger, borderWidth: StyleSheet.hairlineWidth }]}>
-              <AppText variant="micro" tone="secondary">
+            /*
+             * `surfaceSunken`, not `surfaceElevated`: in the light palette
+             * `surfaceElevated` and `surface` are both #FFFFFF, so the box had
+             * no fill at all and the border did the whole job. Sunken reads as a
+             * recess against the sheet in both themes, and the words carry the
+             * meaning — colour never does it alone.
+             */
+            <View
+              accessibilityLiveRegion="polite"
+              style={[
+                styles.connectNotice,
+                {
+                  backgroundColor: colors.surfaceSunken,
+                  borderColor: colors.danger,
+                  borderWidth: 1,
+                },
+              ]}
+            >
+              <AppText variant="caption" tone="secondary">
                 {connectNotice}
               </AppText>
             </View>

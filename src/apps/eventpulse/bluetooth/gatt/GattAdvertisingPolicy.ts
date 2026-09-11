@@ -171,6 +171,38 @@ export function nextIosSlice(current: 'presence' | 'gatt'): {
 }
 
 /** True when two plans ask for the same radio state, so nothing needs doing. */
+/**
+ * What is currently on the air: the plan, and who it says we are.
+ *
+ * The identity is not part of the plan because the plan is about which radios
+ * are running, not what they carry. But it is part of what has been APPLIED,
+ * and that distinction is the whole point of this type.
+ */
+export interface AppliedAdvertising {
+  plan: AdvertisingPlan;
+  /** The rotating peer id in the GATT advertisement, or null when not hosting. */
+  identity: string | null;
+}
+
+/**
+ * True when re-applying would change nothing on the air.
+ *
+ * Comparing plans alone was not enough and cost a whole debugging session. The
+ * peer id rotates every fifteen minutes; the three booleans in the plan do not
+ * change when it does, so the apply was skipped and the GATT advertisement kept
+ * broadcasting the peer id from whenever the app started. The presence radar
+ * moved on, the advertisement did not, and from then on the two never matched:
+ * every Connect reported the person unreachable while their phone was sitting
+ * there advertising perfectly well under a name nobody was looking for.
+ */
+export function advertisingUnchanged(
+  previous: AppliedAdvertising | null,
+  next: AppliedAdvertising,
+): boolean {
+  if (!previous) return false;
+  return advertisingPlansEqual(previous.plan, next.plan) && previous.identity === next.identity;
+}
+
 export function advertisingPlansEqual(a: AdvertisingPlan, b: AdvertisingPlan): boolean {
   return (
     a.presenceAdvertising === b.presenceAdvertising &&
