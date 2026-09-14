@@ -24,7 +24,9 @@ export type AppId =
   | 'higherlower'
   | 'attendance'
   | 'treasurehunt'
-  | 'hitch';
+  | 'hitch'
+  /** Debug-only; appended to `APPS` under `__DEV__` rather than declared in it. */
+  | 'bletest';
 
 /** A capability badge on a card. Both are facts about every app that carries them. */
 export type AppBadge = 'bluetooth' | 'offline' | 'encrypted' | 'multiplayer';
@@ -413,6 +415,61 @@ export const APPS: HubApp[] = [
     screen: lazy(() => import('../apps/hitch/HitchApp')),
   },
 ];
+
+/**
+ * A development diagnostic, listed only in a debug build.
+ *
+ * It is an isolated Android GATT proof-of-concept: two phones, one service, one
+ * message each way. It exists to prove the radio works before anything is built
+ * on top of it, and it has no place in a release build, so it is appended here
+ * rather than written into APPS.
+ */
+const BLE_TEST_APP: HubApp = {
+  id: 'bletest',
+  name: 'BLE GATT Test',
+  tagline: 'Two-phone GATT proof',
+  description:
+    'A development harness that proves a real GATT link between two Android phones: advertise, discover, connect, HELLO_REQUEST, HELLO_RESPONSE.',
+  icon: '\u{1F9EA}',
+  tags: ['Experiments'],
+  accent: '#38BDF8',
+  accentSoft: 'rgba(56,189,248,0.16)',
+  keywords: ['ble', 'gatt', 'bluetooth', 'test', 'diagnostic', 'peripheral', 'central', 'debug'],
+  badges: ['bluetooth', 'offline'],
+  about:
+    'One phone hosts a GATT server and advertises a test service. The other scans for that service, connects, discovers the characteristics and writes HELLO_REQUEST. The host answers with HELLO_RESPONSE. Every step is logged on screen and to logcat, and a run that fails stops at the step that failed rather than reporting a success it did not observe.',
+  features: [
+    {
+      glyph: '\u{1F4E1}',
+      title: 'Real peripheral',
+      body: 'A genuine Android GATT server with a writable and a notifying characteristic.',
+    },
+    {
+      glyph: '\u{1F50D}',
+      title: 'Filtered scan',
+      body: 'Discovery is filtered on the test service UUID, so only the other phone appears.',
+    },
+    {
+      glyph: '\u{1F9FE}',
+      title: 'Step-by-step log',
+      body: 'Each step logs before and after, and the first failure is shown on its own.',
+    },
+  ],
+  permissions: [
+    { name: 'Bluetooth scan, connect and advertise', why: 'the whole point of the test' },
+    {
+      name: 'Location (Android 12+)',
+      why: 'this APK cannot use the neverForLocation flag, so the platform treats every scan as location-derived',
+    },
+  ],
+  // Nothing to show: this is a diagnostic, not a product with screenshots.
+  previews: [],
+  screen: lazy(() => import('../apps/bletest/BleTestApp')),
+};
+
+if (__DEV__) {
+  APPS.push(BLE_TEST_APP);
+}
 
 export const ALL_CATEGORY = 'All';
 

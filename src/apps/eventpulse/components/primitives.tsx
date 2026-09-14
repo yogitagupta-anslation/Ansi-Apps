@@ -79,6 +79,7 @@ export function Button({
   loading,
   full,
   style,
+  accessibilityLabel,
 }: {
   label: string;
   onPress: () => void;
@@ -88,6 +89,14 @@ export function Button({
   loading?: boolean;
   full?: boolean;
   style?: StyleProp<ViewStyle>;
+  /**
+   * Spoken instead of the visible label, for when the word alone is ambiguous.
+   *
+   * "Accept" is unmistakable beside a person's face and meaningless in a
+   * screen-reader's linear list of six identical buttons — this is what lets a
+   * row say "Accept request from Anja Park" without printing it.
+   */
+  accessibilityLabel?: string;
 }): React.ReactElement {
   const { colors } = useTheme();
 
@@ -117,6 +126,7 @@ export function Button({
   return (
     <Pressable
       accessibilityRole="button"
+      accessibilityLabel={accessibilityLabel}
       accessibilityState={{ disabled: disabled || loading }}
       onPress={onPress}
       disabled={disabled || loading}

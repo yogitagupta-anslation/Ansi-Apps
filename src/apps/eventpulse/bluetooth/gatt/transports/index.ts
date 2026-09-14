@@ -14,6 +14,7 @@
 
 import { Platform } from 'react-native';
 
+import { config } from '../../../runtime/config';
 import { GattTransportError, type GattTransport } from '../GattTransport';
 
 export type GattTransportProbe =
@@ -31,6 +32,14 @@ export type GattTransportProbe =
 export function createGattTransport(): GattTransportProbe {
   if (Platform.OS !== 'ios' && Platform.OS !== 'android') {
     return { available: false, reason: `GATT is not supported on ${Platform.OS}.` };
+  }
+
+  if (config.gattStack === 'blechat') {
+    const probe = createBleChatTransport();
+    // Deliberately no silent fallback. If the stack that was asked for is not
+    // there, saying so is worth more than quietly running the other one and
+    // leaving a test result that means nothing.
+    return probe;
   }
 
   let plx: unknown;
@@ -75,6 +84,39 @@ export function createGattTransport(): GattTransportProbe {
         error instanceof GattTransportError
           ? error.message
           : 'The EventPulse GATT transport could not be constructed in this build.',
+    };
+  }
+}
+
+/**
+ * The BleChat-backed stack.
+ *
+ * Required lazily, like everything else here, so a build without the native
+ * modules reports an unavailable probe rather than throwing at import time.
+ */
+function createBleChatTransport(): GattTransportProbe {
+  try {
+    const { BleChatGattTransport, isBleChatTransportAvailable } =
+      require('./BleChatGattTransport') as typeof import('./BleChatGattTransport');
+
+    if (!isBleChatTransportAvailable()) {
+      return {
+        available: false,
+        reason:
+          'The BleChat native BLE modules are not in this build. Run `npx expo prebuild -p ' +
+          'android` and rebuild, or unset EXPO_PUBLIC_EVENTPULSE_GATT to use the previous ' +
+          'transport.',
+      };
+    }
+
+    return { available: true, transport: new BleChatGattTransport() };
+  } catch (error) {
+    return {
+      available: false,
+      reason:
+        error instanceof GattTransportError
+          ? error.message
+          : 'The BleChat-backed GATT transport could not be constructed in this build.',
     };
   }
 }

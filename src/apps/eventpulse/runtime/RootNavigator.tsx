@@ -18,6 +18,8 @@ import { Pressable, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { ConnectionsScreen } from '../screens/ConnectionsScreen';
+import { ConnectionSpaceScreen } from '../screens/ConnectionSpaceScreen';
+import type { ProfileId } from '../types';
 import { DiscoverScreen } from '../screens/DiscoverScreen';
 import { EditProfileScreen } from '../screens/EditProfileScreen';
 import { EventMapScreen } from '../screens/EventMapScreen';
@@ -37,6 +39,20 @@ import { space } from '../theme/tokens';
 
 export type TabKey = 'map' | 'discover' | 'connections' | 'me';
 type Overlay = 'none' | 'edit_profile' | 'privacy' | 'recap';
+
+/**
+ * Who the Connection Space is open with.
+ *
+ * Held beside the overlay rather than inside it because the name and subtitle
+ * are resolved by the row that opened it — from the directory when there is
+ * one, and from the card they sent over the radio when there is not. The screen
+ * should not have to repeat that lookup.
+ */
+interface ChatTarget {
+  profileId: ProfileId;
+  name: string;
+  subtitle?: string;
+}
 
 /**
  * "Browse", not "Discover". The design renames it deliberately: Discover is a
@@ -94,6 +110,7 @@ export function RootNavigator(): React.ReactElement {
 
   const [tab, setTab] = useState<TabKey>('map');
   const [overlay, setOverlay] = useState<Overlay>('none');
+  const [chatWith, setChatWith] = useState<ChatTarget | null>(null);
   const [visited, setVisited] = useState<Set<TabKey>>(() => new Set<TabKey>(['map']));
 
   useEffect(() => {
@@ -118,6 +135,17 @@ export function RootNavigator(): React.ReactElement {
         <EventSelectionScreen />
         <Toast />
       </View>
+    );
+  }
+
+  if (chatWith) {
+    return (
+      <ConnectionSpaceScreen
+        profileId={chatWith.profileId}
+        name={chatWith.name}
+        subtitle={chatWith.subtitle}
+        onBack={() => setChatWith(null)}
+      />
     );
   }
 
@@ -184,7 +212,12 @@ export function RootNavigator(): React.ReactElement {
 
         {visited.has('connections') ? (
           <Pane active={tab === 'connections'}>
-            <ConnectionsScreen onOpenDiscover={() => setTab('discover')} />
+            <ConnectionsScreen
+              onOpenDiscover={() => setTab('discover')}
+              onOpenChat={(profileId, name, subtitle) =>
+                setChatWith({ profileId, name, subtitle })
+              }
+            />
           </Pane>
         ) : null}
 
@@ -209,15 +242,36 @@ export function RootNavigator(): React.ReactElement {
                 onPress={() => setTab(item.key)}
                 accessibilityRole="tab"
                 accessibilityState={{ selected: active }}
-                accessibilityLabel={item.label}
+                accessibilityLabel={
+                  item.key === 'connections' && pendingConnections > 0
+                    ? `${item.label}, ${pendingConnections} connection ${
+                        pendingConnections === 1 ? 'request' : 'requests'
+                      } waiting`
+                    : item.label
+                }
                 style={styles.tab}
               >
                 <View>
                   <AppText variant="body" style={{ opacity: active ? 1 : 0.45 }}>
                     {item.icon}
                   </AppText>
+                  {/* A count, not a dot. "Someone is waiting" and "three people
+                      are waiting" are different amounts of urgency, and the dot
+                      said neither. Driven by the same `incoming_pending` filter
+                      the Requests section renders from, so the badge and the
+                      list can never disagree about how many there are. */}
                   {item.key === 'connections' && pendingConnections > 0 ? (
-                    <View style={[styles.badge, { backgroundColor: colors.accent }]} />
+                    <View style={[styles.badge, { backgroundColor: colors.accent }]}>
+                      {/* `accentText` rather than a tone: it is the colour the
+                          design system already pairs with an accent fill, so
+                          the count stays legible in both themes. */}
+                      <AppText
+                        variant="micro"
+                        style={[styles.badgeCount, { color: colors.accentText }]}
+                      >
+                        {pendingConnections > 9 ? '9+' : String(pendingConnections)}
+                      </AppText>
+                    </View>
                   ) : null}
                 </View>
                 <AppText variant="micro" tone={active ? 'accent' : 'tertiary'}>
@@ -284,10 +338,14 @@ const styles = StyleSheet.create({
   tab: { flex: 1, alignItems: 'center', gap: 2, paddingVertical: space.xs },
   badge: {
     position: 'absolute',
-    top: -2,
-    right: -6,
-    width: 8,
-    height: 8,
-    borderRadius: 4,
+    top: -6,
+    right: -12,
+    minWidth: 18,
+    height: 18,
+    borderRadius: 9,
+    paddingHorizontal: 4,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
+  badgeCount: { lineHeight: 18 },
 });

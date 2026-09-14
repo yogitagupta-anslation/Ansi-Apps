@@ -22,13 +22,18 @@ import {
   type PendingRequest,
 } from '../connections/ConnectionRequestCoordinator';
 import type { ConnectionCard } from '../connections/ConnectionProtocol';
+import {
+  ConversationService,
+  type ConversationMessage,
+} from '../connections/ConversationService';
 import { GattSessionManager } from '../bluetooth/gatt/GattSessionManager';
 import { createGattTransport } from '../bluetooth/gatt/transports';
 import {
-  advertisingPlansEqual,
+  advertisingUnchanged,
   computeAdvertisingPlan,
   nextIosSlice,
   type AdvertisingPlan,
+  type AppliedAdvertising,
 } from '../bluetooth/gatt/GattAdvertisingPolicy';
 import { redactProfile } from '../security/PrivacyService';
 import { SavedPeopleService, type SavedTag } from '../connections/SavedPeopleService';
@@ -42,6 +47,7 @@ import { BlockService, type ReportInput } from '../security/BlockService';
 import { LocalDatabase, MemoryStorageAdapter, keys } from '../storage/LocalDatabase';
 import { AsyncStorageAdapter } from '../storage/AsyncStorageAdapter';
 import { defaultUserProfile } from '../dev/seed';
+import { ensureLocalProfileId, rememberLocalProfileId } from '../profile/LocalIdentity';
 import type {
   Attendee,
   Availability,
@@ -288,7 +294,24 @@ export const actions = {
       presence.applyBlocklist();
     });
 
-    const profile = await profileService.load(defaultUserProfile);
+    /*
+     * Identity before anything that can speak.
+     *
+     * `myCard()` can be called the moment a link comes up, and whatever it
+     * returns is what the far side believes about who we are. Settling this
+     * ahead of the event resume and the radio means there is no window in
+     * which a card could go out carrying a placeholder.
+     *
+     * The second step is the migration for phones that already ran the old
+     * build: `load` keeps a stored profile exactly as it is, so those still
+     * carry the shared `'me'` and would otherwise remain unable to connect to
+     * anyone. `adoptIdentity` replaces a placeholder and nothing else, so a
+     * phone that already has a real identity keeps the one its peers know.
+     */
+    const seedProfileId = await ensureLocalProfileId(db);
+    await profileService.load(() => defaultUserProfile(seedProfileId));
+    const profile = await profileService.adoptIdentity(seedProfileId);
+    await rememberLocalProfileId(db, profile.id);
     const privacy = await profileCache.loadPrivacy();
     // Read before the first paint so the app never flashes the wrong theme.
     const themePreference = await profileCache.loadThemePreference();
@@ -590,7 +613,7 @@ export const actions = {
     try {
       await connectionRequests.request(profileId, note);
       trace('Request', 'result=sent');
-      showToast('Request sent - waiting for them to accept', 'success');
+      showToast('✓  Request sent', 'success');
       void applyAdvertisingPlan();
       return { ok: true };
     } catch (error) {
@@ -628,7 +651,7 @@ export const actions = {
     }
     try {
       await connectionRequests.requestByPeer(peerId, note);
-      showToast('Request sent - waiting for them to accept', 'success');
+      showToast('✓  Request sent', 'success');
       void applyAdvertisingPlan();
       return { ok: true };
     } catch (error) {
@@ -641,6 +664,41 @@ export const actions = {
       showToast(message, 'error');
       return { ok: false, message };
     }
+  },
+
+  /* ---------------------------- conversations ---------------------------- */
+
+  /**
+   * Read a conversation in, so the screen opens on history rather than blank.
+   *
+   * Safe to call every time the screen mounts: the service keeps a loaded
+   * conversation in memory and will not re-read it.
+   */
+  async openConversation(profileId: ProfileId): Promise<ConversationMessage[]> {
+    return conversations.load(profileId);
+  },
+
+  /**
+   * Send one chat message.
+   *
+   * Resolves with the message in whatever state it actually reached — `sent`
+   * when the transport carried it, `failed` when it did not. Never optimistic:
+   * a bubble that claims delivery it did not get is the one thing a chat over
+   * an unreliable radio must not do.
+   */
+  async sendChatMessage(profileId: ProfileId, text: string): Promise<ConversationMessage | null> {
+    if (text.trim().length === 0) return null;
+    try {
+      return await conversations.send(profileId, text);
+    } catch {
+      showToast('Could not send that message.', 'error');
+      return null;
+    }
+  },
+
+  /** Try a failed message again, keeping its id so the far side still dedupes it. */
+  async retryChatMessage(profileId: ProfileId, messageId: string): Promise<void> {
+    await conversations.retry(profileId, messageId);
   },
 
   /** Withdraw a request we sent. */
@@ -765,10 +823,17 @@ async function enterEvent(event: EventDetail, visibility: Visibility): Promise<v
  * ------------------------------------------------------------------ */
 
 let requestTickHandle: ReturnType<typeof setInterval> | null = null;
-let lastAdvertisingPlan: AdvertisingPlan | null = null;
+/** What is actually on the air right now — the plan AND the identity it carries. */
+let lastApplied: AppliedAdvertising | null = null;
 /** iOS time-slice, advanced by the ticker. Android never reads it. */
 let iosSlice: 'presence' | 'gatt' = 'presence';
 let nextSliceAt = 0;
+/**
+ * Android: the epoch boundary the advertised identity was last re-evaluated at.
+ *
+ * Zero means "never", so the first tick arms it against the real boundary.
+ */
+let nextRotationAt = 0;
 
 function publishRequests(): void {
   sessionStore.setState({ incomingRequests: connectionRequests?.incoming() ?? [] });
@@ -777,6 +842,95 @@ function publishRequests(): void {
 function gattUnavailableReason(): string {
   return gattProbe.available ? 'Connections are unavailable right now.' : gattProbe.reason;
 }
+
+/* ------------------------------------------------------------------ *
+ * Conversations
+ * ------------------------------------------------------------------ */
+
+/**
+ * Which person is reachable on which link, assembled from public events only.
+ *
+ * `ConnectionRequestCoordinator` already knows this and keeps it private, and
+ * it stays that way — nothing here reaches into it. Two public sources are
+ * enough: an inbound request names both the device and the sender's card, and
+ * discovery names the device and the rotating peer id, which the radar already
+ * maps to a person.
+ *
+ * Both maps hold transport values that rotate. Neither is ever persisted; the
+ * conversation on disk is keyed by the stable profileId alone.
+ */
+const linkProfiles = new Map<string, ProfileId>();
+const linkPeers = new Map<string, PeerId>();
+
+function profileForDevice(deviceId: string): ProfileId | null {
+  /*
+   * The coordinator first, for the same reason `deviceForProfile` asks it
+   * first: it is the only one of the three maps that is MAINTAINED. It is
+   * pruned when a session closes, when a link goes idle, and on stop, where the
+   * two below are never pruned at all and accumulate stale addresses for the
+   * life of the process. It is also the only one that sees a link the far side
+   * opened during mutual consent, which is the case that dropped every inbound
+   * chat message: the coordinator returns early on mutual consent, before the
+   * `onIncomingRequest` that is the sole thing populating `linkProfiles`.
+   */
+  const attributed = connectionRequests?.profileForDevice(deviceId) ?? null;
+  if (attributed) return attributed;
+
+  const known = linkProfiles.get(deviceId);
+  if (known) return known;
+
+  const peerId = linkPeers.get(deviceId);
+  if (!peerId) return null;
+  return presenceStore.getState().people.find((person) => person.peerId === peerId)?.profileId ?? null;
+}
+
+function deviceForProfile(profileId: ProfileId): string | null {
+  const usable = (deviceId: string): boolean =>
+    gattSessions?.getLinkState(deviceId) === 'connected';
+
+  /*
+   * Ask the coordinator first.
+   *
+   * It is the only component that sees both directions: it records the device
+   * when we dial out, when a request arrives, and re-points it onto the real
+   * profileId on accept. The maps below are reconstructed from public events
+   * and cannot see an outgoing dial at all, which is why a live, healthy link
+   * was invisible to chat and the Connection Space said "out of range" about a
+   * peer it was still connected to.
+   */
+  const known = connectionRequests?.deviceFor(profileId) ?? null;
+  if (known && usable(known)) return known;
+
+  for (const [deviceId, id] of linkProfiles) {
+    if (id === profileId && usable(deviceId)) return deviceId;
+  }
+
+  const peerId = presenceStore
+    .getState()
+    .people.find((person) => person.profileId === profileId)?.peerId;
+  if (!peerId) return null;
+
+  for (const [deviceId, id] of linkPeers) {
+    if (id === peerId && usable(deviceId)) return deviceId;
+  }
+  return null;
+}
+
+export const conversations = new ConversationService({
+  db,
+  // Constructed after `gattSessions`, which is null until the GATT probe runs;
+  // the getter defers the lookup to call time rather than capturing a null.
+  get sessions() {
+    if (!gattSessions) throw new Error('ConversationService used before the GATT channel started');
+    return gattSessions;
+  },
+  now: () => Date.now(),
+  newMessageId: () => `msg_${Date.now().toString(36)}_${(chatSequence += 1)}`,
+  deviceFor: deviceForProfile,
+  profileForDevice,
+} as ConstructorParameters<typeof ConversationService>[0]);
+
+let chatSequence = 0;
 
 async function startConnectionChannel(eventId: EventId): Promise<void> {
   if (!gattSessions || !connectionRequests) {
@@ -790,10 +944,25 @@ async function startConnectionChannel(eventId: EventId): Promise<void> {
   gattSessions.start();
   await connectionRequests.start(eventId);
 
+  gattSessions.subscribe({
+    onDiscovery: (discovery) => {
+      if (discovery.displayName) linkPeers.set(discovery.deviceId, discovery.displayName);
+    },
+  });
+  conversations.start(eventId);
+
   connectionRequests.subscribe({
     onIncomingRequest: (request: PendingRequest) => {
+      // The one public place a device is named alongside the person behind it.
+      if (request.deviceId) linkProfiles.set(request.deviceId, request.card.profileId);
       publishRequests();
       showToast(`${request.card.name} wants to connect`, 'neutral');
+    },
+    onIdentityLearned: (provisionalKey: ProfileId, profileId: ProfileId) => {
+      // A link filed under a stand-in now has a real person behind it.
+      for (const [deviceId, id] of linkProfiles) {
+        if (id === provisionalKey) linkProfiles.set(deviceId, profileId);
+      }
     },
     onSettled: () => {
       publishRequests();
@@ -801,7 +970,41 @@ async function startConnectionChannel(eventId: EventId): Promise<void> {
     },
   });
 
+  /*
+   * What the OS actually granted, before anything tries to use it.
+   *
+   * The GATT channel needs BLUETOOTH_CONNECT twice over: once to open a link,
+   * and once for the peripheral library to write the adapter name that carries
+   * our rotating peer id. A missing grant used to fail both silently — the
+   * library catches the SecurityException, logs a warning of its own, and
+   * advertises the previous name regardless, so the far side matched the wrong
+   * name and called us unreachable. Logging the grant and the adapter name here
+   * turns that into one readable line.
+   */
+  if (isNativeBleAvailable()) {
+    void new NativeBleTransport()
+      .getPermissionDiagnostics()
+      .then((diagnostics) => {
+        trace('GATT', 'permissions at channel start', {
+          granted: diagnostics.granted,
+          missing: diagnostics.missing.join(',') || 'none',
+          sdkInt: diagnostics.sdkInt,
+          adapterName: diagnostics.adapterName ?? 'unreadable (needs BLUETOOTH_CONNECT)',
+        });
+      })
+      .catch(() => undefined);
+  }
+
   trace('GATT', 'channel started', { eventId, transport: gattProbe.available ? 'native' : 'none' });
+  if (gattProbe.available) {
+    void gattProbe.transport.getCapabilities().then((caps) => {
+      trace('GATT', 'capabilities', {
+        central: caps.supportsCentral,
+        peripheral: caps.supportsPeripheral,
+        reason: caps.unavailableReason,
+      });
+    });
+  }
   sessionStore.setState({ gattAvailable: true, gattUnavailableReason: null });
   publishRequests();
   await applyAdvertisingPlan();
@@ -818,6 +1021,46 @@ async function startConnectionChannel(eventId: EventId): Promise<void> {
       iosSlice = next.slice;
       nextSliceAt = now + next.durationMs;
       void applyAdvertisingPlan();
+    }
+
+    /*
+     * Android: the peer id rotates on a wall-clock epoch, and nothing else on
+     * this platform ever re-evaluates the advertisement. Measured on two
+     * emulators: both phones advertised the id they started with for nine
+     * minutes past a boundary, while the presence radar - which DOES rotate,
+     * on its own timer - had moved on. From then on the radar looked for one
+     * name and the advertisement carried another, so every Connect reported
+     * the person unreachable while their phone was advertising perfectly well.
+     *
+     * Only on the boundary, not every tick. `applyAdvertisingPlan` refuses to
+     * touch the radio unless something changed, but reaching that refusal is
+     * neither free nor silent: it logs a line and derives the peer id through
+     * two full SHA-256 passes, and re-applying tears the advertisement down
+     * and puts it back, which would make the device intermittently invisible.
+     */
+    if (Platform.OS === 'android' && now >= nextRotationAt) {
+      const rotatesAt = eventService.nextRotationAt(now);
+      /*
+       * But never while someone is connected.
+       *
+       * Re-advertising is not a rename on this module: startAdvertising
+       * rebuilds the GATT server, clearing every service and re-adding it. The
+       * ACL link survives that, so the phone still looks connected — but the
+       * subscribed central is silently unregistered, and `updateValue` then
+       * reports success while notifying nobody. Measured on two emulators: a
+       * rotation at 12:45 left the peripheral-to-central direction dead, every
+       * frame accepted=true, nothing delivered, no error anywhere.
+       *
+       * So the new name waits for the link to end. Two people already talking
+       * do not need to rediscover each other; only a new peer does, and they
+       * can find us as soon as this conversation is over. Holding the deadline
+       * where it is re-checks each tick, which costs one comparison.
+       */
+      const linked = (gattSessions?.getSessions().length ?? 0) > 0;
+      if (rotatesAt !== null && !linked) {
+        nextRotationAt = rotatesAt;
+        void applyAdvertisingPlan();
+      }
     }
     void connectionRequests?.tick(now).then((expired) => {
       if (expired.length > 0) {
@@ -841,7 +1084,8 @@ async function stopConnectionChannel(): Promise<void> {
     await gattProbe.transport.stopPeripheral().catch(() => undefined);
     await gattProbe.transport.stopScan().catch(() => undefined);
   }
-  lastAdvertisingPlan = null;
+  lastApplied = null;
+  nextRotationAt = 0;
   sessionStore.setState({ incomingRequests: [] });
 }
 
@@ -875,9 +1119,34 @@ async function applyAdvertisingPlan(): Promise<void> {
     reason: plan.reason,
   });
 
-  if (lastAdvertisingPlan && advertisingPlansEqual(lastAdvertisingPlan, plan)) return;
-  lastAdvertisingPlan = plan;
+  /*
+   * The identity is read once and used for both the comparison and the
+   * advertisement, so the two cannot drift apart between here and the call
+   * below — which is exactly the failure this replaces.
+   */
+  const identity = plan.gattPeripheral ? (eventService.currentPeerId() ?? null) : null;
+  const next: AppliedAdvertising = { plan, identity };
 
+  if (advertisingUnchanged(lastApplied, next)) return;
+  const rotated = lastApplied !== null && lastApplied.identity !== identity;
+  lastApplied = next;
+
+  if (rotated) {
+    trace('Advertising', 'identity rotated', { identity });
+  }
+
+  /*
+   * Two independent halves, deliberately.
+   *
+   * Hosting and looking are separate capabilities of separate radios' worth of
+   * state: a phone with no advertiser can still dial out, and a phone whose
+   * advertisement is refused can still find everyone else. They used to share
+   * one `try`, so the peripheral half failing — or, as it turned out, simply
+   * never settling — meant `startScan()` was never reached and this phone
+   * silently stopped looking for anyone at all. That is the failure that made
+   * Connect report "not reachable" while both phones were advertising happily.
+   */
+  let peripheralError: unknown = null;
   try {
     if (plan.gattPeripheral) {
       // The local name is our current rotating peer id: the one value that lets
@@ -885,22 +1154,49 @@ async function applyAdvertisingPlan(): Promise<void> {
       // already public in every presence beacon and rotates on the same epoch,
       // so it grants no new or lasting handle.
       await gattTransport.startPeripheral({
-        displayName: eventService.currentPeerId() ?? undefined,
+        displayName: identity ?? undefined,
       });
     } else {
       await gattTransport.stopPeripheral();
     }
-
-    if (plan.gattScanning) await gattTransport.startScan();
-    else await gattTransport.stopScan();
   } catch (error) {
     // A chipset with no advertiser is a real and common outcome. Say so once
-    // rather than failing silently or retrying for ever.
+    // rather than failing silently or retrying for ever — but do not let it
+    // stop the scan below.
+    peripheralError = error;
+    /*
+     * Forget what we claimed to have applied. `lastApplied` is committed before
+     * the radio call, so without this a rotation that failed would be recorded
+     * as done and nothing would retry it - leaving the phone advertising
+     * nothing at all until the next boundary, a full epoch away.
+     */
+    lastApplied = null;
+    trace('Advertising', 'peripheral FAILED', {
+      wanted: plan.gattPeripheral,
+      error: error instanceof Error ? error.message : String(error),
+      code: (error as { code?: string } | null)?.code,
+    });
     sessionStore.setState({
       gattUnavailableReason:
         error instanceof Error ? error.message : 'This phone cannot host a connection.',
     });
   }
+
+  try {
+    if (plan.gattScanning) await gattTransport.startScan();
+    else await gattTransport.stopScan();
+  } catch (error) {
+    trace('Advertising', 'scan FAILED', {
+      wanted: plan.gattScanning,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+
+  trace('Advertising', 'applied', {
+    peripheral: plan.gattPeripheral,
+    scanning: plan.gattScanning,
+    peripheralFailed: peripheralError !== null,
+  });
 }
 
 /* ------------------------------------------------------------------ *
@@ -1054,6 +1350,14 @@ export const queries = {
   },
 
   /**
+   * Who a radar peer turned out to be, for the offline case where the directory
+   * never resolved them. Null until a connection with them has settled.
+   */
+  profileForPeer(peerId: PeerId): ProfileId | null {
+    return connectionRequests?.profileForPeer(peerId) ?? null;
+  },
+
+  /**
    * Can a connection be opened to this person right now?
    *
    * Being on the radar is not enough. The radar is a beacon and the connection
@@ -1069,6 +1373,22 @@ export const queries = {
   /** True when this radar peer is advertising the connection service right now. */
   canConnectToPeer(peerId: PeerId): boolean {
     return connectionRequests?.isPeerReachable(peerId) ?? false;
+  },
+
+  /** Everything known about a conversation, oldest first. */
+  conversation(profileId: ProfileId): ConversationMessage[] {
+    return conversations.messages(profileId);
+  },
+
+  /**
+   * Whether a message could go out right now.
+   *
+   * A conversation stays readable when the link drops — this only says whether
+   * the composer can send, so the UI can be honest about it instead of queuing
+   * into nowhere.
+   */
+  canChat(profileId: ProfileId): boolean {
+    return deviceForProfile(profileId) !== null;
   },
 
   /** Requests waiting on the user, newest first. */

@@ -23,6 +23,7 @@ import type {
 } from '../types';
 import { ApiError, type EventPulseApi } from '../api/ApiClient';
 import { ProfileCache } from './ProfileCache';
+import { isPlaceholderProfileId } from './LocalIdentity';
 import { fnv1a32 } from '../utils/bytes';
 
 export interface ProfileDraft {
@@ -108,6 +109,30 @@ export class ProfileService {
     this.privacy = await this.cache.loadPrivacy();
     this.onProfileChanged?.(this.profile);
     return this.profile;
+  }
+
+  /**
+   * Adopt this install's own identity, replacing a placeholder if one is there.
+   *
+   * `load` only consults the fallback when nothing is stored, so a phone that
+   * has already run the app keeps whatever id it was given on first launch —
+   * including the old shared `'me'`. Fixing the default alone would therefore
+   * have left every existing install broken. This runs on every boot and is a
+   * no-op once the id is real, which is what makes it safe to keep there.
+   */
+  async adoptIdentity(profileId: ProfileId): Promise<Profile> {
+    if (!this.profile) throw new Error('ProfileService.adoptIdentity called before load()');
+
+    // A real id already on the profile is the one peers have connected to.
+    // Never trade it for a freshly minted one — that would make the user a
+    // stranger to everyone who already knows them.
+    if (!isPlaceholderProfileId(this.profile.id)) return this.profile;
+
+    const next: Profile = { ...this.profile, id: profileId, userId: profileId };
+    this.profile = next;
+    await this.cache.saveProfile(next);
+    this.onProfileChanged?.(next);
+    return next;
   }
 
   get current(): Profile | null {

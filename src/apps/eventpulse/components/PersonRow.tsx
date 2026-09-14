@@ -41,6 +41,33 @@ export interface PersonRowProps {
   onToggleSaved?: () => void;
   onPress: () => void;
   onConnect?: () => void;
+  /**
+   * The other half of a decision, rendered beside `onConnect` inside the card.
+   *
+   * Accept and Decline are two answers to one question, so they have to be
+   * siblings. Declining used to live outside the card entirely, which put the
+   * two halves in different containers and left "Decline" floating against the
+   * next person's row.
+   */
+  onDecline?: () => void;
+  /** Label for the decline action. Defaults to the established wording. */
+  declineLabel?: string;
+  /**
+   * Rendered inside the card, above the person.
+   *
+   * For the eyebrow that says what kind of row this is — "CONNECTION REQUEST" —
+   * so the card announces itself before the reader has parsed a name.
+   */
+  header?: React.ReactNode;
+  /**
+   * Rendered inside the row's own bounds, below the actions.
+   *
+   * A `flat` row draws its divider on the container, so anything rendered after
+   * the row reads as belonging to the person underneath. The Chat button is the
+   * case that matters: it must sit above that hairline or it looks like it
+   * opens the wrong conversation.
+   */
+  footer?: React.ReactNode;
   onNavigate?: () => void;
 }
 
@@ -55,6 +82,10 @@ function PersonRowComponent({
   onToggleSaved,
   onPress,
   onConnect,
+  onDecline,
+  declineLabel = 'Decline',
+  header,
+  footer,
   onNavigate,
 }: PersonRowProps): React.ReactElement {
   const { colors, name } = useTheme();
@@ -69,6 +100,8 @@ function PersonRowComponent({
 
   return (
     <Container onPress={onPress} style={flat ? styles.flat : styles.card}>
+      {header}
+
       <View style={styles.main}>
         <Avatar
           avatar={profile.avatar}
@@ -191,6 +224,19 @@ function PersonRowComponent({
 
       {onConnect ? (
         <View style={styles.actions}>
+          {/* Decline first in source order so it is first in the accessibility
+              tree and first under a left-to-right reading — and, being the
+              lighter control, it never steals the thumb's default target on the
+              right. */}
+          {onDecline ? (
+            <Button
+              label={declineLabel}
+              onPress={onDecline}
+              variant="secondary"
+              accessibilityLabel={`${declineLabel} request from ${profile.name}`}
+            />
+          ) : null}
+
           {/* A finished action is not a disabled one. "Request sent" rendered as
               a dimmed primary button reads as "this control is broken" and, at
               45% opacity on a filled accent, barely reads at all. Settled states
@@ -202,9 +248,12 @@ function PersonRowComponent({
             variant={settled ? 'secondary' : 'primary'}
             disabled={settled}
             full
+            accessibilityLabel={`${connectionActionLabel(connectionState)} ${profile.name}`}
           />
         </View>
       ) : null}
+
+      {footer}
     </Container>
   );
 }
