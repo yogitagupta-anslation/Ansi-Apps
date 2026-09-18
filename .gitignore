@@ -9,3 +9,9 @@ dist/
 /ios/
 
 *.log
+
+# Signing material. /android/ already covers android/keystore.properties, but these
+# patterns also catch a keystore left anywhere else in the tree by accident.
+*.jks
+*.keystore
+keystore.properties
