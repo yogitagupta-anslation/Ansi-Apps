@@ -1,4 +1,4 @@
-import React, {useEffect} from 'react';
+ import React, {useEffect} from 'react';
 import {Text, View} from 'react-native';
 import {createBottomTabNavigator} from '@react-navigation/bottom-tabs';
 import {useSafeAreaInsets} from 'react-native-safe-area-context';

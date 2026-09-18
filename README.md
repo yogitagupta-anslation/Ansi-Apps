@@ -113,6 +113,43 @@ live there. Three config plugins re-apply the native halves on every prebuild:
 Both register their `ReactPackage`s through `plugins/addReactPackages.js`, which
 knows the several shapes `MainApplication` has taken across Expo SDKs.
 
+## Release builds
+
+A fourth plugin, **`withReleaseHardening.js`**, carries the settings a Play
+upload needs. They live in a plugin for the same reason the native sources do:
+`android/` is regenerated, so an edit there survives exactly until the next
+`expo prebuild --clean`.
+
+- **Signing.** The generated project signs release builds with the *debug*
+  keystore, which Play rejects. The plugin adds a `release` signing config fed
+  from `android/keystore.properties` (gitignored — see
+  `android-keystore.properties.example`) or from `ANDROID_KEYSTORE_*`
+  environment variables for CI. With neither configured it falls back to debug
+  signing and warns, so `expo run:android --variant release` keeps working
+  locally.
+- **R8 and resource shrinking**, both off by default in an Expo project. Keep
+  rules for every native module in `modules/` are appended to
+  `proguard-rules.pro`, because the bridge resolves modules by name and a
+  stripped BLE adapter does not crash — it scans and finds nobody.
+- **Cloud backup off.** The identity key and the at-rest key live in
+  AsyncStorage, and Auto Backup would copy both to Google Drive. Device-to-device
+  transfer is deliberately left on, so changing phones still carries attendance
+  records and profiles across.
+
+Unused sensitive permissions are stripped in `app.json` rather than here:
+`CAMERA`, `RECORD_AUDIO`, `ACTIVITY_RECOGNITION` and `SYSTEM_ALERT_WINDOW` are
+all listed under `android.blockedPermissions`. The last one is removed from the
+release manifest only — the debug source set declares it at a higher merge
+priority, so React Native's dev-menu overlay is unaffected.
+
+Removing `CAMERA` also fixed a live bug. `react-native-image-picker` does not
+need it, but its `isCameraPermissionFulfilled` refuses to launch the camera when
+the app *declares* the permission without holding it — which is exactly what
+expo-image-picker's manifest entry caused. Attendance's camera button works again
+now that the declaration is gone.
+
+Build the upload artifact with `cd android && ./gradlew bundleRelease`.
+
 ## Porting notes
 
 Three SDKs became one (Expo 57 / React Native 0.86 / React 19). What that
